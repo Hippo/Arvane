@@ -210,10 +210,24 @@ TEST(EntityRegistryTests, LoadsFirstPartyHorseBrainAndAnimation) {
   ASSERT_NE(horse, nullptr);
   EXPECT_EQ(horse->animation_asset, "arvane:animation/horse");
   ASSERT_TRUE(horse->components.brain.has_value());
-  ASSERT_GE(horse->components.brain->goals.size(), 3U);
+  ASSERT_GE(horse->components.brain->goals.size(), 4U);
   EXPECT_EQ(horse->components.brain->goals[0].type, "arvane:swim_in_fluid");
-  EXPECT_EQ(horse->components.brain->goals[1].type, "arvane:wander");
-  EXPECT_EQ(horse->components.brain->goals[2].type, "arvane:idle");
+  EXPECT_EQ(horse->components.brain->goals[1].type, "arvane:avoid_fluid");
+  EXPECT_EQ(horse->components.brain->goals[2].type, "arvane:wander");
+  EXPECT_EQ(horse->components.brain->goals[3].type, "arvane:idle");
+
+  const std::optional<arv::EntityTypeID> pig_id =
+      registry_result.value().find_type("arvane:pig");
+  ASSERT_TRUE(pig_id.has_value());
+  const arv::entity::EntityTypeRecord* pig =
+      registry_result.value().type(pig_id.value());
+  ASSERT_NE(pig, nullptr);
+  ASSERT_TRUE(pig->components.brain.has_value());
+  ASSERT_GE(pig->components.brain->goals.size(), 4U);
+  EXPECT_EQ(pig->components.brain->goals[0].type, "arvane:swim_in_fluid");
+  EXPECT_EQ(pig->components.brain->goals[1].type, "arvane:avoid_fluid");
+  EXPECT_EQ(pig->components.brain->goals[2].type, "arvane:wander");
+  EXPECT_EQ(pig->components.brain->goals[3].type, "arvane:idle");
 }
 
 TEST(EntityRegistryTests, RejectsInvalidPresentationAnimationAssetKind) {

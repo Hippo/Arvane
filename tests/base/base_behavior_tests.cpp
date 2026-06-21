@@ -27,6 +27,7 @@ TEST(BaseBehaviorTests, RegistersBaseEntityGoalIds) {
 
   EXPECT_TRUE(entity_goals.contains(arv::base::ids::IdleGoalID));
   EXPECT_TRUE(entity_goals.contains(arv::base::ids::WanderGoalID));
+  EXPECT_TRUE(entity_goals.contains(arv::base::ids::AvoidFluidGoalID));
   EXPECT_TRUE(entity_goals.contains(arv::base::ids::SwimInFluidGoalID));
   EXPECT_TRUE(entity_goals.contains(arv::base::ids::NearestTargetGoalID));
   EXPECT_TRUE(entity_goals.contains(arv::base::ids::MoveToTargetGoalID));

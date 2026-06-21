@@ -679,6 +679,163 @@ TEST(WorldEntityTests, SwimInFluidMovesTowardDrySupportedEscape) {
   EXPECT_GT(transform->position.x, 0.5F);
 }
 
+TEST(WorldEntityTests, SwimInFluidKeepsMovingTowardLessWetSupportedLand) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID water =
+      registry.find_variant("arvane:water").value();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  (void)world.ensure_chunk(arv::block_to_chunk({{-1, 1, 0}}));
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{2, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{-1, 1, 0}}, water));
+  ASSERT_TRUE(world.set_block({{0, 1, 0}}, water));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, water));
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.4F, 1.6F, 1.4F}};
+  components.movement = arv::entity::AuthoredMovementComponent{4.0F};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:swim_in_fluid",
+                                     .priority = 0,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  arv::world::EntityCreateInfo info;
+  info.type_name = "test:wide_swimmer";
+  info.position = {0.5F, 1.0F, 0.5F};
+  info.authored_components = components;
+  const arv::EntityID swimmer = world.create_entity(std::move(info));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(&registry, &goals);
+
+  const arv::entity::MovementIntent* intent =
+      world.find_entity_movement_intent(swimmer);
+  ASSERT_NE(intent, nullptr);
+  EXPECT_GT(intent->desired_direction.y, 0.0F);
+  EXPECT_GT(intent->desired_direction.x, 0.0F);
+  const arv::entity::EntityVelocity* velocity =
+      world.find_entity_velocity(swimmer);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_GT(velocity->linear.x, 2.0F);
+  const arv::entity::EntityTransform* transform =
+      world.find_entity_transform(swimmer);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.x, 0.5F);
+}
+
+TEST(WorldEntityTests, AiLivingMountSwimsHorizontallyThroughWater) {
+  const arv::entity::VehicleDefinitionRegistry vehicles =
+      make_test_living_mount_registry();
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID water =
+      registry.find_variant("arvane:water").value();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  (void)world.ensure_chunk(arv::block_to_chunk({{-1, 1, 0}}));
+  ASSERT_TRUE(world.set_block({{0, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{1, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{2, 0, 0}}, stone));
+  ASSERT_TRUE(world.set_block({{-1, 1, 0}}, water));
+  ASSERT_TRUE(world.set_block({{0, 1, 0}}, water));
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, water));
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.4F, 1.6F, 1.4F}};
+  components.movement = arv::entity::AuthoredMovementComponent{4.0F};
+  components.rideable = arv::entity::AuthoredRideableComponent{"arvane:test_horse"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_horse"};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:swim_in_fluid",
+                                     .priority = 0,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  arv::world::EntityCreateInfo info;
+  info.type_name = "test:swimming_horse";
+  info.position = {0.5F, 1.0F, 0.5F};
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  const arv::EntityID mount = world.create_entity(std::move(info));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(&registry, &goals, &vehicles);
+
+  const arv::entity::VehiclePhysicsComponent* physics =
+      world.find_entity_vehicle_physics(mount);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_TRUE(physics->in_water);
+  const arv::entity::EntityVelocity* velocity =
+      world.find_entity_velocity(mount);
+  ASSERT_NE(velocity, nullptr);
+  EXPECT_GT(velocity->linear.x, 2.0F);
+  const arv::entity::EntityTransform* transform =
+      world.find_entity_transform(mount);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_GT(transform->position.x, 0.5F);
+}
+
+TEST(WorldEntityTests, AvoidFluidGoalSteersDryEntityAwayFromNearbyWater) {
+  const arv::voxel::BlockRegistry registry = arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID water =
+      registry.find_variant("arvane:water").value();
+  arv::world::EntityGoalRegistry goals = make_base_goal_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  place_test_floor(world, stone, -3, 3, -1, 1);
+  ASSERT_TRUE(world.set_block({{1, 1, 0}}, water));
+
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{0.8F, 0.9F, 0.8F}};
+  components.movement = arv::entity::AuthoredMovementComponent{2.0F};
+  components.brain = arv::entity::AuthoredBrainComponent{};
+  components.brain->tick_interval = 1U;
+  components.brain->goals.push_back({.type = "arvane:avoid_fluid",
+                                     .priority = 0,
+                                     .radius = 3.0F,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  components.brain->goals.push_back({.type = "arvane:wander",
+                                     .priority = 8,
+                                     .speed_multiplier = 1.0F,
+                                     .duration_ticks = 20U,
+                                     .animation = "walk"});
+  arv::world::EntityCreateInfo info;
+  info.type_name = "test:water_avoider";
+  info.position = {0.5F, 1.0F, 0.5F};
+  info.authored_components = components;
+  const arv::EntityID entity = world.create_entity(std::move(info));
+
+  world.set_tick_index(1);
+  (void)world.tick_entities(&registry, &goals);
+
+  const arv::entity::BrainComponent* brain = world.find_entity_brain(entity);
+  ASSERT_NE(brain, nullptr);
+  EXPECT_TRUE(goal_is_active(*brain, "arvane:avoid_fluid"));
+  EXPECT_FALSE(goal_is_active(*brain, "arvane:wander"));
+  const arv::entity::MovementIntent* intent =
+      world.find_entity_movement_intent(entity);
+  ASSERT_NE(intent, nullptr);
+  EXPECT_LT(intent->desired_direction.x, 0.0F);
+  const arv::entity::EntityTransform* transform =
+      world.find_entity_transform(entity);
+  ASSERT_NE(transform, nullptr);
+  EXPECT_LT(transform->position.x, 0.5F);
+}
+
 TEST(WorldEntityTests, UnmountedLivingMountConsumesMovementIntentButOccupiedMountDoesNot) {
   const arv::entity::VehicleDefinitionRegistry vehicles =
       make_test_living_mount_registry();

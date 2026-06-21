@@ -21,6 +21,10 @@ inline constexpr u32 DefaultAttackAnimationTicks = 8U;
 inline constexpr f32 DefaultTargetRadius = 16.0F;
 inline constexpr f32 DefaultAttackRange = 1.8F;
 inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
+inline constexpr f32 DefaultAvoidFluidRadius = 3.0F;
+inline constexpr f32 FluidAvoidProbeDistance = 1.2F;
+inline constexpr f32 FluidEscapeProbeDistance = 1.5F;
+inline constexpr f32 SwimFallbackHorizontalScale = 0.35F;
 
 [[nodiscard]] Aabb3f entity_body_bounds(Vec3f position, Vec3f box) noexcept {
   const Vec3f size{
@@ -39,6 +43,17 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
     EntityID entity_id) noexcept {
   const entity::EntityCollision* collision = world.find_entity_collision(entity_id);
   return collision == nullptr ? Vec3f{0.8F, 1.8F, 0.8F} : collision->box;
+}
+
+[[nodiscard]] Vec3f bounds_center(Aabb3f bounds) noexcept {
+  return {
+      (bounds.min.x + bounds.max.x) * 0.5F,
+      (bounds.min.y + bounds.max.y) * 0.5F,
+      (bounds.min.z + bounds.max.z) * 0.5F};
+}
+
+[[nodiscard]] Vec3f horizontal_unit(Vec3f value) noexcept {
+  return normalize_or_zero({value.x, 0.0F, value.z});
 }
 
 [[nodiscard]] Vec3f entity_center(
@@ -190,7 +205,7 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
              pos);
 }
 
-[[nodiscard]] bool bounds_overlap_fluid(
+[[nodiscard]] u32 fluid_cell_count_in_bounds(
     const world::EntityGoalContext& context,
     Aabb3f bounds) noexcept {
   const i32 min_x = static_cast<i32>(std::floor(bounds.min.x));
@@ -199,16 +214,23 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
   const i32 max_x = static_cast<i32>(std::ceil(bounds.max.x));
   const i32 max_y = static_cast<i32>(std::ceil(bounds.max.y));
   const i32 max_z = static_cast<i32>(std::ceil(bounds.max.z));
+  u32 count = 0U;
   for (i32 z = min_z; z < max_z; ++z) {
     for (i32 y = min_y; y < max_y; ++y) {
       for (i32 x = min_x; x < max_x; ++x) {
         if (world_cell_contains_fluid(context, {{x, y, z}})) {
-          return true;
+          ++count;
         }
       }
     }
   }
-  return false;
+  return count;
+}
+
+[[nodiscard]] bool bounds_overlap_fluid(
+    const world::EntityGoalContext& context,
+    Aabb3f bounds) noexcept {
+  return fluid_cell_count_in_bounds(context, bounds) > 0U;
 }
 
 [[nodiscard]] bool entity_in_fluid(world::EntityGoalContext& context) {
@@ -218,23 +240,23 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
   return bounds_overlap_fluid(context, bounds);
 }
 
-[[nodiscard]] bool candidate_is_dry_and_supported(
+[[nodiscard]] bool candidate_is_solid_free(
     world::EntityGoalContext& context,
-    Aabb3f current_bounds,
-    Vec3f direction) {
-  if (context.block_registry == nullptr || !world::has_horizontal_motion(direction)) {
-    return false;
-  }
-  direction = normalize_or_zero({direction.x, 0.0F, direction.z});
-  const Aabb3f candidate = translated(current_bounds, direction * 1.5F);
-  if (bounds_overlap_fluid(context, candidate)) {
+    Aabb3f candidate) {
+  if (context.block_registry == nullptr) {
     return false;
   }
   const world::WorldCollisionQuery solid_query{
       context.world,
       *context.block_registry,
       true};
-  if (physics::overlaps_solid_blocks(solid_query, candidate, 0.001F)) {
+  return !physics::overlaps_solid_blocks(solid_query, candidate, 0.001F);
+}
+
+[[nodiscard]] bool candidate_has_support_below(
+    world::EntityGoalContext& context,
+    Aabb3f candidate) {
+  if (context.block_registry == nullptr) {
     return false;
   }
   const world::WorldCollisionQuery support_query{
@@ -242,6 +264,168 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
       *context.block_registry,
       false};
   return physics::has_support_below(support_query, candidate, 0.02F);
+}
+
+[[nodiscard]] bool candidate_is_dry_and_supported(
+    world::EntityGoalContext& context,
+    Aabb3f current_bounds,
+    Vec3f direction,
+    f32 probe_distance = FluidEscapeProbeDistance) {
+  if (!world::has_horizontal_motion(direction)) {
+    return false;
+  }
+  direction = horizontal_unit(direction);
+  const Aabb3f candidate = translated(current_bounds, direction * probe_distance);
+  return !bounds_overlap_fluid(context, candidate) &&
+         candidate_is_solid_free(context, candidate) &&
+         candidate_has_support_below(context, candidate);
+}
+
+struct FluidAwareness {
+  Vec3f away_direction{};
+  u32 fluid_cells{};
+};
+
+[[nodiscard]] std::optional<FluidAwareness> fluid_awareness_near_bounds(
+    const world::EntityGoalContext& context,
+    Aabb3f bounds,
+    f32 radius) noexcept {
+  radius = std::max(0.25F, radius);
+  const f32 half_width =
+      std::max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) * 0.5F;
+  const f32 search_radius = radius + half_width + 0.75F;
+  const f32 search_radius_sq = search_radius * search_radius;
+  const Vec3f center = bounds_center(bounds);
+  const i32 min_x = static_cast<i32>(std::floor(bounds.min.x - radius));
+  const i32 min_y = static_cast<i32>(std::floor(bounds.min.y - radius));
+  const i32 min_z = static_cast<i32>(std::floor(bounds.min.z - radius));
+  const i32 max_x = static_cast<i32>(std::ceil(bounds.max.x + radius));
+  const i32 max_y = static_cast<i32>(std::ceil(bounds.max.y + radius));
+  const i32 max_z = static_cast<i32>(std::ceil(bounds.max.z + radius));
+
+  FluidAwareness awareness;
+  for (i32 z = min_z; z < max_z; ++z) {
+    for (i32 y = min_y; y < max_y; ++y) {
+      for (i32 x = min_x; x < max_x; ++x) {
+        if (!world_cell_contains_fluid(context, {{x, y, z}})) {
+          continue;
+        }
+        const Vec3f fluid_center{
+            static_cast<f32>(x) + 0.5F,
+            static_cast<f32>(y) + 0.5F,
+            static_cast<f32>(z) + 0.5F};
+        const Vec3f away{center.x - fluid_center.x, 0.0F, center.z - fluid_center.z};
+        const f32 distance_sq = horizontal_length_squared(away);
+        if (distance_sq > search_radius_sq) {
+          continue;
+        }
+        ++awareness.fluid_cells;
+        if (distance_sq > 0.0001F) {
+          awareness.away_direction =
+              awareness.away_direction + away * (1.0F / std::max(0.25F, distance_sq));
+        }
+      }
+    }
+  }
+
+  if (awareness.fluid_cells == 0U) {
+    return std::nullopt;
+  }
+  awareness.away_direction = horizontal_unit(awareness.away_direction);
+  return awareness;
+}
+
+[[nodiscard]] std::optional<Vec3f> avoid_fluid_direction(
+    world::EntityGoalContext& context) {
+  if (context.block_registry == nullptr) {
+    return std::nullopt;
+  }
+
+  const Aabb3f bounds = entity_body_bounds(
+      context.transform.position,
+      entity_collision_box(context.world, context.entity_id));
+  if (bounds_overlap_fluid(context, bounds)) {
+    return std::nullopt;
+  }
+
+  const f32 radius =
+      context.goal.radius > 0.0F ? context.goal.radius : DefaultAvoidFluidRadius;
+  const std::optional<FluidAwareness> awareness =
+      fluid_awareness_near_bounds(context, bounds, radius);
+  if (!awareness.has_value()) {
+    return std::nullopt;
+  }
+
+  Vec3f preferred = horizontal_unit(context.goal.state.movement_direction);
+  if (!world::has_horizontal_motion(preferred)) {
+    preferred = world::deterministic_wander_direction(
+        context.entity_id,
+        context.tick_index,
+        context.goal_index);
+  }
+  preferred = horizontal_unit(preferred);
+  const Vec3f away = awareness->away_direction;
+  const u32 current_near_fluid = awareness->fluid_cells;
+  Vec3f best{};
+  f32 best_score = -1000000.0F;
+
+  const auto consider = [&](Vec3f candidate, f32 bonus) {
+    candidate = horizontal_unit(candidate);
+    if (!world::has_horizontal_motion(candidate)) {
+      return;
+    }
+
+    const Aabb3f candidate_bounds =
+        translated(bounds, candidate * FluidAvoidProbeDistance);
+    if (bounds_overlap_fluid(context, candidate_bounds) ||
+        !candidate_is_solid_free(context, candidate_bounds) ||
+        !candidate_has_support_below(context, candidate_bounds)) {
+      return;
+    }
+
+    const std::optional<FluidAwareness> candidate_awareness =
+        fluid_awareness_near_bounds(context, candidate_bounds, radius);
+    const u32 candidate_near_fluid =
+        candidate_awareness.has_value() ? candidate_awareness->fluid_cells : 0U;
+    const f32 away_alignment =
+        world::has_horizontal_motion(away) ? dot(candidate, away) : 0.0F;
+    if (away_alignment < -0.25F && candidate_near_fluid >= current_near_fluid) {
+      return;
+    }
+
+    const f32 near_fluid_delta =
+        static_cast<f32>(static_cast<i32>(current_near_fluid) -
+                         static_cast<i32>(candidate_near_fluid));
+    f32 score = near_fluid_delta * 4.0F + away_alignment * 3.0F + bonus;
+    if (candidate_near_fluid == 0U) {
+      score += 8.0F;
+    }
+    if (score > best_score) {
+      best_score = score;
+      best = candidate;
+    }
+  };
+
+  consider(away, 2.0F);
+  consider(preferred, 0.25F);
+  consider(preferred * -1.0F, 0.0F);
+  consider({1.0F, 0.0F, 0.0F}, 0.0F);
+  consider({-1.0F, 0.0F, 0.0F}, 0.0F);
+  consider({0.0F, 0.0F, 1.0F}, 0.0F);
+  consider({0.0F, 0.0F, -1.0F}, 0.0F);
+  for (u32 attempt = 0U; attempt < 4U; ++attempt) {
+    consider(
+        world::deterministic_wander_direction(
+            context.entity_id,
+            context.tick_index + attempt + 3U,
+            context.goal_index + attempt + 1U),
+        0.0F);
+  }
+
+  if (!world::has_horizontal_motion(best)) {
+    return std::nullopt;
+  }
+  return best;
 }
 
 [[nodiscard]] Vec3f swim_escape_direction(world::EntityGoalContext& context) {
@@ -256,27 +440,97 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
         context.goal_index);
   }
 
-  std::array<Vec3f, 8> candidates{{
-      fallback,
-      {-fallback.x, 0.0F, -fallback.z},
-      {1.0F, 0.0F, 0.0F},
-      {-1.0F, 0.0F, 0.0F},
-      {0.0F, 0.0F, 1.0F},
-      {0.0F, 0.0F, -1.0F},
-      world::deterministic_wander_direction(context.entity_id, context.tick_index + 3U, context.goal_index),
-      world::deterministic_wander_direction(context.entity_id, context.tick_index + 7U, context.goal_index),
-  }};
-  for (Vec3f candidate : candidates) {
-    if (candidate_is_dry_and_supported(context, bounds, candidate)) {
-      candidate = normalize_or_zero({candidate.x, 0.0F, candidate.z});
-      context.goal.state.movement_direction = candidate;
-      return {candidate.x, 1.0F, candidate.z};
+  const u32 current_fluid_cells = fluid_cell_count_in_bounds(context, bounds);
+  const std::optional<FluidAwareness> awareness =
+      fluid_awareness_near_bounds(context, bounds, DefaultAvoidFluidRadius);
+  const Vec3f away =
+      awareness.has_value() ? awareness->away_direction : Vec3f{};
+  Vec3f best{};
+  f32 best_score = -1000000.0F;
+  u32 best_fluid_cells = current_fluid_cells;
+  bool best_dry_supported = false;
+
+  const auto consider = [&](Vec3f candidate, f32 bonus) {
+    candidate = horizontal_unit(candidate);
+    if (!world::has_horizontal_motion(candidate)) {
+      return;
     }
+
+    const Aabb3f candidate_bounds =
+        translated(bounds, candidate * FluidEscapeProbeDistance);
+    if (!candidate_is_solid_free(context, candidate_bounds)) {
+      return;
+    }
+    const u32 candidate_fluid_cells =
+        fluid_cell_count_in_bounds(context, candidate_bounds);
+    const bool dry = candidate_fluid_cells == 0U;
+    const bool supported = candidate_has_support_below(context, candidate_bounds);
+    if (dry && !supported) {
+      return;
+    }
+
+    const f32 away_alignment =
+        world::has_horizontal_motion(away) ? dot(candidate, away) : 0.0F;
+    const f32 fluid_delta =
+        static_cast<f32>(static_cast<i32>(current_fluid_cells) -
+                         static_cast<i32>(candidate_fluid_cells));
+    f32 score = fluid_delta * 12.0F + away_alignment * 4.0F + bonus;
+    if (dry) {
+      score += 60.0F;
+    }
+    if (supported) {
+      score += 6.0F;
+    }
+    if (candidate_is_dry_and_supported(context, bounds, candidate)) {
+      score += 20.0F;
+    }
+    if (candidate_fluid_cells >= current_fluid_cells &&
+        away_alignment <= 0.0F && !supported) {
+      score -= 12.0F;
+    }
+
+    if (score > best_score) {
+      best_score = score;
+      best = candidate;
+      best_fluid_cells = candidate_fluid_cells;
+      best_dry_supported = dry && supported;
+    }
+  };
+
+  consider(away, 3.0F);
+  consider(fallback, 0.5F);
+  consider(fallback * -1.0F, 0.0F);
+  consider({1.0F, 0.0F, 0.0F}, 0.0F);
+  consider({-1.0F, 0.0F, 0.0F}, 0.0F);
+  consider({0.0F, 0.0F, 1.0F}, 0.0F);
+  consider({0.0F, 0.0F, -1.0F}, 0.0F);
+  consider(
+      world::deterministic_wander_direction(
+          context.entity_id,
+          context.tick_index + 3U,
+          context.goal_index),
+      0.0F);
+  consider(
+      world::deterministic_wander_direction(
+          context.entity_id,
+          context.tick_index + 7U,
+          context.goal_index),
+      0.0F);
+
+  if (world::has_horizontal_motion(best) &&
+      (best_dry_supported || best_fluid_cells < current_fluid_cells ||
+       (world::has_horizontal_motion(away) && dot(best, away) > 0.25F))) {
+    context.goal.state.movement_direction = best;
+    const f32 horizontal_scale = best_dry_supported ? 1.0F : 0.75F;
+    return {best.x * horizontal_scale, 1.0F, best.z * horizontal_scale};
   }
 
   fallback = normalize_or_zero({fallback.x, 0.0F, fallback.z});
   context.goal.state.movement_direction = fallback;
-  return {fallback.x * 0.35F, 1.0F, fallback.z * 0.35F};
+  return {
+      fallback.x * SwimFallbackHorizontalScale,
+      1.0F,
+      fallback.z * SwimFallbackHorizontalScale};
 }
 
 [[nodiscard]] world::EntityGoalHandler make_idle_goal_handler() {
@@ -330,6 +584,43 @@ inline constexpr f32 DefaultReturnHomeRadius = 12.0F;
     if (context.movement_intent != nullptr) {
       context.movement_intent->desired_direction = redirected;
     }
+  };
+  return handler;
+}
+
+[[nodiscard]] world::EntityGoalHandler make_avoid_fluid_goal_handler() {
+  world::EntityGoalHandler handler;
+  handler.categories = world::goal_category_mask(world::EntityGoalCategory::Movement);
+  handler.can_start = [](world::EntityGoalContext& context) {
+    return avoid_fluid_direction(context).has_value();
+  };
+  handler.can_continue = [](world::EntityGoalContext& context) {
+    return context.goal.state.remaining_ticks > 0U &&
+           avoid_fluid_direction(context).has_value();
+  };
+  handler.start = [](world::EntityGoalContext& context) {
+    if (const std::optional<Vec3f> direction = avoid_fluid_direction(context);
+        direction.has_value()) {
+      context.goal.state.movement_direction = direction.value();
+      return;
+    }
+    context.goal.state.movement_direction = world::deterministic_wander_direction(
+        context.entity_id,
+        context.tick_index,
+        context.goal_index);
+  };
+  handler.tick = [](world::EntityGoalContext& context) {
+    const std::optional<Vec3f> direction = avoid_fluid_direction(context);
+    if (!direction.has_value()) {
+      context.clear_movement_intent();
+      return;
+    }
+    context.goal.state.movement_direction = direction.value();
+    entity::MovementIntent& intent = context.movement_intent();
+    intent.desired_direction = direction.value();
+    intent.speed_multiplier = std::max(0.0F, context.goal.speed_multiplier);
+    intent.jump = false;
+    intent.sprint = false;
   };
   return handler;
 }
@@ -541,6 +832,12 @@ void register_base_entity_goals(world::EntityGoalRegistry& registry) {
       std::string{ids::WanderGoalID},
       make_wander_goal_handler());
   assert(result && "wander goal registration failed");
+  (void)result;
+
+  result = registry.register_handler(
+      std::string{ids::AvoidFluidGoalID},
+      make_avoid_fluid_goal_handler());
+  assert(result && "avoid-fluid goal registration failed");
   (void)result;
 
   result = registry.register_handler(

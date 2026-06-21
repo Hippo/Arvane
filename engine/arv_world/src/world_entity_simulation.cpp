@@ -14,6 +14,8 @@ namespace arv::world::detail {
 namespace {
 
 inline constexpr f32 AirborneIntentBlend = 0.10F;
+inline constexpr f32 EntityLiquidGravityScale = 0.15F;
+inline constexpr f32 EntityLiquidTerminalVelocityScale = 0.25F;
 inline constexpr f32 VehicleStopSpeedBlocksPerSecond = 0.04F;
 inline constexpr f32 VehicleStopAngularRadiansPerSecond = 0.01F;
 inline constexpr f32 VehicleAnimationSpeedEpsilonBlocksPerSecond = 0.05F;
@@ -42,6 +44,66 @@ struct DroppedItemLiquidProbe {
   bool overlaps_liquid{};
   f32 highest_surface_y{};
 };
+
+struct EntityLiquidProbe {
+  bool overlaps_liquid{};
+  f32 highest_surface_y{};
+};
+
+[[nodiscard]] bool query_cell_contains_liquid(
+    const physics::ICollisionQuery& query,
+    const voxel::BlockRegistry& registry,
+    BlockPos pos,
+    f32& surface_y) noexcept {
+  const voxel::FluidCell fluid = query.fluid_cell(pos);
+  if (!fluid.empty()) {
+    surface_y = voxel::fluid_surface_y(pos, fluid);
+    return true;
+  }
+
+  if (!query.is_block_loaded(pos)) {
+    return false;
+  }
+  const voxel::BlockVariantRecord* record = registry.variant(query.block_variant(pos));
+  if (record == nullptr || !record->properties.fluid) {
+    return false;
+  }
+  surface_y = static_cast<f32>(pos.value.y) + 1.0F;
+  return true;
+}
+
+[[nodiscard]] EntityLiquidProbe probe_entity_liquid(
+    const physics::ICollisionQuery& query,
+    const voxel::BlockRegistry& registry,
+    const Aabb3f& bounds,
+    f32 collision_epsilon) {
+  const i32 min_x = static_cast<i32>(std::floor(bounds.min.x));
+  const i32 min_y = static_cast<i32>(std::floor(bounds.min.y));
+  const i32 min_z = static_cast<i32>(std::floor(bounds.min.z));
+  const i32 max_x = static_cast<i32>(std::ceil(bounds.max.x));
+  const i32 max_y = static_cast<i32>(std::ceil(bounds.max.y));
+  const i32 max_z = static_cast<i32>(std::ceil(bounds.max.z));
+
+  EntityLiquidProbe probe;
+  for (i32 z = min_z; z < max_z; ++z) {
+    for (i32 y = min_y; y < max_y; ++y) {
+      for (i32 x = min_x; x < max_x; ++x) {
+        const BlockPos pos{{x, y, z}};
+        f32 surface_y = 0.0F;
+        if (!query_cell_contains_liquid(query, registry, pos, surface_y)) {
+          continue;
+        }
+        if (bounds.max.y <= static_cast<f32>(y) + collision_epsilon ||
+            bounds.min.y >= surface_y - collision_epsilon) {
+          continue;
+        }
+        probe.overlaps_liquid = true;
+        probe.highest_surface_y = std::max(probe.highest_surface_y, surface_y);
+      }
+    }
+  }
+  return probe;
+}
 
 [[nodiscard]] DroppedItemLiquidProbe probe_dropped_item_liquid(
     const physics::ICollisionQuery& query,
@@ -697,6 +759,15 @@ u32 WorldEntitySimulation::tick_entity_physics(
               ? nullptr
               : vehicle_registry->find(vehicle_physics->definition);
       const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
+      const EntityLiquidProbe liquid = probe_entity_liquid(
+          collision_query,
+          *block_registry,
+          bounds,
+          physics_config.collision_epsilon);
+      vehicle_physics->in_water = liquid.overlaps_liquid;
+      vehicle_physics->submerged =
+          liquid.overlaps_liquid &&
+          bounds.max.y <= liquid.highest_surface_y - physics_config.collision_epsilon;
       const bool supported = physics::has_support_below(
           collision_query,
           bounds,
@@ -713,12 +784,23 @@ u32 WorldEntitySimulation::tick_entity_physics(
       } else {
         vehicle_physics->air_time += static_cast<f32>(tick_seconds);
         vehicle_physics->ground_contact_time = 0.0F;
-        velocity.linear.y = std::max(
-            velocity.linear.y -
-                physics_config.gravity_per_second *
-                    std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
-                    static_cast<f32>(tick_seconds),
-            -physics_config.terminal_velocity);
+        if (liquid.overlaps_liquid) {
+          velocity.linear.y *= std::clamp(physics_config.liquid_drag, 0.0F, 1.0F);
+          velocity.linear.y = std::max(
+              velocity.linear.y -
+                  physics_config.gravity_per_second *
+                      std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
+                      EntityLiquidGravityScale *
+                      static_cast<f32>(tick_seconds),
+              -physics_config.terminal_velocity * EntityLiquidTerminalVelocityScale);
+        } else {
+          velocity.linear.y = std::max(
+              velocity.linear.y -
+                  physics_config.gravity_per_second *
+                      std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
+                      static_cast<f32>(tick_seconds),
+              -physics_config.terminal_velocity);
+        }
       }
 
       const bool ai_controlled_living_mount =
@@ -728,7 +810,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
         const Vec3f direction = normalize_or_zero(intent->desired_direction);
         const f32 speed = std::max(0.0F, movement->walk_speed) *
                           std::max(0.0F, intent->speed_multiplier);
-        if (grounded) {
+        if (grounded || liquid.overlaps_liquid) {
           velocity.linear.x = direction.x * speed;
           velocity.linear.z = direction.z * speed;
         } else {
@@ -869,6 +951,11 @@ u32 WorldEntitySimulation::tick_entity_physics(
     }
 
     const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
+    const EntityLiquidProbe liquid = probe_entity_liquid(
+        collision_query,
+        *block_registry,
+        bounds,
+        physics_config.collision_epsilon);
     const bool has_ground_support = physics::has_support_below(
         collision_query,
         bounds,
@@ -880,7 +967,10 @@ u32 WorldEntitySimulation::tick_entity_physics(
       const Vec3f direction = normalize_or_zero(intent->desired_direction);
       const f32 speed = std::max(0.0F, movement->walk_speed) *
                         std::max(0.0F, intent->speed_multiplier);
-      if (grounded) {
+      if (liquid.overlaps_liquid) {
+        velocity.linear.y *= std::clamp(physics_config.liquid_drag, 0.0F, 1.0F);
+      }
+      if (grounded || liquid.overlaps_liquid) {
         velocity.linear.x = direction.x * speed;
         velocity.linear.z = direction.z * speed;
       } else {
@@ -896,7 +986,14 @@ u32 WorldEntitySimulation::tick_entity_physics(
       }
     }
 
-    if (!grounded) {
+    if (liquid.overlaps_liquid) {
+      velocity.linear.y = std::max(
+          velocity.linear.y -
+              physics_config.gravity_per_second *
+                  EntityLiquidGravityScale *
+                  static_cast<f32>(tick_seconds),
+          -physics_config.terminal_velocity * EntityLiquidTerminalVelocityScale);
+    } else if (!grounded) {
       velocity.linear.y = std::max(
           velocity.linear.y - physics_config.gravity_per_second * tick_seconds,
           -physics_config.terminal_velocity);

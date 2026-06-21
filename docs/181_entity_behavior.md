@@ -46,6 +46,10 @@ behavior:
       - type: arvane:swim_in_fluid
         priority: 0
 
+      - type: arvane:avoid_fluid
+        priority: 1
+        radius: 3
+
       - type: arvane:melee_attack
         priority: 2
         target: nearest_player
@@ -284,6 +288,7 @@ look_at_target     -> Look
 move_to_target     -> Movement
 melee_attack       -> Attack
 acquire_target     -> Target
+avoid_fluid        -> Movement
 swim_in_fluid      -> Movement
 ```
 
@@ -576,6 +581,7 @@ The current `arv_base` registration set is:
 ```text
 arvane:idle
 arvane:wander
+arvane:avoid_fluid
 arvane:swim_in_fluid
 arvane:nearest_target
 arvane:move_to_target
@@ -585,9 +591,12 @@ arvane:flee_from_target
 arvane:return_home
 ```
 
-`arvane:swim_in_fluid` recovers land entities from water by moving upward and
-steering toward dry supported space when possible. `arvane:melee_attack` only
-deals damage when authored data supplies a positive `damage` value.
+`arvane:avoid_fluid` lets land entities steer away from nearby water before
+ordinary wandering carries them in. `arvane:swim_in_fluid` recovers land
+entities from water by moving upward, preferring dry supported space, and still
+making progress toward less fluid overlap when dry land is not immediately
+reachable. `arvane:melee_attack` only deals damage when authored data supplies a
+positive `damage` value.
 
 Avoid adding entity-specific goals like:
 

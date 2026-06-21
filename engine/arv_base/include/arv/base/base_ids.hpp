@@ -19,6 +19,7 @@ inline constexpr std::string_view DroppedItemEntityTypeName = "arvane:dropped_it
 
 inline constexpr std::string_view IdleGoalID = "arvane:idle";
 inline constexpr std::string_view WanderGoalID = "arvane:wander";
+inline constexpr std::string_view AvoidFluidGoalID = "arvane:avoid_fluid";
 inline constexpr std::string_view FloatInFluidGoalID = "arvane:float_in_fluid";
 inline constexpr std::string_view SwimInFluidGoalID = "arvane:swim_in_fluid";
 inline constexpr std::string_view NearestTargetGoalID = "arvane:nearest_target";

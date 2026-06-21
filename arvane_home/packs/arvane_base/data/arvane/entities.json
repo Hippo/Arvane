@@ -27,6 +27,14 @@
               "animation": "walk"
             },
             {
+              "type": "arvane:avoid_fluid",
+              "priority": 4,
+              "radius": 3,
+              "speed_multiplier": 0.9,
+              "duration_ticks": 40,
+              "animation": "walk"
+            },
+            {
               "type": "arvane:wander",
               "priority": 8,
               "radius": 12,
@@ -82,6 +90,14 @@
               "type": "arvane:swim_in_fluid",
               "priority": 0,
               "speed_multiplier": 0.65,
+              "animation": "walk"
+            },
+            {
+              "type": "arvane:avoid_fluid",
+              "priority": 4,
+              "radius": 3,
+              "speed_multiplier": 0.55,
+              "duration_ticks": 40,
               "animation": "walk"
             },
             {
