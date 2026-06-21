@@ -1,0 +1,29 @@
+{
+  "id": "arvane:chest",
+  "type": "arvane:crafting",
+  "category": "arvane:building",
+  "icon": {
+    "item": "arvane:chest"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:oak_log",
+      "count": 8
+    }
+  ],
+  "result": {
+    "item": "arvane:chest",
+    "count": 1
+  },
+  "unlock": {
+    "default": true,
+    "collect_items": [
+      "arvane:oak_log"
+    ]
+  },
+  "search_terms": [
+    "storage",
+    "container",
+    "wood"
+  ]
+}

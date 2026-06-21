@@ -2,6 +2,7 @@
 
 #include "arv/client/chat_history.hpp"
 #include "arv/client/local_player_controller.hpp"
+#include "arv/client/player_menu.hpp"
 #include "arv/core/text_edit.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/protocol/chat.hpp"
@@ -25,10 +26,19 @@ public:
   [[nodiscard]] bool tab_menu_visible() const noexcept;
 
   [[nodiscard]] bool inventory_open() const noexcept;
+  [[nodiscard]] PlayerMenuTab player_menu_tab() const noexcept;
+  [[nodiscard]] const std::string& player_menu_search() const noexcept;
+  [[nodiscard]] usize player_menu_search_cursor() const noexcept;
+  [[nodiscard]] const std::string& selected_crafting_category_id() const noexcept;
+  [[nodiscard]] const std::string& selected_crafting_recipe_id() const noexcept;
   [[nodiscard]] bool chat_open() const noexcept;
 
   void toggle_inventory_if_allowed(const player::ResolvedPermissions& permissions);
   void open_inventory() noexcept;
+  void set_player_menu_tab(PlayerMenuTab tab) noexcept;
+  void clear_player_menu_search() noexcept;
+  void select_crafting_category(std::string category_id);
+  void select_crafting_recipe(std::string recipe_id);
   void open_chat();
   void open_chat_with_draft(std::string draft);
   void close_chat() noexcept;
@@ -52,6 +62,7 @@ public:
   [[nodiscard]] std::optional<std::string> handle_chat_input(
       const InputFrame& input,
       bool was_chat_open);
+  void handle_player_menu_input(const InputFrame& input, bool was_inventory_open);
 
   [[nodiscard]] const std::string& chat_draft() const noexcept;
   [[nodiscard]] usize chat_draft_cursor() const noexcept;
@@ -68,6 +79,10 @@ private:
   void assign_chat_draft(std::string draft);
 
   bool inventory_open_{};
+  PlayerMenuTab player_menu_tab_{PlayerMenuTab::Inventory};
+  arv::core::TextEditBuffer player_menu_search_{};
+  std::string selected_crafting_category_id_{};
+  std::string selected_crafting_recipe_id_{};
   bool chat_open_{};
   bool tab_menu_visible_{};
   arv::core::TextEditBuffer chat_draft_{};

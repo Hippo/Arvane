@@ -241,6 +241,18 @@ MessageRegistry MessageRegistry::make_core_registry() {
   registry.register_message({MessageType::ClientboundCloseContainer, "ClientboundCloseContainer",
                              MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});
+  registry.register_message({MessageType::ServerboundCraftRecipe, "ServerboundCraftRecipe",
+                             MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundCraftRecipeResult, "ClientboundCraftRecipeResult",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundRecipeBookSnapshot, "ClientboundRecipeBookSnapshot",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
+  registry.register_message({MessageType::ClientboundRecipeUnlocks, "ClientboundRecipeUnlocks",
+                             MessageDirection::ServerToClient, ReliabilityClass::ReliableOrdered,
+                             NetworkLane::Gameplay});
   registry.register_message({MessageType::ServerboundChatMessage, "ServerboundChatMessage",
                              MessageDirection::ClientToServer, ReliabilityClass::ReliableOrdered,
                              NetworkLane::Gameplay});

@@ -6,6 +6,7 @@
 #include "arv/core/location.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
@@ -74,6 +75,7 @@ struct ServerPlayerSaveState {
   std::optional<Location> respawn_location{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
+  std::vector<std::string> unlocked_recipe_ids{};
 };
 
 struct BlockBreakingConfig {
@@ -192,6 +194,7 @@ struct ServerStartInfo {
   plugin::PluginManager* plugins{};
   const player::ContainerTypeRegistry* container_types{};
   const player::ContainerUiLayoutRegistry* container_layouts{};
+  const crafting::CraftingRecipeRegistry* crafting_registry{};
 };
 
 struct DroppedItemStack {

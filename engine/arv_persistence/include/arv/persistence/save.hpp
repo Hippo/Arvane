@@ -72,6 +72,7 @@ struct PlayerSaveData {
   std::optional<Location> respawn_location{};
   u8 selected_hotbar_slot{};
   player::Inventory inventory{player::DefaultPlayerInventorySlotCount};
+  std::vector<std::string> unlocked_recipe_ids{};
 };
 
 struct LoadedSaveData {

@@ -904,6 +904,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
       {
           {0, 9, {800.0F, 600.0F}, {slots.data(), 9}, "Stone", 1.0F},
           {true, "Inventory", 0, 9, {800.0F, 600.0F}, {slots.data(), slots.size()}},
+          {},
           {true, true, {chat.data(), chat.size()}, "test", 4U, 1U, 3U},
           {true, "Players", "footer", {players.data(), players.size()}},
           {true, "Stats", {scoreboard_lines.data(), scoreboard_lines.size()}, nullptr, &vars, arv::PlayerID{42}},
@@ -965,6 +966,80 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_EQ(fps->text, "FPS: 144");
   EXPECT_FLOAT_EQ(fps->rect.x, 8.0F);
   EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
+}
+
+TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  std::vector<arv::ui::UiItemStackView> slots(36);
+  slots[0] = {"arvane:stone", "Stone", 32};
+  arv::ui::PlayerMenuUiModel inventory_menu;
+  inventory_menu.visible = true;
+  inventory_menu.active_tab_id = "inventory";
+  inventory_menu.viewport = {800.0F, 600.0F};
+  inventory_menu.tabs = {
+      {"inventory", "Inventory", true},
+      {"crafting", "Crafting", false},
+      {"settings", "Settings", false},
+      {"exit", "Exit Game", false},
+  };
+  inventory_menu.inventory.visible = true;
+  inventory_menu.inventory.title = "Inventory";
+  inventory_menu.inventory.hotbar_slot_count = 9U;
+  inventory_menu.inventory.slots = {slots.data(), slots.size()};
+  arv::ui::append_player_menu_ui(tree, inventory_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* inventory_panel = tree.find_by_stable_id("player_menu.panel");
+  ASSERT_NE(inventory_panel, nullptr);
+  EXPECT_NEAR(inventory_panel->rect.width, 560.0F, 0.001F);
+  EXPECT_NEAR(inventory_panel->rect.height, 344.0F, 0.001F);
+  const auto* inventory_tab_label =
+      tree.find_by_stable_id("player_menu.tab.inventory.label");
+  ASSERT_NE(inventory_tab_label, nullptr);
+  EXPECT_EQ(inventory_tab_label->text, "Inventory");
+  const auto* crafting_tab_label =
+      tree.find_by_stable_id("player_menu.tab.crafting.label");
+  ASSERT_NE(crafting_tab_label, nullptr);
+  EXPECT_EQ(crafting_tab_label->text, "Crafting");
+
+  tree.clear();
+  arv::ui::PlayerMenuUiModel crafting_menu = inventory_menu;
+  crafting_menu.active_tab_id = "crafting";
+  crafting_menu.tabs[0].selected = false;
+  crafting_menu.tabs[1].selected = true;
+  crafting_menu.crafting.categories = {
+      {"arvane:building", "Building", {}, false},
+      {"arvane:combat", "Combat", {}, true},
+  };
+  crafting_menu.crafting.recipes = {
+      {"arvane:wood_sword", "Wood Sword", slots[0], true, true},
+  };
+  crafting_menu.crafting.selected_recipe_id = "arvane:wood_sword";
+  crafting_menu.crafting.selected_recipe_label = "Wood Sword";
+  crafting_menu.crafting.selected_ingredients = {
+      {"Oak Log", 2U, 0U, false},
+      {"Stone", 1U, 0U, false},
+  };
+  crafting_menu.crafting.has_selected_recipe = true;
+  crafting_menu.crafting.selected_recipe_craftable = true;
+  arv::ui::append_player_menu_ui(tree, crafting_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* crafting_panel = tree.find_by_stable_id("player_menu.panel");
+  ASSERT_NE(crafting_panel, nullptr);
+  EXPECT_NEAR(crafting_panel->rect.width, 720.0F, 0.001F);
+  EXPECT_NEAR(crafting_panel->rect.height, 520.0F, 0.001F);
+  const auto* category_label = tree.find_by_stable_id("crafting.category.0.label");
+  ASSERT_NE(category_label, nullptr);
+  EXPECT_EQ(category_label->text, "Building");
+  const auto* clear_label = tree.find_by_stable_id("crafting.search.clear.label");
+  ASSERT_NE(clear_label, nullptr);
+  EXPECT_EQ(clear_label->text, "X");
+  const auto* craft_label = tree.find_by_stable_id("crafting.craft.label");
+  ASSERT_NE(craft_label, nullptr);
+  EXPECT_EQ(craft_label->text, "Craft");
 }
 
 TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {

@@ -670,8 +670,13 @@ void DesktopFrameLoop::build_gameplay_ui(
                   active_session.tab_players.data(),
                   active_session.tab_players.size()},
               .inventory_title = assets_.language.text("ui.inventory.title"),
+              .player_menu_title = assets_.language.text("ui.inventory.title"),
               .tab_title = assets_.language.text("ui.tab.players"),
               .container_layouts = &assets_.container_layouts,
+              .crafting_registry = &assets_.crafting_registry,
+              .item_registry = &assets_.item_registry,
+              .item_atlas = &assets_.item_atlas,
+              .block_atlas = &assets_.block_atlas,
               .viewport = ui_metrics_.logical_size,
               .cursor_position = {
                   platform_input.cursor_x,

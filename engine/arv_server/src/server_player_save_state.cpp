@@ -39,6 +39,7 @@ bool ServerPlayerSaveCache::apply_to_player(
   player_state.respawn_location = found->respawn_location;
   player_state.selected_hotbar_slot = found->selected_hotbar_slot;
   player_state.inventory = found->inventory;
+  player_state.unlocked_recipe_ids = found->unlocked_recipe_ids;
   return true;
 }
 
@@ -61,6 +62,7 @@ void ServerPlayerSaveCache::record(
   save.respawn_location = player_state.respawn_location;
   save.selected_hotbar_slot = player_state.selected_hotbar_slot;
   save.inventory = player_state.inventory;
+  save.unlocked_recipe_ids = player_state.unlocked_recipe_ids;
 
   const auto found = std::find_if(
       states_.begin(),

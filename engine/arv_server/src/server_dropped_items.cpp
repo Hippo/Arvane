@@ -194,6 +194,18 @@ void ServerRuntimeImpl::tick_dropped_item_pickups(Seconds tick_seconds) {
       if (leftover_count == live_drop->stack.count) {
         continue;
       }
+      const u16 inserted_count =
+          static_cast<u16>(live_drop->stack.count - leftover_count);
+      for (const SessionID session_id : sessions_.session_ids()) {
+        const ServerSession* session = sessions_.find(session_id);
+        if (session != nullptr && session->player_id == player_id) {
+          publish_recipe_unlocks_for_collected_stack(
+              *session,
+              *player_state,
+              player::item_stack_with_count(live_drop->stack, inserted_count));
+          break;
+        }
+      }
 
       if (insert_result.complete()) {
         (void)default_world_.destroy_entity(drop.entity_id, world::EntityDespawnReason::Removed);

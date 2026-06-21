@@ -9,6 +9,7 @@
 #include "arv/client/client_ui_assets.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/client/render_asset_upload.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/render/render_types.hpp"
 #include "web_application.hpp"
 #include "web_platform.hpp"
@@ -333,6 +334,13 @@ bool ensure_entity_render_assets_loaded() {
         names.error().message);
     return false;
   }
+  auto crafting_result =
+      crafting::load_crafting_registry_from_packs(packs, loaded_assets.item_registry);
+  if (!crafting_result) {
+    set_status("failed to load web crafting recipes: " + crafting_result.error().message);
+    return false;
+  }
+  g_app.entity_assets.crafting_registry = std::move(crafting_result.value().registry);
   if (auto names = client::apply_client_entity_display_names(
           g_app.ui.language,
           loaded_assets.entity_registry);

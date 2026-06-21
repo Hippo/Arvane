@@ -13,6 +13,7 @@
 #include "arv/command/command_registry.hpp"
 #include "arv/core/fixed_timestep.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/net/gns_transport.hpp"
@@ -94,6 +95,7 @@ struct DesktopSessionDependencies {
   sched::ITaskExecutor& client_tasks;
   const voxel::BlockRegistry& block_registry;
   const player::ItemRegistry& item_registry;
+  const crafting::CraftingRecipeRegistry& crafting_registry;
   const player::ContainerTypeRegistry& container_types;
   const player::ContainerUiLayoutRegistry& container_layouts;
   const player::GameModeRegistry& game_modes;

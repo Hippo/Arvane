@@ -4,6 +4,7 @@
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/container_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/message_envelope.hpp"
@@ -215,6 +216,21 @@ net::NetworkResult ClientProtocolSender::send_inventory_action(
       protocol::ReliabilityClass::ReliableOrdered,
       protocol::NetworkLane::Gameplay,
       protocol::serialize_serverbound_inventory_action_request(request));
+}
+
+net::NetworkResult ClientProtocolSender::send_craft_recipe(
+    const protocol::ServerboundCraftRecipe& request) {
+  net::ITransport* transport = connection_.transport();
+  if (!transport) {
+    return net::NetworkResult::failure(net::NetworkError{"client has no transport"});
+  }
+  return send_protocol_message(
+      *transport,
+      connection_.connection_id(),
+      protocol::MessageType::ServerboundCraftRecipe,
+      protocol::ReliabilityClass::ReliableOrdered,
+      protocol::NetworkLane::Gameplay,
+      protocol::serialize_serverbound_craft_recipe(request));
 }
 
 net::NetworkResult ClientProtocolSender::send_open_container_block(

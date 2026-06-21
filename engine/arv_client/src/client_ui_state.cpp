@@ -13,6 +13,7 @@ namespace arv::client {
 namespace {
 
 constexpr usize MaxChatDraftBytes = 256U;
+constexpr usize MaxCraftingSearchBytes = 64U;
 constexpr usize MaxSubmittedChatHistory = 100U;
 
 [[nodiscard]] arv::text::TextVariableBinding text_binding_from_protocol(
@@ -49,6 +50,26 @@ bool ClientUiState::inventory_open() const noexcept {
   return inventory_open_;
 }
 
+PlayerMenuTab ClientUiState::player_menu_tab() const noexcept {
+  return player_menu_tab_;
+}
+
+const std::string& ClientUiState::player_menu_search() const noexcept {
+  return player_menu_search_.value;
+}
+
+usize ClientUiState::player_menu_search_cursor() const noexcept {
+  return player_menu_search_.cursor;
+}
+
+const std::string& ClientUiState::selected_crafting_recipe_id() const noexcept {
+  return selected_crafting_recipe_id_;
+}
+
+const std::string& ClientUiState::selected_crafting_category_id() const noexcept {
+  return selected_crafting_category_id_;
+}
+
 bool ClientUiState::chat_open() const noexcept {
   return chat_open_;
 }
@@ -60,6 +81,7 @@ void ClientUiState::toggle_inventory_if_allowed(
   }
   inventory_open_ = !inventory_open_;
   if (inventory_open_) {
+    player_menu_tab_ = PlayerMenuTab::Inventory;
     chat_open_ = false;
     reset_chat_history_navigation();
   }
@@ -67,8 +89,31 @@ void ClientUiState::toggle_inventory_if_allowed(
 
 void ClientUiState::open_inventory() noexcept {
   inventory_open_ = true;
+  player_menu_tab_ = PlayerMenuTab::Inventory;
   chat_open_ = false;
   reset_chat_history_navigation();
+}
+
+void ClientUiState::set_player_menu_tab(PlayerMenuTab tab) noexcept {
+  player_menu_tab_ = tab;
+  if (tab != PlayerMenuTab::Crafting) {
+    selected_crafting_recipe_id_.clear();
+  }
+}
+
+void ClientUiState::clear_player_menu_search() noexcept {
+  player_menu_search_.value.clear();
+  player_menu_search_.cursor = 0U;
+  player_menu_search_.selection_anchor = 0U;
+}
+
+void ClientUiState::select_crafting_recipe(std::string recipe_id) {
+  selected_crafting_recipe_id_ = std::move(recipe_id);
+}
+
+void ClientUiState::select_crafting_category(std::string category_id) {
+  selected_crafting_category_id_ = std::move(category_id);
+  selected_crafting_recipe_id_.clear();
 }
 
 void ClientUiState::open_chat() {
@@ -101,6 +146,32 @@ void ClientUiState::close_ui() noexcept {
   chat_draft_.selection_anchor = 0U;
   reset_chat_history_navigation();
   pending_url_confirmation_.reset();
+}
+
+void ClientUiState::handle_player_menu_input(
+    const InputFrame& input,
+    bool was_inventory_open) {
+  if (!inventory_open_ || !was_inventory_open ||
+      player_menu_tab_ != PlayerMenuTab::Crafting) {
+    return;
+  }
+  for (const arv::core::TextEditInput& edit_input : input.text_edit_events) {
+    if (edit_input.command == arv::core::TextEditCommand::MoveUp ||
+        edit_input.command == arv::core::TextEditCommand::MoveDown) {
+      continue;
+    }
+    const arv::core::TextEditResult result =
+        player_menu_search_.handle_edit(edit_input, MaxCraftingSearchBytes);
+    if (result.clipboard_text.has_value()) {
+      pending_clipboard_text_ = result.clipboard_text.value();
+    }
+  }
+  if (input.text_backspace_pressed) {
+    (void)player_menu_search_.backspace();
+  }
+  if (!input.text_input.empty()) {
+    (void)player_menu_search_.insert(input.text_input, MaxCraftingSearchBytes);
+  }
 }
 
 void ClientUiState::set_language(const arv::text::LanguageCatalog* language) noexcept {

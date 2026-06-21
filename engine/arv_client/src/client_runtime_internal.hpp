@@ -7,6 +7,7 @@
 #include "arv/core/time.hpp"
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/pack_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/world_time.hpp"
 
 #include "client_chunk_inbox.hpp"
@@ -20,7 +21,9 @@
 #include "client_skin_runtime.hpp"
 #include "client_ui_state.hpp"
 
+#include <algorithm>
 #include <filesystem>
+#include <iterator>
 #include <optional>
 
 namespace arv::text {
@@ -59,6 +62,42 @@ struct ClientPackSyncState {
   HashMap<std::string, ClientPackSyncDownload> downloads{};
 };
 
+struct ClientRecipeBookRuntime {
+  void clear() {
+    unlocked_recipe_ids.clear();
+    last_craft_result.reset();
+  }
+
+  [[nodiscard]] bool is_unlocked(std::string_view recipe_id) const noexcept {
+    return std::find(
+               unlocked_recipe_ids.begin(),
+               unlocked_recipe_ids.end(),
+               recipe_id) != unlocked_recipe_ids.end();
+  }
+
+  void apply_snapshot(protocol::ClientboundRecipeBookSnapshot snapshot) {
+    unlocked_recipe_ids = std::move(snapshot.unlocked_recipe_ids);
+    std::sort(unlocked_recipe_ids.begin(), unlocked_recipe_ids.end());
+    unlocked_recipe_ids.erase(
+        std::unique(unlocked_recipe_ids.begin(), unlocked_recipe_ids.end()),
+        unlocked_recipe_ids.end());
+  }
+
+  void apply_unlocks(protocol::ClientboundRecipeUnlocks unlocks) {
+    unlocked_recipe_ids.insert(
+        unlocked_recipe_ids.end(),
+        std::make_move_iterator(unlocks.unlocked_recipe_ids.begin()),
+        std::make_move_iterator(unlocks.unlocked_recipe_ids.end()));
+    std::sort(unlocked_recipe_ids.begin(), unlocked_recipe_ids.end());
+    unlocked_recipe_ids.erase(
+        std::unique(unlocked_recipe_ids.begin(), unlocked_recipe_ids.end()),
+        unlocked_recipe_ids.end());
+  }
+
+  std::vector<std::string> unlocked_recipe_ids{};
+  std::optional<protocol::ClientboundCraftRecipeResult> last_craft_result{};
+};
+
 struct ClientRuntimeContext {
   ClientConnectionRuntime& connection;
   ClientProtocolSender& sender;
@@ -76,6 +115,7 @@ struct ClientRuntimeContext {
   ClientSkinRuntime& skins;
   ParticleSystem& particles;
   ClientPackSyncState& pack_sync;
+  ClientRecipeBookRuntime& recipe_book;
   std::optional<protocol::ClientboundWorldTime>& world_time_update;
   const arv::text::LanguageCatalog* language{};
   const arv::entity::VehicleDefinitionRegistry* vehicle_registry{};

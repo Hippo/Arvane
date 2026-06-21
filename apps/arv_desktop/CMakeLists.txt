@@ -73,6 +73,7 @@ target_link_libraries(arv_desktop PRIVATE
   arv_base_ui
   arv_client
   arv_core
+  arv_crafting
   arv_crypto
   arv_io
   arv_text

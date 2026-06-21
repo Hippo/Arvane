@@ -5,6 +5,7 @@
 #include "arv/asset/pack.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/player/container.hpp"
@@ -23,6 +24,7 @@ struct DedicatedRegistries {
 
   player::ItemRegistry item_registry;
   u64 item_registry_hash{};
+  crafting::CraftingRecipeRegistry crafting_registry;
 
   player::ContainerTypeRegistry container_types;
   player::ContainerUiLayoutRegistry container_layouts;

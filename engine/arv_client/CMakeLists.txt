@@ -30,6 +30,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/local_player_controller.hpp
   include/arv/client/player_skin_rendering.hpp
   include/arv/client/particles.hpp
+  include/arv/client/player_menu.hpp
   include/arv/client/remote_chunk_stream.hpp
   include/arv/client/replicated_entity_mirror.hpp
   include/arv/client/render_asset_upload.hpp
@@ -74,6 +75,7 @@ target_link_libraries(arv_client_session
     arv_player
     arv_protocol_block_updates
     arv_protocol_container_sync
+    arv_protocol_crafting
     arv_protocol_dropped_items
     arv_protocol_entity_replication
     arv_protocol_inventory_sync
@@ -316,6 +318,7 @@ target_link_libraries(arv_client_runtime
     arv_client_dropped_items
     arv_client_local_player
     arv_core
+    arv_crafting
     arv_crypto
     arv_entity
     arv_io_headers
@@ -325,6 +328,7 @@ target_link_libraries(arv_client_runtime
     arv_protocol_block_updates
     arv_protocol_chat
     arv_protocol_container_sync
+    arv_protocol_crafting
     arv_protocol_dropped_items
     arv_protocol_entity_interaction
     arv_protocol_entity_replication

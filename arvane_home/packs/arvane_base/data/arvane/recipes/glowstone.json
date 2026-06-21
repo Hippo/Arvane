@@ -1,0 +1,27 @@
+{
+  "id": "arvane:glowstone",
+  "type": "arvane:crafting",
+  "category": "arvane:misc",
+  "icon": {
+    "item": "arvane:glowstone"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:coal",
+      "count": 4
+    }
+  ],
+  "result": {
+    "item": "arvane:glowstone",
+    "count": 1
+  },
+  "unlock": {
+    "collect_items": [
+      "arvane:coal"
+    ]
+  },
+  "search_terms": [
+    "light",
+    "lamp"
+  ]
+}

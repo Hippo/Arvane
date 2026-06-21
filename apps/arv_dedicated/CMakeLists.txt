@@ -25,6 +25,7 @@ target_link_libraries(arv_dedicated PRIVATE
   arv_asset
   arv_base
   arv_core
+  arv_crafting
   arv_crypto
   arv_entity
   arv_io

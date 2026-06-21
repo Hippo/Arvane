@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace arv::ui {
@@ -14,6 +15,14 @@ namespace widgets_detail {
 constexpr f32 InventorySlotSize = 40.0F;
 constexpr f32 InventorySlotSpacing = 4.0F;
 constexpr u32 InventoryGridColumns = 9;
+constexpr f32 PlayerMenuInventoryWidth = 560.0F;
+constexpr f32 PlayerMenuInventoryHeight = 344.0F;
+constexpr f32 PlayerMenuCraftingWidth = 720.0F;
+constexpr f32 PlayerMenuCraftingHeight = 520.0F;
+constexpr f32 PlayerMenuPlaceholderHeight = 320.0F;
+constexpr f32 PlayerMenuContentTop = 66.0F;
+constexpr f32 RecipeSlotSize = 44.0F;
+constexpr f32 RecipeSlotSpacing = 6.0F;
 constexpr f32 InventoryGridWidth =
     static_cast<f32>(InventoryGridColumns) * InventorySlotSize +
     static_cast<f32>(InventoryGridColumns - 1U) * InventorySlotSpacing;
@@ -47,6 +56,314 @@ UiElement inventory_grid(std::string stable_id) {
   grid.layout.spacing = InventorySlotSpacing;
   grid.hit_test = false;
   return grid;
+}
+
+UiElement menu_button(
+    std::string stable_id,
+    std::string action,
+    std::string label,
+    bool selected,
+    f32 width,
+    f32 height,
+    const UiTheme& theme) {
+  UiElement button;
+  button.stable_id = std::move(stable_id);
+  button.type = UiElementType::Button;
+  button.layout.width_mode = UiSizeMode::Fixed;
+  button.layout.height_mode = UiSizeMode::Fixed;
+  button.layout.width = width;
+  button.layout.height = height;
+  button.style.background =
+      selected ? theme.colors.surface_selected : theme.colors.surface_alt;
+  button.style.background_hover = theme.colors.surface_hover;
+  button.style.background_pressed = theme.colors.surface_pressed;
+  button.style.background_selected = theme.colors.surface_selected;
+  button.style.foreground = theme.colors.text;
+  button.style.border = selected ? theme.colors.border_focus : theme.colors.border;
+  button.style.border_width = theme.layout.border_width;
+  button.style.radius = theme.layout.radius_sm;
+  button.focusable = true;
+  button.selected = selected;
+  button.action = std::move(action);
+  button.text = std::move(label);
+  return button;
+}
+
+UiNodeID add_menu_button(
+    UiTree& tree,
+    UiNodeID parent,
+    UiElement button,
+    const UiTheme& theme) {
+  const std::string stable_id = button.stable_id;
+  std::string label = std::move(button.text);
+  button.text.clear();
+  const bool enabled = button.enabled;
+  const UiNodeID button_id = tree.add_child(parent, std::move(button));
+  if (!label.empty()) {
+    UiElement label_element = text_element(
+        stable_id + ".label",
+        std::move(label),
+        enabled ? theme.colors.text : theme.colors.text_disabled,
+        UiTextRole::Body);
+    label_element.layout.anchor = UiAnchor::Center;
+    tree.add_child(button_id, std::move(label_element));
+  }
+  return button_id;
+}
+
+[[nodiscard]] f32 player_menu_width(std::string_view active_tab_id) noexcept {
+  return active_tab_id == "inventory" ? PlayerMenuInventoryWidth : PlayerMenuCraftingWidth;
+}
+
+[[nodiscard]] f32 player_menu_height(std::string_view active_tab_id) noexcept {
+  if (active_tab_id == "inventory") {
+    return PlayerMenuInventoryHeight;
+  }
+  if (active_tab_id == "crafting") {
+    return PlayerMenuCraftingHeight;
+  }
+  return PlayerMenuPlaceholderHeight;
+}
+
+void append_inventory_section(
+    UiTree& tree,
+    UiNodeID parent,
+    InventoryUiModel model,
+    Vec2f offset,
+    bool show_title) {
+  const UiTheme& theme = tree.theme();
+
+  UiElement stack;
+  stack.stable_id = show_title ? "player_menu.inventory.stack" : "player_menu.inventory.compact_stack";
+  stack.type = UiElementType::VerticalStack;
+  stack.layout.spacing = theme.layout.spacing_md;
+  stack.layout.offset = offset;
+  stack.hit_test = false;
+  const UiNodeID stack_id = tree.add_child(parent, std::move(stack));
+
+  if (show_title) {
+    tree.add_child(
+        stack_id,
+        text_element("player_menu.inventory.title", model.title, theme.colors.text, UiTextRole::Heading));
+  }
+
+  const usize slot_total =
+      std::max<usize>(model.slots.size(), player::DefaultPlayerInventorySlotCount);
+  const usize hotbar_slot_count =
+      std::min<usize>(model.hotbar_slot_count, slot_total);
+
+  const UiNodeID grid_id =
+      tree.add_child(stack_id, inventory_grid("player_menu.inventory.grid"));
+  append_inventory_slot_range(
+      tree,
+      grid_id,
+      model,
+      hotbar_slot_count,
+      slot_total);
+
+  UiElement hotbar_separator;
+  hotbar_separator.stable_id = "player_menu.inventory.hotbar_separator";
+  hotbar_separator.type = UiElementType::Panel;
+  hotbar_separator.layout.width_mode = UiSizeMode::Fixed;
+  hotbar_separator.layout.height_mode = UiSizeMode::Fixed;
+  hotbar_separator.layout.width = InventoryGridWidth;
+  hotbar_separator.layout.height = 2.0F;
+  hotbar_separator.style.background = theme.colors.border_focus;
+  hotbar_separator.style.background.w = 0.58F;
+  hotbar_separator.hit_test = false;
+  tree.add_child(stack_id, std::move(hotbar_separator));
+
+  if (hotbar_slot_count > 0U) {
+    const UiNodeID hotbar_id =
+        tree.add_child(stack_id, inventory_grid("player_menu.inventory.hotbar"));
+    append_inventory_slot_range(
+        tree,
+        hotbar_id,
+        model,
+        0U,
+        hotbar_slot_count);
+  }
+}
+
+void append_recipe_slot(
+    UiTree& tree,
+    UiNodeID parent,
+    const CraftingRecipeTileView& recipe,
+    usize index,
+    Vec2f offset) {
+  const UiTheme& theme = tree.theme();
+  UiElement slot;
+  slot.stable_id = "crafting.recipe." + std::to_string(index);
+  slot.type = UiElementType::Slot;
+  slot.layout.width_mode = UiSizeMode::Fixed;
+  slot.layout.height_mode = UiSizeMode::Fixed;
+  slot.layout.width = RecipeSlotSize;
+  slot.layout.height = RecipeSlotSize;
+  slot.layout.offset = offset;
+  slot.style.background =
+      recipe.selected ? theme.colors.surface_selected : theme.colors.surface_alt;
+  slot.style.background.w = recipe.craftable ? 0.92F : 0.50F;
+  slot.style.background_hover = theme.colors.surface_hover;
+  slot.style.background_pressed = theme.colors.surface_pressed;
+  slot.style.border = recipe.craftable ? theme.colors.border_focus : theme.colors.border;
+  slot.style.border_width = theme.layout.border_width;
+  slot.style.radius = theme.layout.radius_sm;
+  slot.selected = recipe.selected;
+  slot.focusable = true;
+  slot.action = "crafting.recipe:" + recipe.id;
+  const UiNodeID slot_id = tree.add_child(parent, std::move(slot));
+  add_item_slot_children(
+      tree,
+      slot_id,
+      "crafting.recipe." + std::to_string(index),
+      static_cast<u8>(std::min<usize>(index, 255U)),
+      &recipe.icon,
+      false);
+}
+
+void append_crafting_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuUiModel& model) {
+  const UiTheme& theme = tree.theme();
+  const CraftingUiModel& crafting = model.crafting;
+
+  UiElement categories;
+  categories.stable_id = "crafting.categories";
+  categories.type = UiElementType::VerticalStack;
+  categories.layout.spacing = 6.0F;
+  categories.layout.offset = {20.0F, PlayerMenuContentTop};
+  categories.hit_test = false;
+  const UiNodeID categories_id = tree.add_child(panel_id, std::move(categories));
+
+  for (usize index = 0; index < crafting.categories.size(); ++index) {
+    const CraftingCategoryTabView& category = crafting.categories[index];
+    UiElement button = menu_button(
+        "crafting.category." + std::to_string(index),
+        "crafting.category:" + category.id,
+        category.label,
+        category.selected,
+        116.0F,
+        34.0F,
+        theme);
+    add_menu_button(tree, categories_id, std::move(button), theme);
+  }
+
+  UiElement search = fixed_panel(
+      "crafting.search",
+      350.0F,
+      34.0F,
+      theme.colors.surface_alt);
+  search.layout.offset = {154.0F, PlayerMenuContentTop};
+  search.style.background.w = 0.78F;
+  search.action = "crafting.search.focus";
+  style_surface(search, theme, theme.layout.radius_sm);
+  const UiNodeID search_id = tree.add_child(panel_id, std::move(search));
+  const std::string search_text =
+      crafting.search.empty() ? std::string{"Search"} : crafting.search;
+  UiElement search_label = text_element(
+      "crafting.search.text",
+      search_text,
+      crafting.search.empty() ? theme.colors.text_muted : theme.colors.text,
+      UiTextRole::Body);
+  search_label.layout.anchor = UiAnchor::Center;
+  tree.add_child(search_id, std::move(search_label));
+
+  UiElement clear_button = menu_button(
+      "crafting.search.clear",
+      "crafting.search.clear",
+      "X",
+      false,
+      34.0F,
+      34.0F,
+      theme);
+  clear_button.layout.offset = {512.0F, PlayerMenuContentTop};
+  add_menu_button(tree, panel_id, std::move(clear_button), theme);
+
+  UiElement recipes_panel = fixed_panel(
+      "crafting.recipes.panel",
+      374.0F,
+      214.0F,
+      theme.colors.surface_alt);
+  recipes_panel.layout.offset = {154.0F, 108.0F};
+  recipes_panel.style.background.w = 0.38F;
+  recipes_panel.hit_test = false;
+  style_surface(recipes_panel, theme, theme.layout.radius_sm);
+  const UiNodeID recipes_panel_id = tree.add_child(panel_id, std::move(recipes_panel));
+
+  constexpr u32 RecipeColumns = 7;
+  for (usize index = 0; index < crafting.recipes.size(); ++index) {
+    const u32 column = static_cast<u32>(index % RecipeColumns);
+    const u32 row = static_cast<u32>(index / RecipeColumns);
+    if (row >= 4U) {
+      break;
+    }
+    append_recipe_slot(
+        tree,
+        recipes_panel_id,
+        crafting.recipes[index],
+        index,
+        {12.0F + static_cast<f32>(column) * (RecipeSlotSize + RecipeSlotSpacing),
+         12.0F + static_cast<f32>(row) * (RecipeSlotSize + RecipeSlotSpacing)});
+  }
+
+  UiElement detail = fixed_panel(
+      "crafting.detail",
+      152.0F,
+      214.0F,
+      theme.colors.surface_alt);
+  detail.layout.offset = {548.0F, 108.0F};
+  detail.style.background.w = 0.46F;
+  detail.hit_test = false;
+  style_surface(detail, theme, theme.layout.radius_sm);
+  const UiNodeID detail_id = tree.add_child(panel_id, std::move(detail));
+  if (crafting.has_selected_recipe) {
+    tree.add_child(
+        detail_id,
+        text_element(
+            "crafting.detail.title",
+            crafting.selected_recipe_label,
+            theme.colors.text,
+            UiTextRole::Body));
+    for (usize index = 0; index < crafting.selected_ingredients.size() && index < 4U; ++index) {
+      const CraftingIngredientLineView& ingredient = crafting.selected_ingredients[index];
+      UiElement line = text_element(
+          "crafting.detail.ingredient." + std::to_string(index),
+          ingredient.label + " " + std::to_string(ingredient.owned) + "/" +
+              std::to_string(ingredient.required),
+          ingredient.satisfied ? theme.colors.success : theme.colors.warning,
+          UiTextRole::Small);
+      line.layout.offset = {0.0F, 32.0F + static_cast<f32>(index) * 22.0F};
+      tree.add_child(detail_id, std::move(line));
+    }
+    UiElement craft = menu_button(
+        "crafting.craft",
+        "crafting.craft:" + crafting.selected_recipe_id,
+        "Craft",
+        false,
+        112.0F,
+        34.0F,
+        theme);
+    craft.layout.anchor = UiAnchor::BottomCenter;
+    craft.layout.offset = {0.0F, -12.0F};
+    craft.enabled = crafting.selected_recipe_craftable;
+    add_menu_button(tree, detail_id, std::move(craft), theme);
+  } else {
+    UiElement empty = text_element(
+        "crafting.detail.empty",
+        "No recipe",
+        theme.colors.text_muted,
+        UiTextRole::Body);
+    empty.layout.anchor = UiAnchor::Center;
+    tree.add_child(detail_id, std::move(empty));
+  }
+
+  append_inventory_section(
+      tree,
+      panel_id,
+      model.inventory,
+      {164.0F, 302.0F},
+      false);
 }
 
 void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
@@ -138,6 +455,95 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
         "inventory.cursor_stack",
         0,
         &model.cursor_stack.value(),
+        false);
+  }
+
+  (void)model.viewport;
+}
+
+void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
+  if (!model.visible) {
+    return;
+  }
+  const UiTheme& theme = tree.theme();
+  UiElement panel = fixed_panel(
+      "player_menu.panel",
+      player_menu_width(model.active_tab_id),
+      player_menu_height(model.active_tab_id),
+      theme.colors.surface);
+  panel.layout.anchor = UiAnchor::Center;
+  panel.style.background.w = std::min(panel.style.background.w, 0.96F);
+  style_surface(panel, theme, theme.widgets.panel.radius);
+  panel.hit_test = true;
+  const UiNodeID panel_id = tree.add_child(tree.root_id(), std::move(panel));
+
+  UiElement tabs;
+  tabs.stable_id = "player_menu.tabs";
+  tabs.type = UiElementType::HorizontalStack;
+  tabs.layout.spacing = theme.layout.spacing_sm;
+  tabs.layout.offset = {20.0F, 20.0F};
+  tabs.hit_test = false;
+  const UiNodeID tabs_id = tree.add_child(panel_id, std::move(tabs));
+  for (const PlayerMenuTabButtonView& tab : model.tabs) {
+    UiElement tab_button = menu_button(
+        "player_menu.tab." + tab.id,
+        "player_menu.tab:" + tab.id,
+        tab.label,
+        tab.selected,
+        116.0F,
+        34.0F,
+        theme);
+    add_menu_button(tree, tabs_id, std::move(tab_button), theme);
+  }
+
+  if (model.active_tab_id == "crafting") {
+    append_crafting_ui(tree, panel_id, model);
+  } else if (model.active_tab_id == "settings") {
+    UiElement text = text_element(
+        "player_menu.settings.placeholder",
+        "Settings",
+        theme.colors.text,
+        UiTextRole::Heading);
+    text.layout.anchor = UiAnchor::Center;
+    tree.add_child(panel_id, std::move(text));
+  } else if (model.active_tab_id == "exit") {
+    UiElement text = text_element(
+        "player_menu.exit.placeholder",
+        "Exit Game",
+        theme.colors.text,
+        UiTextRole::Heading);
+    text.layout.anchor = UiAnchor::Center;
+    tree.add_child(panel_id, std::move(text));
+  } else {
+    append_inventory_section(
+        tree,
+        panel_id,
+        std::move(model.inventory),
+        {84.0F, PlayerMenuContentTop},
+        true);
+  }
+
+  if (model.inventory.cursor_stack.has_value() &&
+      !model.inventory.cursor_stack->empty()) {
+    UiElement cursor_slot;
+    cursor_slot.stable_id = "player_menu.cursor_stack";
+    cursor_slot.type = UiElementType::Slot;
+    cursor_slot.layout.width_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.height_mode = UiSizeMode::Fixed;
+    cursor_slot.layout.width = InventorySlotSize;
+    cursor_slot.layout.height = InventorySlotSize;
+    cursor_slot.layout.offset = {
+        model.cursor_position.x - InventorySlotSize * 0.5F,
+        model.cursor_position.y - InventorySlotSize * 0.5F};
+    cursor_slot.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+    cursor_slot.hit_test = false;
+    const UiNodeID cursor_slot_id = tree.add_child(tree.root_id(), std::move(cursor_slot));
+    add_item_slot_children(
+        tree,
+        cursor_slot_id,
+        "player_menu.cursor_stack",
+        0,
+        &model.inventory.cursor_stack.value(),
         false);
   }
 
@@ -364,6 +770,10 @@ void append_container_ui(UiTree& tree, ContainerUiModel model) {
 void build_inventory_ui(UiTree& tree, InventoryUiModel model) {
   tree.clear();
   widgets_detail::append_inventory_ui(tree, model);
+}
+
+void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
+  widgets_detail::append_player_menu_ui(tree, std::move(model));
 }
 
 void append_container_ui(UiTree& tree, ContainerUiModel model) {

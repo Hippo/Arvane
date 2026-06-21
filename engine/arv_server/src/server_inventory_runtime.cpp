@@ -82,6 +82,15 @@ player::InventoryInsertResult ServerRuntimeImpl::insert_player_inventory_stack(
     result.leftover = stack;
     return result;
   }
+  const auto publish_collected = [&](const player::ItemStack& inserted) {
+    for (const SessionID session_id : sessions_.session_ids()) {
+      const ServerSession* session = sessions_.find(session_id);
+      if (session != nullptr && session->player_id == player_id) {
+        publish_recipe_unlocks_for_collected_stack(*session, *player_state, inserted);
+        break;
+      }
+    }
+  };
 
   if (preferred_slot.has_value()) {
     if (!player_state->inventory.is_valid_slot(preferred_slot.value())) {
@@ -91,21 +100,40 @@ player::InventoryInsertResult ServerRuntimeImpl::insert_player_inventory_stack(
 
     if (replace_preferred_slot) {
       player_state->inventory.set_slot(preferred_slot.value(), stack);
+      publish_collected(stack);
       return result;
     }
 
+    const u16 requested_count = stack.count;
     player::ItemStack remaining = stack;
     (void)player_state->inventory.merge_stack_into_slot(
         preferred_slot.value(),
         remaining,
         *item_registry_);
     if (remaining.count == 0U) {
+      publish_collected(stack);
       return result;
+    }
+    if (remaining.count < requested_count) {
+      publish_collected(
+          player::item_stack_with_count(
+              stack,
+              static_cast<u16>(requested_count - remaining.count)));
     }
     stack = remaining;
   }
 
-  return player_state->inventory.insert_stack(stack, *item_registry_);
+  const u16 requested_count = stack.count;
+  result = player_state->inventory.insert_stack(stack, *item_registry_);
+  const u16 leftover_count =
+      result.leftover.has_value() ? result.leftover->count : 0U;
+  if (leftover_count < requested_count) {
+    publish_collected(
+        player::item_stack_with_count(
+            stack,
+            static_cast<u16>(requested_count - leftover_count)));
+  }
+  return result;
 }
 
 player::InventoryOperationResult ServerRuntimeImpl::apply_player_inventory_click(

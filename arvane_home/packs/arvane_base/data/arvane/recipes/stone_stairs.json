@@ -1,0 +1,29 @@
+{
+  "id": "arvane:stone_stairs",
+  "type": "arvane:crafting",
+  "category": "arvane:building",
+  "icon": {
+    "item": "arvane:stone_stairs"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:stone",
+      "count": 6
+    }
+  ],
+  "result": {
+    "item": "arvane:stone_stairs",
+    "count": 4
+  },
+  "unlock": {
+    "default": true,
+    "collect_items": [
+      "arvane:stone"
+    ]
+  },
+  "search_terms": [
+    "stairs",
+    "stone",
+    "building"
+  ]
+}

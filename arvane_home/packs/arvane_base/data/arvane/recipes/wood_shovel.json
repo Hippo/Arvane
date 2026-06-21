@@ -1,0 +1,32 @@
+{
+  "id": "arvane:wood_shovel",
+  "type": "arvane:crafting",
+  "category": "arvane:tools",
+  "icon": {
+    "item": "arvane:wood_shovel"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:oak_log",
+      "count": 2
+    },
+    {
+      "item": "arvane:stone",
+      "count": 1
+    }
+  ],
+  "result": {
+    "item": "arvane:wood_shovel",
+    "count": 1
+  },
+  "unlock": {
+    "default": true,
+    "collect_items": [
+      "arvane:oak_log"
+    ]
+  },
+  "search_terms": [
+    "tool",
+    "digging"
+  ]
+}

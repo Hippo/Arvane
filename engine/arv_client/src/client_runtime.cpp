@@ -34,6 +34,7 @@ struct ClientRuntime::Impl {
         skins,
         particles,
         pack_sync,
+        recipe_book,
         world_time_update,
         language,
         vehicle_registry,
@@ -87,6 +88,7 @@ struct ClientRuntime::Impl {
     dropped_items.clear();
     chunks.clear();
     inventory.reset();
+    recipe_book.clear();
     particles.clear();
     pack_sync.clear();
     world_time_update.reset();
@@ -112,8 +114,10 @@ struct ClientRuntime::Impl {
   detail::ClientSkinRuntime skins{};
   ParticleSystem particles{};
   detail::ClientPackSyncState pack_sync{};
+  detail::ClientRecipeBookRuntime recipe_book{};
   std::optional<protocol::ClientboundWorldTime> world_time_update{};
   u32 next_attack_sequence{1};
+  u32 next_craft_action_id{1};
   std::vector<ClientAttackFeedback> attack_feedback{};
 };
 
@@ -304,6 +308,38 @@ bool ClientRuntime::inventory_open() const noexcept {
   return impl_->ui.inventory_open();
 }
 
+PlayerMenuTab ClientRuntime::player_menu_tab() const noexcept {
+  return impl_->ui.player_menu_tab();
+}
+
+const std::string& ClientRuntime::player_menu_search() const noexcept {
+  return impl_->ui.player_menu_search();
+}
+
+const std::string& ClientRuntime::selected_crafting_recipe_id() const noexcept {
+  return impl_->ui.selected_crafting_recipe_id();
+}
+
+const std::string& ClientRuntime::selected_crafting_category_id() const noexcept {
+  return impl_->ui.selected_crafting_category_id();
+}
+
+void ClientRuntime::set_player_menu_tab(PlayerMenuTab tab) noexcept {
+  impl_->ui.set_player_menu_tab(tab);
+}
+
+void ClientRuntime::clear_player_menu_search() noexcept {
+  impl_->ui.clear_player_menu_search();
+}
+
+void ClientRuntime::select_crafting_category(std::string category_id) {
+  impl_->ui.select_crafting_category(std::move(category_id));
+}
+
+void ClientRuntime::select_crafting_recipe(std::string recipe_id) {
+  impl_->ui.select_crafting_recipe(std::move(recipe_id));
+}
+
 bool ClientRuntime::chat_open() const noexcept {
   return impl_->ui.chat_open();
 }
@@ -431,6 +467,22 @@ bool ClientRuntime::has_authoritative_inventory() const noexcept {
   return impl_->inventory.has_authoritative_inventory();
 }
 
+std::span<const std::string> ClientRuntime::unlocked_recipe_ids() const noexcept {
+  return impl_->recipe_book.unlocked_recipe_ids;
+}
+
+bool ClientRuntime::recipe_unlocked(std::string_view recipe_id) const noexcept {
+  return impl_->recipe_book.is_unlocked(recipe_id);
+}
+
+std::optional<protocol::ClientboundCraftRecipeResult>
+ClientRuntime::take_craft_recipe_result() {
+  std::optional<protocol::ClientboundCraftRecipeResult> result =
+      std::move(impl_->recipe_book.last_craft_result);
+  impl_->recipe_book.last_craft_result.reset();
+  return result;
+}
+
 bool ClientRuntime::container_open() const noexcept {
   return impl_->inventory.container_open();
 }
@@ -514,6 +566,20 @@ net::NetworkResult ClientRuntime::request_inventory_close() {
   return impl_->inventory.request_close(
       impl_->sender,
       impl_->connection.state());
+}
+
+net::NetworkResult ClientRuntime::request_craft_recipe(std::string recipe_id, u16 count) {
+  if (impl_->connection.state() != net::ConnectionState::InGame) {
+    return net::NetworkResult::failure(net::NetworkError{"client is not in game"});
+  }
+  if (recipe_id.empty() || count == 0U) {
+    return net::NetworkResult::failure(net::NetworkError{"invalid craft request"});
+  }
+  protocol::ServerboundCraftRecipe request;
+  request.recipe_id = std::move(recipe_id);
+  request.count = count;
+  request.client_action_id = impl_->next_craft_action_id++;
+  return impl_->sender.send_craft_recipe(request);
 }
 
 net::NetworkResult ClientRuntime::request_attack_entity(EntityNetID target_entity) {

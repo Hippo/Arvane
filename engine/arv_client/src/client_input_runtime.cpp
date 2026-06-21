@@ -525,6 +525,7 @@ void ClientInputRuntime::submit_input(
     net::ConnectionState connection_state) {
   ui.set_tab_menu_visible(input.tab_menu_held);
   const bool was_chat_open = ui.chat_open();
+  const bool was_inventory_open = ui.inventory_open();
 
   if (input.text_cancel_pressed && (ui.inventory_open() || ui.chat_open())) {
     ui.close_ui();
@@ -538,6 +539,7 @@ void ClientInputRuntime::submit_input(
   }
 
   std::optional<std::string> chat_submission = ui.handle_chat_input(input, was_chat_open);
+  ui.handle_player_menu_input(input, was_inventory_open);
   if (chat_submission.has_value() && connection_state == net::ConnectionState::InGame) {
     (void)sender.send_chat_message({std::move(chat_submission.value()), std::nullopt});
   }

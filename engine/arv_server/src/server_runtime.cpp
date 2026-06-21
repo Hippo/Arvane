@@ -131,6 +131,7 @@ namespace {
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
+  save.unlocked_recipe_ids = player.unlocked_recipe_ids;
   return save;
 }
 
@@ -153,6 +154,7 @@ namespace {
   save.respawn_location = player_state.respawn_location;
   save.selected_hotbar_slot = player_state.selected_hotbar_slot;
   save.inventory = player_state.inventory;
+  save.unlocked_recipe_ids = player_state.unlocked_recipe_ids;
   return save;
 }
 
@@ -703,6 +705,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   player_saves_.load(start_info.saved_players);
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
+  crafting_registry_ = start_info.crafting_registry;
   container_types_ = start_info.container_types;
   container_layouts_ = start_info.container_layouts;
   entity_registry_ = start_info.entity_registry;

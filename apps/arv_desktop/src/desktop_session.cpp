@@ -333,6 +333,7 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.listen_address = {"in-process", 0};
   server_start_info.block_registry = &dependencies_.block_registry;
   server_start_info.item_registry = &dependencies_.item_registry;
+  server_start_info.crafting_registry = &dependencies_.crafting_registry;
   server_start_info.container_types = &dependencies_.container_types;
   server_start_info.container_layouts = &dependencies_.container_layouts;
   server_start_info.game_modes = &dependencies_.game_modes;

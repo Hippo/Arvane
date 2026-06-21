@@ -203,8 +203,8 @@ TEST(GameplayUiModelProjectionTests, BuildsRuntimeBackedOpenChatAndInventoryMode
   EXPECT_EQ(model.hotbar.item_name_popup, "Stone");
   EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.75F);
   EXPECT_FALSE(model.inventory.visible);
-  ASSERT_TRUE(model.inventory.cursor_stack.has_value());
-  EXPECT_EQ(model.inventory.cursor_stack->display_name, "Stick");
+  ASSERT_TRUE(model.player_menu.inventory.cursor_stack.has_value());
+  EXPECT_EQ(model.player_menu.inventory.cursor_stack->display_name, "Stick");
   EXPECT_TRUE(model.chat.input_active);
   EXPECT_EQ(model.chat.draft, "draft");
   EXPECT_EQ(model.chat.history_scroll_offset, history_scroll_offset);
@@ -242,7 +242,7 @@ TEST(GameplayUiModelProjectionTests, SnapshotBuilderUsesLanguageFallbackAndPopup
               .debug_fps_visible = false,
           });
 
-  EXPECT_EQ(model.inventory.title, "Localized Inventory");
+  EXPECT_EQ(model.player_menu.inventory.title, "Localized Inventory");
   EXPECT_EQ(model.tab_menu.header, "Localized Players");
   EXPECT_TRUE(model.hotbar.item_name_popup.empty());
   EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.0F);
@@ -273,7 +273,7 @@ TEST(GameplayUiModelProjectionTests, SnapshotBuilderKeepsExplicitTitlesAndVisibl
               .language = &language,
           });
 
-  EXPECT_EQ(model.inventory.title, "Backpack");
+  EXPECT_EQ(model.player_menu.inventory.title, "Backpack");
   EXPECT_EQ(model.tab_menu.header, "Crew");
   EXPECT_EQ(model.hotbar.item_name_popup, "Pickaxe");
   EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.5F);

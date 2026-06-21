@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace arv::player {
 
@@ -59,6 +60,7 @@ struct PlayerState {
   std::optional<Location> respawn_location{};
   Inventory inventory{DefaultPlayerInventorySlotCount};
   std::optional<ItemStack> inventory_cursor_stack{};
+  std::vector<std::string> unlocked_recipe_ids{};
   u8 selected_hotbar_slot{};
   PlayerSelection selection{};
   TickIndex last_processed_input_tick{};

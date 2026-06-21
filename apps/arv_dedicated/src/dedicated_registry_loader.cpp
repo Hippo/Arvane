@@ -5,6 +5,7 @@
 #include "arv/base/base_ids.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/core/log.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/persistence/save.hpp"
@@ -411,11 +412,23 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
   }
   registries.item_registry_hash =
       persistence::hash_item_registry(registries.item_registry);
+  auto crafting_result =
+      crafting::load_crafting_registry_from_packs(packs, registries.item_registry);
+  if (!crafting_result) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("crafting", crafting_result.error().message));
+  }
+  for (const crafting::CraftingLoadDiagnostic& diagnostic :
+       crafting_result.value().diagnostics) {
+    core::warn("dedicated", diagnostic.describe());
+  }
+  registries.crafting_registry = std::move(crafting_result.value().registry);
   core::info(
       "dedicated",
-      "loaded item registry: items={} hash={}",
+      "loaded item registry: items={} hash={} recipes={}",
       registries.item_registry.item_count(),
-      registries.item_registry_hash);
+      registries.item_registry_hash,
+      registries.crafting_registry.recipes().size());
 
   auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
   if (!entity_definition_text) {

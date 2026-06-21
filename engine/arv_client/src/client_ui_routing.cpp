@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string_view>
 
 namespace arv::client {
 namespace {
@@ -112,6 +113,75 @@ namespace {
   return false;
 }
 
+[[nodiscard]] bool consume_prefix(
+    std::string_view value,
+    std::string_view prefix,
+    std::string_view& suffix) noexcept {
+  if (!value.starts_with(prefix)) {
+    return false;
+  }
+  suffix = value.substr(prefix.size());
+  return true;
+}
+
+[[nodiscard]] std::optional<PlayerMenuTab> player_menu_tab_from_id(
+    std::string_view id) noexcept {
+  if (id == "inventory") {
+    return PlayerMenuTab::Inventory;
+  }
+  if (id == "crafting") {
+    return PlayerMenuTab::Crafting;
+  }
+  if (id == "settings") {
+    return PlayerMenuTab::Settings;
+  }
+  if (id == "exit") {
+    return PlayerMenuTab::ExitGame;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool apply_player_menu_action(
+    ClientRuntime& client,
+    const std::optional<ui::UiAction>& action) {
+  if (!action.has_value()) {
+    return false;
+  }
+  std::string_view suffix;
+  if (consume_prefix(action->action_id, "player_menu.tab:", suffix)) {
+    if (const std::optional<PlayerMenuTab> tab = player_menu_tab_from_id(suffix);
+        tab.has_value()) {
+      client.set_player_menu_tab(tab.value());
+      return true;
+    }
+  }
+  if (consume_prefix(action->action_id, "crafting.category:", suffix)) {
+    client.set_player_menu_tab(PlayerMenuTab::Crafting);
+    client.select_crafting_category(std::string{suffix});
+    return true;
+  }
+  if (consume_prefix(action->action_id, "crafting.recipe:", suffix)) {
+    client.set_player_menu_tab(PlayerMenuTab::Crafting);
+    client.select_crafting_recipe(std::string{suffix});
+    return true;
+  }
+  if (consume_prefix(action->action_id, "crafting.craft:", suffix)) {
+    if (!suffix.empty()) {
+      (void)client.request_craft_recipe(std::string{suffix}, 1U);
+      return true;
+    }
+  }
+  if (action->action_id == "crafting.search.clear") {
+    client.clear_player_menu_search();
+    return true;
+  }
+  if (action->action_id == "crafting.search.focus") {
+    client.set_player_menu_tab(PlayerMenuTab::Crafting);
+    return true;
+  }
+  return false;
+}
+
 } // namespace
 
 GameplayPauseMenuRoutingResult route_gameplay_pause_menu_input(
@@ -165,6 +235,9 @@ bool route_inventory_mouse_input(
     const std::optional<ui::UiNodeID> hit = ui_tree.hit_test(cursor);
     const std::optional<ui::UiAction> action =
         ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Left);
+    if (apply_player_menu_action(client, action)) {
+      return true;
+    }
     if (client.container_open() && shift_modifier_pressed(platform_input)) {
       std::optional<ContainerSlotActionRef> slot;
       if (action.has_value()) {

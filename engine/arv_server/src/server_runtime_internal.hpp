@@ -11,6 +11,7 @@
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/container_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
@@ -388,6 +389,9 @@ struct ServerRuntimeImpl {
   void handle_inventory_action_request(
       net::ConnectionID connection_id,
       const protocol::ServerboundInventoryActionRequest& request);
+  void handle_craft_recipe(
+      net::ConnectionID connection_id,
+      const protocol::ServerboundCraftRecipe& request);
   void handle_open_container_block(
       net::ConnectionID connection_id,
       const protocol::ServerboundOpenContainerBlock& request);
@@ -558,6 +562,16 @@ struct ServerRuntimeImpl {
   void send_world_join_result(const ServerSession& session, const player::PlayerState& player_state);
   void send_world_time(const ServerSession& session);
   void broadcast_world_time(WorldID world_id);
+  void send_recipe_book_snapshot(const ServerSession& session);
+  void send_recipe_unlocks(
+      const ServerSession& session,
+      std::span<const std::string> unlocked_recipe_ids);
+  void send_craft_recipe_result(
+      const ServerSession& session,
+      std::string_view recipe_id,
+      u16 requested_count,
+      u16 crafted_count,
+      protocol::CraftRecipeResult result);
   void send_player_permissions(const ServerSession& session, const player::PlayerState& player_state);
   void send_player_movement_tuning(
       const ServerSession& session,
@@ -585,6 +599,14 @@ struct ServerRuntimeImpl {
   [[nodiscard]] protocol::ClientboundInventoryUpdate make_inventory_update(
       const player::PlayerState& player_state,
       u32 revision) const;
+  void normalize_player_recipe_book(player::PlayerState& player_state) const;
+  [[nodiscard]] std::vector<std::string> unlock_recipes_for_collected_stack(
+      player::PlayerState& player_state,
+      const player::ItemStack& stack) const;
+  void publish_recipe_unlocks_for_collected_stack(
+      const ServerSession& session,
+      player::PlayerState& player_state,
+      const player::ItemStack& stack);
 
   bool apply_saved_player_state(const ServerSession& session, player::PlayerState& player_state);
   void record_player_save_state(const ServerSession& session, const player::PlayerState& player_state);
@@ -617,6 +639,7 @@ struct ServerRuntimeImpl {
   std::vector<net::NetworkEvent> inbound_events_;
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
+  const crafting::CraftingRecipeRegistry* crafting_registry_{};
   const player::ContainerTypeRegistry* container_types_{};
   const player::ContainerUiLayoutRegistry* container_layouts_{};
   const entity::EntityRegistry* entity_registry_{};

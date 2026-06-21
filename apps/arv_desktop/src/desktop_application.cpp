@@ -224,6 +224,7 @@ int DesktopApplication::run(int argc, char** argv) {
           client_tasks,
           assets.block_registry,
           assets.item_registry,
+          assets.crafting_registry,
           assets.container_types,
           assets.container_layouts,
           game_modes,

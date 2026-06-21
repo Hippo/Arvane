@@ -53,6 +53,7 @@ target_link_libraries(arv_web
     arv_client_remote_chunk_stream
     arv_client_world_time
     arv_base_ui
+    arv_crafting
     arv_net
     arv_physics
     arv_platform_input

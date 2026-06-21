@@ -91,9 +91,15 @@ void append_web_gameplay_ui_to_frame(
               .chat_history_scroll_offset = g_app.ui.chat_history_scroll_offset,
               .inventory_title =
                   g_app.ui.language.text("ui.inventory.title", "Inventory"),
+              .player_menu_title =
+                  g_app.ui.language.text("ui.inventory.title", "Inventory"),
               .tab_title =
                   g_app.ui.language.text("ui.tab.players", "Players"),
               .container_layouts = &g_app.block_assets.loaded.container_layouts,
+              .crafting_registry = &g_app.entity_assets.crafting_registry,
+              .item_registry = &g_app.entity_assets.loaded.item_registry,
+              .item_atlas = &g_app.entity_assets.item_atlas,
+              .block_atlas = &g_app.block_assets.loaded.block_atlas,
               .viewport = viewport,
               .cursor_position = cursor_position,
               .hotbar_item_popup_name = g_app.ui.hotbar_item_popup.popup_name,

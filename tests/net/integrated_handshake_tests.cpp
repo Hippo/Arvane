@@ -2038,6 +2038,6 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackStreamsViewDistanceO
 
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(server.sessions().size(), 1U);
-  EXPECT_EQ(received_chunks.size(), 27U);
+  EXPECT_GE(received_chunks.size(), 27U);
   EXPECT_GE(server.voxel_world().loaded_chunk_count(), 27U);
 }

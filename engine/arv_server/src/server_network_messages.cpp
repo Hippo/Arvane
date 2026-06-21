@@ -1580,6 +1580,15 @@ void ServerRuntimeImpl::handle_message(
       handle_inventory_action_request(connection_id, request.value());
       return;
     }
+    case protocol::MessageType::ServerboundCraftRecipe: {
+      auto request = protocol::deserialize_serverbound_craft_recipe(decoded.value().payload);
+      if (!request) {
+        kick_client(connection_id, arv::text::text_or_fallback(language_, "server.disconnect.invalid_protocol_packet", "Invalid protocol packet."));
+        return;
+      }
+      handle_craft_recipe(connection_id, request.value());
+      return;
+    }
     case protocol::MessageType::ServerboundOpenContainerBlock: {
       auto request = protocol::deserialize_serverbound_open_container_block(decoded.value().payload);
       if (!request) {

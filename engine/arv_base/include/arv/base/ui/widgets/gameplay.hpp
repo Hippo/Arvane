@@ -30,6 +30,7 @@ struct CrosshairHudModel {
 struct GameplayUiModel {
   HotbarHudModel hotbar{};
   InventoryUiModel inventory{};
+  PlayerMenuUiModel player_menu{};
   ChatUiModel chat{};
   TabMenuUiModel tab_menu{};
   ScoreboardUiModel scoreboard{};

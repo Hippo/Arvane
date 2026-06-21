@@ -1,10 +1,13 @@
 #pragma once
 
 #include "arv/base/ui/widgets/gameplay.hpp"
+#include "arv/asset/texture_atlas.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/core/types.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/io/config.hpp"
 #include "arv/player/container.hpp"
+#include "arv/player/item.hpp"
 
 #include <chrono>
 #include <optional>
@@ -41,8 +44,13 @@ struct GameplayUiModelInput {
   usize chat_history_scroll_offset{};
   std::span<const ui::PlayerListEntryView> tab_players{};
   std::string_view inventory_title{};
+  std::string_view player_menu_title{};
   std::string_view container_title{};
   const player::ContainerUiLayoutDefinition* container_layout{};
+  const crafting::CraftingRecipeRegistry* crafting_registry{};
+  const player::ItemRegistry* item_registry{};
+  const asset::TextureAtlas* item_atlas{};
+  const asset::BlockTextureAtlas* block_atlas{};
   std::string_view tab_title{};
   Vec2f viewport{};
   Vec2f cursor_position{};
@@ -65,8 +73,13 @@ struct GameplayUiSnapshotModelInput {
   usize chat_history_scroll_offset{};
   std::span<const ui::PlayerListEntryView> tab_players{};
   std::string inventory_title{};
+  std::string player_menu_title{};
   std::string tab_title{};
   const player::ContainerUiLayoutRegistry* container_layouts{};
+  const crafting::CraftingRecipeRegistry* crafting_registry{};
+  const player::ItemRegistry* item_registry{};
+  const asset::TextureAtlas* item_atlas{};
+  const asset::BlockTextureAtlas* block_atlas{};
   Vec2f viewport{};
   Vec2f cursor_position{};
   u32 displayed_fps{};

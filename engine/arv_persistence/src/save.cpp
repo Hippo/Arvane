@@ -811,6 +811,36 @@ Expected<void, PersistenceError> write_json_atomic(
   return inventory;
 }
 
+[[nodiscard]] io::DataValue string_array_to_value(std::span<const std::string> values) {
+  io::DataValue array = io::DataValue::array();
+  for (const std::string& value : values) {
+    if (!value.empty()) {
+      array.push(value);
+    }
+  }
+  return array;
+}
+
+[[nodiscard]] std::vector<std::string> string_array_from_value(
+    const io::DataValue& node) {
+  std::vector<std::string> values;
+  const io::DataValue::Array* array = node.array_if();
+  if (array == nullptr) {
+    return values;
+  }
+  values.reserve(array->size());
+  for (const io::DataValue& entry : *array) {
+    if (entry.kind() != io::DataKind::String) {
+      continue;
+    }
+    std::string value{entry.as_string_or({})};
+    if (!value.empty()) {
+      values.push_back(std::move(value));
+    }
+  }
+  return values;
+}
+
 [[nodiscard]] std::filesystem::path player_file_path(
     const std::filesystem::path& root,
     const PlayerSaveData& player) {
@@ -845,6 +875,7 @@ Expected<void, PersistenceError> write_player_save_file(
     player_json.set("respawn", location_to_value(save.respawn_location.value(), false));
   }
   player_json.set("selected_hotbar_slot", static_cast<u64>(save.selected_hotbar_slot));
+  player_json.set("unlocked_recipes", string_array_to_value(save.unlocked_recipe_ids));
   player_json.set("inventory_version", static_cast<u64>(2U));
   player_json.set("inventory", inventory_to_value(save.inventory, item_registry));
   return write_json_atomic(player_file_path(root, save), player_json, "player save JSON");
@@ -946,6 +977,10 @@ load_entity_region_file(
   }
   player_save.selected_hotbar_slot =
       static_cast<u8>(u64_value_or(player_json, "selected_hotbar_slot", 0U));
+  if (const io::DataValue* unlocked = member(player_json, "unlocked_recipes");
+      unlocked != nullptr) {
+    player_save.unlocked_recipe_ids = string_array_from_value(*unlocked);
+  }
   if (const io::DataValue* inventory = member(player_json, "inventory");
       inventory != nullptr) {
     player_save.inventory = inventory_from_json(

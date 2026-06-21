@@ -1,0 +1,8 @@
+{
+  "id": "arvane:building",
+  "name": "Building",
+  "icon": {
+    "item": "arvane:stone"
+  },
+  "sort_order": 100
+}

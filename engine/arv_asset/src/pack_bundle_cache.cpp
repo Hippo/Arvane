@@ -144,6 +144,8 @@ struct DecodedBundle {
          leaf == "entities.json" ||
          leaf == "vehicles.json" ||
          leaf == "item_animations.json" ||
+         has_prefix(leaf, "crafting_categories/") ||
+         has_prefix(leaf, "recipes/") ||
          has_prefix(leaf, "lang/") ||
          has_prefix(leaf, "particles/");
 }

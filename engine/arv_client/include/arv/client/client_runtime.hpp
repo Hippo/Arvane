@@ -7,6 +7,7 @@
 #include "arv/client/local_identity.hpp"
 #include "arv/client/local_player_controller.hpp"
 #include "arv/client/particles.hpp"
+#include "arv/client/player_menu.hpp"
 #include "arv/client/replicated_entity_mirror.hpp"
 #include "arv/client/vehicle_debug.hpp"
 #include "arv/core/time.hpp"
@@ -17,6 +18,7 @@
 #include "arv/protocol/container_sync.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_time.hpp"
@@ -113,6 +115,14 @@ public:
   [[nodiscard]] TickRate server_tick_rate() const noexcept;
   void configure_vehicles(const entity::VehicleDefinitionRegistry* registry) noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
+  [[nodiscard]] PlayerMenuTab player_menu_tab() const noexcept;
+  [[nodiscard]] const std::string& player_menu_search() const noexcept;
+  [[nodiscard]] const std::string& selected_crafting_category_id() const noexcept;
+  [[nodiscard]] const std::string& selected_crafting_recipe_id() const noexcept;
+  void set_player_menu_tab(PlayerMenuTab tab) noexcept;
+  void clear_player_menu_search() noexcept;
+  void select_crafting_category(std::string category_id);
+  void select_crafting_recipe(std::string recipe_id);
   [[nodiscard]] bool chat_open() const noexcept;
   [[nodiscard]] const std::string& chat_draft() const noexcept;
   [[nodiscard]] usize chat_draft_cursor() const noexcept;
@@ -144,6 +154,10 @@ public:
   [[nodiscard]] const std::optional<player::ItemStack>& inventory_cursor_stack() const noexcept;
   [[nodiscard]] u32 inventory_revision() const noexcept;
   [[nodiscard]] bool has_authoritative_inventory() const noexcept;
+  [[nodiscard]] std::span<const std::string> unlocked_recipe_ids() const noexcept;
+  [[nodiscard]] bool recipe_unlocked(std::string_view recipe_id) const noexcept;
+  [[nodiscard]] std::optional<protocol::ClientboundCraftRecipeResult>
+  take_craft_recipe_result();
   [[nodiscard]] bool container_open() const noexcept;
   [[nodiscard]] const std::string& active_container_type() const noexcept;
   [[nodiscard]] const std::string& active_container_title() const noexcept;
@@ -165,6 +179,7 @@ public:
   net::NetworkResult request_inventory_shift_transfer(usize slot_index);
   net::NetworkResult request_inventory_drop_cursor(bool one_item);
   net::NetworkResult request_inventory_close();
+  net::NetworkResult request_craft_recipe(std::string recipe_id, u16 count = 1);
   net::NetworkResult request_attack_entity(EntityNetID target_entity);
   net::NetworkResult request_ride_entity(EntityNetID rideable_id, std::string seat_id = {});
   net::NetworkResult request_dismount();

@@ -1,0 +1,28 @@
+{
+  "id": "arvane:bucket",
+  "type": "arvane:crafting",
+  "category": "arvane:tools",
+  "icon": {
+    "item": "arvane:bucket"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:iron_ore",
+      "count": 3
+    }
+  ],
+  "result": {
+    "item": "arvane:bucket",
+    "count": 1
+  },
+  "unlock": {
+    "collect_items": [
+      "arvane:iron_ore"
+    ]
+  },
+  "search_terms": [
+    "water",
+    "fluid",
+    "tool"
+  ]
+}

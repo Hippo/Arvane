@@ -2,6 +2,7 @@
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/container_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
@@ -169,6 +170,14 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
       registry.lookup(arv::protocol::MessageType::ClientboundRegistrySnapshot);
   const auto pack_ready =
       registry.lookup(arv::protocol::MessageType::ServerboundPackReady);
+  const auto craft_recipe =
+      registry.lookup(arv::protocol::MessageType::ServerboundCraftRecipe);
+  const auto craft_result =
+      registry.lookup(arv::protocol::MessageType::ClientboundCraftRecipeResult);
+  const auto recipe_book =
+      registry.lookup(arv::protocol::MessageType::ClientboundRecipeBookSnapshot);
+  const auto recipe_unlocks =
+      registry.lookup(arv::protocol::MessageType::ClientboundRecipeUnlocks);
 
   ASSERT_TRUE(ping.has_value());
   ASSERT_TRUE(move.has_value());
@@ -226,6 +235,10 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   ASSERT_TRUE(pack_chunk.has_value());
   ASSERT_TRUE(registry_snapshot.has_value());
   ASSERT_TRUE(pack_ready.has_value());
+  ASSERT_TRUE(craft_recipe.has_value());
+  ASSERT_TRUE(craft_result.has_value());
+  ASSERT_TRUE(recipe_book.has_value());
+  ASSERT_TRUE(recipe_unlocks.has_value());
   EXPECT_EQ(ping->reliability, arv::protocol::ReliabilityClass::UnreliableEvent);
   EXPECT_EQ(move->reliability, arv::protocol::ReliabilityClass::UnreliableLatestWins);
   EXPECT_EQ(correction->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
@@ -303,6 +316,18 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(registry_snapshot->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(pack_ready->direction, arv::protocol::MessageDirection::ClientToServer);
   EXPECT_EQ(pack_ready->lane, arv::protocol::NetworkLane::Session);
+  EXPECT_EQ(craft_recipe->direction, arv::protocol::MessageDirection::ClientToServer);
+  EXPECT_EQ(craft_recipe->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(craft_recipe->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(craft_result->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(craft_result->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(craft_result->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(recipe_book->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(recipe_book->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(recipe_book->lane, arv::protocol::NetworkLane::Gameplay);
+  EXPECT_EQ(recipe_unlocks->direction, arv::protocol::MessageDirection::ServerToClient);
+  EXPECT_EQ(recipe_unlocks->reliability, arv::protocol::ReliabilityClass::ReliableOrdered);
+  EXPECT_EQ(recipe_unlocks->lane, arv::protocol::NetworkLane::Gameplay);
   EXPECT_EQ(ping->lane, arv::protocol::NetworkLane::Debug);
   EXPECT_EQ(move->lane, arv::protocol::NetworkLane::Movement);
   EXPECT_EQ(correction->lane, arv::protocol::NetworkLane::Movement);
@@ -346,7 +371,7 @@ TEST(ProtocolTests, CoreMessageRegistryHasDeclaredReliability) {
   EXPECT_EQ(skin_rules->lane, arv::protocol::NetworkLane::Session);
   EXPECT_EQ(skin_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
   EXPECT_EQ(skin_upload_data->lane, arv::protocol::NetworkLane::ChunkStreaming);
-  EXPECT_EQ(registry.size(), 77U);
+  EXPECT_EQ(registry.size(), 81U);
 }
 
 TEST(ProtocolTests, PackSyncPacketsRoundTrip) {
@@ -410,6 +435,52 @@ TEST(ProtocolTests, PackSyncPacketsRoundTrip) {
   ASSERT_TRUE(decoded_ready) << decoded_ready.error().message;
   EXPECT_EQ(decoded_ready.value().registry_hash, ready.registry_hash);
   ASSERT_EQ(decoded_ready.value().loaded_bundle_hashes.size(), 1U);
+}
+
+TEST(ProtocolTests, CraftingPacketsRoundTripThroughSerialization) {
+  const arv::protocol::ServerboundCraftRecipe request{
+      "arvane:stone_stairs",
+      3U,
+      42U};
+  const auto decoded_request = arv::protocol::deserialize_serverbound_craft_recipe(
+      arv::protocol::serialize_serverbound_craft_recipe(request));
+  ASSERT_TRUE(decoded_request) << decoded_request.error().message;
+  EXPECT_EQ(decoded_request.value().recipe_id, request.recipe_id);
+  EXPECT_EQ(decoded_request.value().count, request.count);
+  EXPECT_EQ(decoded_request.value().client_action_id, request.client_action_id);
+
+  const arv::protocol::ClientboundCraftRecipeResult result{
+      "arvane:stone_stairs",
+      3U,
+      2U,
+      arv::protocol::CraftRecipeResult::InventoryFull};
+  const auto decoded_result = arv::protocol::deserialize_clientbound_craft_recipe_result(
+      arv::protocol::serialize_clientbound_craft_recipe_result(result));
+  ASSERT_TRUE(decoded_result) << decoded_result.error().message;
+  EXPECT_EQ(decoded_result.value().recipe_id, result.recipe_id);
+  EXPECT_EQ(decoded_result.value().requested_count, result.requested_count);
+  EXPECT_EQ(decoded_result.value().crafted_count, result.crafted_count);
+  EXPECT_EQ(decoded_result.value().result, result.result);
+
+  const arv::protocol::ClientboundRecipeBookSnapshot snapshot{
+      {"arvane:stone_stairs", "arvane:wood_pickaxe"}};
+  const auto decoded_snapshot = arv::protocol::deserialize_clientbound_recipe_book_snapshot(
+      arv::protocol::serialize_clientbound_recipe_book_snapshot(snapshot));
+  ASSERT_TRUE(decoded_snapshot) << decoded_snapshot.error().message;
+  EXPECT_EQ(decoded_snapshot.value().unlocked_recipe_ids, snapshot.unlocked_recipe_ids);
+
+  const arv::protocol::ClientboundRecipeUnlocks unlocks{{"arvane:bucket"}};
+  const auto decoded_unlocks = arv::protocol::deserialize_clientbound_recipe_unlocks(
+      arv::protocol::serialize_clientbound_recipe_unlocks(unlocks));
+  ASSERT_TRUE(decoded_unlocks) << decoded_unlocks.error().message;
+  EXPECT_EQ(decoded_unlocks.value().unlocked_recipe_ids, unlocks.unlocked_recipe_ids);
+
+  const arv::protocol::ServerboundCraftRecipe invalid_count{
+      "arvane:stone_stairs",
+      0U,
+      1U};
+  EXPECT_FALSE(arv::protocol::deserialize_serverbound_craft_recipe(
+      arv::protocol::serialize_serverbound_craft_recipe(invalid_count)));
 }
 
 TEST(ProtocolTests, VehiclePacketsRoundTripThroughSerialization) {

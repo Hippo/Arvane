@@ -216,6 +216,17 @@ DesktopLoadedAssetsResult load_desktop_assets(
   }
   loaded.item_registry_hash = persistence::hash_item_registry(loaded.item_registry);
 
+  auto crafting_result =
+      crafting::load_crafting_registry_from_packs(packs, loaded.item_registry);
+  if (!crafting_result) {
+    return asset_failure("crafting", crafting_result.error().message);
+  }
+  for (const crafting::CraftingLoadDiagnostic& diagnostic :
+       crafting_result.value().diagnostics) {
+    core::warn("assets", diagnostic.describe());
+  }
+  loaded.crafting_registry = std::move(crafting_result.value().registry);
+
   loaded.item_animation_library =
       std::move(gameplay_assets.item_animation_library);
 

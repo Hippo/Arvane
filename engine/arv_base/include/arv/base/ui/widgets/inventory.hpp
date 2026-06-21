@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace arv::ui {
 
@@ -41,7 +42,60 @@ struct ContainerUiModel {
   Vec2f cursor_position{};
 };
 
+struct PlayerMenuTabButtonView {
+  std::string id{};
+  std::string label{};
+  bool selected{};
+};
+
+struct CraftingCategoryTabView {
+  std::string id{};
+  std::string label{};
+  UiItemStackView icon{};
+  bool selected{};
+};
+
+struct CraftingIngredientLineView {
+  std::string label{};
+  u16 required{};
+  u32 owned{};
+  bool satisfied{};
+};
+
+struct CraftingRecipeTileView {
+  std::string id{};
+  std::string label{};
+  UiItemStackView icon{};
+  bool craftable{};
+  bool selected{};
+};
+
+struct CraftingUiModel {
+  std::string title{"Crafting"};
+  std::string search{};
+  std::vector<CraftingCategoryTabView> categories{};
+  std::vector<CraftingRecipeTileView> recipes{};
+  std::string selected_recipe_id{};
+  std::string selected_recipe_label{};
+  UiItemStackView selected_recipe_icon{};
+  std::vector<CraftingIngredientLineView> selected_ingredients{};
+  bool selected_recipe_craftable{};
+  bool has_selected_recipe{};
+};
+
+struct PlayerMenuUiModel {
+  bool visible{};
+  std::string title{"Player Menu"};
+  std::string active_tab_id{"inventory"};
+  Vec2f viewport{};
+  Vec2f cursor_position{};
+  std::vector<PlayerMenuTabButtonView> tabs{};
+  InventoryUiModel inventory{};
+  CraftingUiModel crafting{};
+};
+
 void build_inventory_ui(UiTree& tree, InventoryUiModel model);
+void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model);
 void append_container_ui(UiTree& tree, ContainerUiModel model);
 void append_item_tooltip(UiTree& tree, ItemTooltipUiModel model);
 

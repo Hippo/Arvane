@@ -1,0 +1,8 @@
+{
+  "id": "arvane:tools",
+  "name": "Tools",
+  "icon": {
+    "item": "arvane:wood_pickaxe"
+  },
+  "sort_order": 200
+}

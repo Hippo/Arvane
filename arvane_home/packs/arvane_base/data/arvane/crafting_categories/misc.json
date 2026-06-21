@@ -1,0 +1,8 @@
+{
+  "id": "arvane:misc",
+  "name": "Misc",
+  "icon": {
+    "item": "arvane:coal"
+  },
+  "sort_order": 1000
+}

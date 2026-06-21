@@ -95,6 +95,7 @@ add_executable(arv_tests
   protocol/chat_tests.cpp
   protocol/packet_tests.cpp
   player/container_tests.cpp
+  player/crafting_tests.cpp
   player/inventory_tests.cpp
   player/permission_tests.cpp
   player/selection_tests.cpp
@@ -169,6 +170,7 @@ target_link_libraries(arv_tests PRIVATE
   arv_client
   arv_client_session
   arv_command
+  arv_crafting
   arv_core
   arv_crypto
   arv_entity

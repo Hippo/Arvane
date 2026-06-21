@@ -297,6 +297,12 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
     player_state.grounded = false;
     seed_player_inventory(player_state);
   }
+  normalize_player_recipe_book(player_state);
+  for (const std::optional<player::ItemStack>& stack : player_state.inventory.slots()) {
+    if (stack.has_value()) {
+      (void)unlock_recipes_for_collected_stack(player_state, stack.value());
+    }
+  }
   refresh_player_permissions(player_state);
   accepted_player_movement_[session.player_id] = {
       player_state.position,
@@ -646,6 +652,7 @@ void ServerRuntimeImpl::send_world_join_result(
     send_player_permissions(session, player_state);
     send_player_movement_tuning(session, player_state);
     send_movement_hz_if_non_default(session);
+    send_recipe_book_snapshot(session);
   }
   if (send_result && mode_ == ServerMode::Dedicated) {
     core::info(

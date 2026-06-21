@@ -8,6 +8,7 @@
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/container_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/entity_interaction.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_type.hpp"
@@ -46,6 +47,8 @@ public:
 
   net::NetworkResult send_inventory_action(
       protocol::ServerboundInventoryActionRequest request);
+  net::NetworkResult send_craft_recipe(
+      const protocol::ServerboundCraftRecipe& request);
   net::NetworkResult send_open_container_block(
       const protocol::ServerboundOpenContainerBlock& request);
   net::NetworkResult send_container_action(

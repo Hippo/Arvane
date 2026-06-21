@@ -451,6 +451,12 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
       packs / "arvane_base/data/arvane/container_layouts.json",
       "{\"container_layouts\":[]}\n");
   write_text(
+      packs / "arvane_base/data/arvane/crafting_categories/building.json",
+      "{\"id\":\"arvane:building\",\"name\":\"Building\",\"icon\":{\"item\":\"arvane:stone\"},\"sort_order\":100}\n");
+  write_text(
+      packs / "arvane_base/data/arvane/recipes/stone_stairs.json",
+      "{\"id\":\"arvane:stone_stairs\",\"type\":\"arvane:crafting\",\"category\":\"arvane:building\",\"icon\":{\"item\":\"arvane:stone_stairs\"},\"ingredients\":[{\"item\":\"arvane:stone\",\"count\":6}],\"result\":{\"item\":\"arvane:stone_stairs\",\"count\":4},\"unlock\":{\"default\":true},\"search_terms\":[\"stairs\"]}\n");
+  write_text(
       packs / "arvane_base/assets/arvane/textures/block/stone.png",
       "fake-png");
   write_text(
@@ -483,6 +489,12 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
       "data/arvane/container_layouts.json"));
   EXPECT_TRUE(contains_bundle_file(
       first.value().files,
+      "data/arvane/crafting_categories/building.json"));
+  EXPECT_TRUE(contains_bundle_file(
+      first.value().files,
+      "data/arvane/recipes/stone_stairs.json"));
+  EXPECT_TRUE(contains_bundle_file(
+      first.value().files,
       "assets/arvane/textures/block/stone.png"));
   EXPECT_FALSE(contains_bundle_file(first.value().files, "server/spawn_rules.yaml"));
   EXPECT_FALSE(contains_bundle_file(
@@ -491,6 +503,10 @@ TEST(PackBundleTests, BuildsDeterministicClientSafeBundleAndInstallsCache) {
 
   EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
       "assets/arvane/textures/block/stone.png"));
+  EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
+      "data/arvane/crafting_categories/building.json"));
+  EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
+      "data/arvane/recipes/stone_stairs.json"));
   EXPECT_TRUE(arv::asset::is_client_bundle_relative_path_allowed(
       "assets/arvane/fonts/font.ttf"));
   EXPECT_FALSE(arv::asset::is_client_bundle_relative_path_allowed("../escape.txt"));

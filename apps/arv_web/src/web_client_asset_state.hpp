@@ -6,6 +6,7 @@
 #include "arv/client/item_animation.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/client/player_skin_rendering.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/ui/core/ui.hpp"
 
 #include <filesystem>
@@ -24,6 +25,7 @@ struct WebBlockRenderAssets {
 
 struct WebEntityRenderAssets {
   client::ClientEntityRenderAssets loaded{};
+  crafting::CraftingRecipeRegistry crafting_registry{};
   client::ItemAnimationLibrary item_animation_library{};
   asset::TextureAtlas item_atlas{};
   ui::UiImageData crosshair_image{};

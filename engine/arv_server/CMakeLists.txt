@@ -24,6 +24,7 @@ add_library(arv_server STATIC
   src/server_chunk_streaming_runtime.cpp
   src/server_combat.cpp
   src/server_container_runtime.cpp
+  src/server_crafting_runtime.cpp
   src/server_dropped_items.cpp
   src/server_explosion.cpp
   src/server_inventory_runtime.cpp
@@ -40,5 +41,5 @@ add_library(arv_server STATIC
   src/world_registry.cpp
 )
 target_include_directories(arv_server PUBLIC include)
-target_link_libraries(arv_server PUBLIC arv_command arv_core arv_crypto arv_io arv_net arv_physics arv_plugin arv_protocol arv_sched arv_world)
+target_link_libraries(arv_server PUBLIC arv_command arv_core arv_crypto arv_crafting arv_io arv_net arv_physics arv_plugin arv_protocol arv_sched arv_world)
 target_link_libraries(arv_server PRIVATE arv_asset arv_persistence arv_text)

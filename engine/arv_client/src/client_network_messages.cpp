@@ -8,6 +8,7 @@
 #include "arv/protocol/chat.hpp"
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/container_sync.hpp"
+#include "arv/protocol/crafting.hpp"
 #include "arv/protocol/entity_replication.hpp"
 #include "arv/protocol/explosion.hpp"
 #include "arv/protocol/handshake.hpp"
@@ -69,6 +70,7 @@ void apply_world_leave(
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
+  runtime.recipe_book.clear();
   runtime.pack_sync.clear();
   runtime.world_time_update.reset();
   runtime.player_controller.leave_world();
@@ -82,6 +84,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.dropped_items.clear();
   runtime.chunks.clear();
   runtime.inventory.reset();
+  runtime.recipe_book.clear();
   runtime.world_time_update.reset();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
@@ -1028,6 +1031,33 @@ void ClientNetworkRouter::handle_message(
         return;
       }
       runtime.inventory.apply_update(std::move(update.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundRecipeBookSnapshot: {
+      auto snapshot =
+          protocol::deserialize_clientbound_recipe_book_snapshot(decoded.value().payload);
+      if (!snapshot) {
+        return;
+      }
+      runtime.recipe_book.apply_snapshot(std::move(snapshot.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundRecipeUnlocks: {
+      auto unlocks =
+          protocol::deserialize_clientbound_recipe_unlocks(decoded.value().payload);
+      if (!unlocks) {
+        return;
+      }
+      runtime.recipe_book.apply_unlocks(std::move(unlocks.value()));
+      return;
+    }
+    case protocol::MessageType::ClientboundCraftRecipeResult: {
+      auto result =
+          protocol::deserialize_clientbound_craft_recipe_result(decoded.value().payload);
+      if (!result) {
+        return;
+      }
+      runtime.recipe_book.last_craft_result = std::move(result.value());
       return;
     }
     case protocol::MessageType::ClientboundOpenContainer: {

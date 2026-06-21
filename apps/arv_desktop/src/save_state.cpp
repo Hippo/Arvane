@@ -23,6 +23,7 @@ namespace {
   save.respawn_location = player.respawn_location;
   save.selected_hotbar_slot = player.selected_hotbar_slot;
   save.inventory = player.inventory;
+  save.unlocked_recipe_ids = player.unlocked_recipe_ids;
   return save;
 }
 
@@ -101,6 +102,7 @@ std::vector<persistence::PlayerSaveData> capture_player_saves(
     save.respawn_location = player_state->respawn_location;
     save.selected_hotbar_slot = player_state->selected_hotbar_slot;
     save.inventory = player_state->inventory;
+    save.unlocked_recipe_ids = player_state->unlocked_recipe_ids;
     persistence::upsert_player_save(players, std::move(save));
   }
 
@@ -156,6 +158,7 @@ void apply_loaded_player_saves(
     player_state.respawn_location = found->respawn_location;
     player_state.selected_hotbar_slot = found->selected_hotbar_slot;
     player_state.inventory = found->inventory;
+    player_state.unlocked_recipe_ids = found->unlocked_recipe_ids;
   }
 }
 
@@ -179,6 +182,7 @@ std::vector<server::ServerPlayerSaveState> to_server_player_saves(
     save.respawn_location = player.respawn_location;
     save.selected_hotbar_slot = player.selected_hotbar_slot;
     save.inventory = player.inventory;
+    save.unlocked_recipe_ids = player.unlocked_recipe_ids;
     saves.emplace_back(std::move(save));
   }
   return saves;
