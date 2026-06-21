@@ -3,87 +3,110 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
     <title>Arvane Web</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body data-arv-state="boot">
     <main class="web-client" data-arv-state="boot" aria-label="Arvane web client">
       <canvas id="arvane-canvas" tabindex="0"></canvas>
+
       <section class="session-panel" aria-label="Arvane main menu">
         <div class="menu-layout">
-          <header class="menu-intro">
-            <p class="kicker">Arvane Web</p>
-            <h1>Multiplayer</h1>
-            <p id="status-line" class="status" role="status">Loading runtime</p>
+          <header class="menu-header">
+            <h1 id="servers-heading">Arvane</h1>
+            <p id="status-line" class="menu-message" role="status">Starting Arvane...</p>
+            <button id="profile-button" class="profile-button" type="button" aria-haspopup="dialog" aria-controls="profile-dialog">
+              <span id="profile-avatar" class="profile-avatar" aria-hidden="true">W</span>
+              <span id="profile-display-name" class="profile-name">WebPlayer</span>
+            </button>
           </header>
 
-          <div class="menu-workspace">
-            <section class="profile-section" aria-labelledby="profile-heading">
-              <div class="section-heading">
-                <p class="eyebrow">Profile</p>
-                <h2 id="profile-heading">Player</h2>
-              </div>
-              <form id="profile-form" class="profile-form">
-                <label class="menu-field" for="player-name">
-                  <span>Username</span>
-                  <input id="player-name" type="text" maxlength="32" value="WebPlayer" spellcheck="false" autocomplete="nickname">
-                </label>
-                <button id="save-profile-button" class="secondary-button" type="submit">Save Username</button>
-              </form>
-              <div class="skin-block">
-                <div>
-                  <p class="eyebrow">Skin</p>
-                  <p id="skin-summary" class="skin-summary">Default skin</p>
-                  <p id="skin-detail" class="fine-print">Classic model</p>
-                </div>
-                <label class="skin-model-toggle">
-                  <input id="skin-model" type="checkbox">
-                  <span>Slim arms</span>
-                </label>
-                <input id="skin-file" type="file" accept="image/png" hidden>
-                <button id="pick-skin-button" class="secondary-button" type="button">Choose PNG</button>
-              </div>
-            </section>
+          <section class="server-browser" aria-labelledby="servers-heading">
+            <div id="server-list" class="server-list" role="listbox" tabindex="0" aria-label="Saved servers"></div>
 
-            <section class="server-section" aria-labelledby="servers-heading">
-              <div class="section-heading server-heading">
-                <div>
-                  <p class="eyebrow">Servers</p>
-                  <h2 id="servers-heading">Server List</h2>
-                </div>
-                <button id="new-server-button" class="ghost-button" type="button">New</button>
+            <footer class="browser-footer">
+              <div class="actions">
+                <button id="new-server-button" class="secondary-button" type="button">Add Server</button>
+                <button id="edit-server-button" class="ghost-button" type="button">Edit</button>
+                <button id="disconnect-button" class="ghost-button danger-button" type="button">Disconnect</button>
+                <button id="connect-button" class="primary-button" type="button">Join Server</button>
               </div>
-              <div id="server-list" class="server-list" role="listbox" aria-label="Saved servers"></div>
-              <form id="server-form" class="server-form">
-                <label class="menu-field" for="server-name">
-                  <span>Name</span>
-                  <input id="server-name" type="text" value="Local" spellcheck="false" autocomplete="off">
-                </label>
-                <label class="menu-field wide-field" for="server-url">
-                  <span>Address</span>
-                  <input id="server-url" type="text" value="ws://localhost:42070/arvane" spellcheck="false" autocomplete="off" inputmode="url">
-                </label>
-                <div class="server-edit-actions">
-                  <button id="save-server-button" class="secondary-button" type="submit">Save Server</button>
-                  <button id="remove-server-button" class="ghost-button" type="button">Remove</button>
-                </div>
-              </form>
-            </section>
-          </div>
-
-          <footer class="menu-footer">
-            <div>
-              <p class="eyebrow">Connection</p>
-              <p id="selected-server-line" class="selected-server">ws://localhost:42070/arvane</p>
-            </div>
-            <div class="actions">
-              <button id="connect-button" type="button">Connect</button>
-              <button id="disconnect-button" type="button">Disconnect</button>
-            </div>
-          </footer>
+            </footer>
+          </section>
         </div>
       </section>
     </main>
+
+    <dialog id="profile-dialog" class="menu-dialog profile-dialog" aria-labelledby="profile-heading">
+      <form id="profile-form" class="dialog-body" method="dialog">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">Profile</p>
+            <h2 id="profile-heading">Player</h2>
+          </div>
+          <button class="icon-button dialog-close" type="button" aria-label="Close profile">X</button>
+        </header>
+
+        <label class="menu-field" for="player-name">
+          <span>Username</span>
+          <input id="player-name" type="text" maxlength="32" value="WebPlayer" spellcheck="false" autocomplete="nickname">
+        </label>
+
+        <section class="skin-panel" aria-labelledby="skin-heading">
+          <div>
+            <p id="skin-heading" class="field-title">Skin</p>
+            <p id="skin-summary" class="skin-summary">Default skin</p>
+            <p id="skin-detail" class="field-detail">Classic model</p>
+          </div>
+
+          <label class="skin-model-toggle" for="skin-model">
+            <input id="skin-model" type="checkbox">
+            <span>
+              <strong>Slim arms</strong>
+            </span>
+          </label>
+
+          <input id="skin-file" type="file" accept="image/png" hidden>
+          <button id="pick-skin-button" class="secondary-button" type="button">Choose Skin</button>
+        </section>
+
+        <footer class="dialog-actions">
+          <button class="ghost-button dialog-close" type="button">Cancel</button>
+          <button id="save-profile-button" class="primary-button" type="submit">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="server-dialog" class="menu-dialog server-dialog" aria-labelledby="server-dialog-heading">
+      <form id="server-form" class="dialog-body" method="dialog">
+        <header class="dialog-header">
+          <div>
+            <p id="server-dialog-mode" class="eyebrow">Server</p>
+            <h2 id="server-dialog-heading">Add Server</h2>
+          </div>
+          <button class="icon-button dialog-close" type="button" aria-label="Close server editor">X</button>
+        </header>
+
+        <label class="menu-field" for="server-name">
+          <span>Server Name</span>
+          <input id="server-name" type="text" value="Local Game" spellcheck="false" autocomplete="off">
+        </label>
+
+        <label class="menu-field" for="server-url">
+          <span>Server Address</span>
+          <input id="server-url" type="text" value="ws://localhost:42070/arvane" spellcheck="false" autocomplete="off" inputmode="url">
+        </label>
+
+        <footer class="dialog-actions">
+          <button id="remove-server-button" class="ghost-button danger-button" type="button">Remove</button>
+          <span class="dialog-spacer" aria-hidden="true"></span>
+          <button class="ghost-button dialog-close" type="button">Cancel</button>
+          <button id="save-server-button" class="primary-button" type="submit">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
     <script src="loader.js"></script>
   </body>
 </html>

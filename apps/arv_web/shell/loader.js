@@ -10,10 +10,17 @@
   const serverName = document.getElementById('server-name');
   const serverUrl = document.getElementById('server-url');
   const newServerButton = document.getElementById('new-server-button');
+  const editServerButton = document.getElementById('edit-server-button');
   const removeServerButton = document.getElementById('remove-server-button');
-  const selectedServerLine = document.getElementById('selected-server-line');
+  const serverDialog = document.getElementById('server-dialog');
+  const serverDialogHeading = document.getElementById('server-dialog-heading');
+  const serverDialogMode = document.getElementById('server-dialog-mode');
+  const profileButton = document.getElementById('profile-button');
+  const profileDialog = document.getElementById('profile-dialog');
   const profileForm = document.getElementById('profile-form');
   const playerName = document.getElementById('player-name');
+  const profileDisplayName = document.getElementById('profile-display-name');
+  const profileAvatar = document.getElementById('profile-avatar');
   const saveProfileButton = document.getElementById('save-profile-button');
   const skinSummary = document.getElementById('skin-summary');
   const skinDetail = document.getElementById('skin-detail');
@@ -25,7 +32,7 @@
   const importDirectoryPath = '/arvane_home/imports';
   const sessionLogPath = '/arvane_home/logs/web-session.log';
   const defaultServerUrl = serverUrl ? serverUrl.value : 'ws://localhost:42070/arvane';
-  const defaultServers = [{ name: 'Local', address: defaultServerUrl }];
+  const defaultServers = [{ name: 'Local Game', address: defaultServerUrl }];
   const pendingLogLines = [];
   const runtimeCacheKey = String(Date.now());
   let storageMetadataReady = false;
@@ -35,8 +42,15 @@
   let panelMarker = null;
   let servers = defaultServers.slice();
   let selectedServerIndex = 0;
+  let editingServerIndex = -1;
+  let serverFormSnapshot = null;
+  let serverDialogCommitted = false;
+  let statusClearTimer = 0;
+  let lastServerClickIndex = -1;
+  let lastServerClickTime = 0;
   let profileDirty = false;
   let currentSkinHash = '';
+  const serverDoubleClickWindowMs = 420;
 
   if (connectionPanel && panelParent) {
     panelMarker = document.createComment('arvane-session-panel');
@@ -110,18 +124,228 @@
     flushPendingLogs();
   }
 
+  function friendlyStatus(text) {
+    const raw = String(text || '').trim();
+    const lower = raw.toLowerCase();
+    if (!raw) {
+      return '';
+    }
+    if ([
+      'browser storage ready',
+      'ready',
+      'ready (storage mounted)',
+      'storage synced',
+      'focused',
+      'focus lost',
+      'visible',
+      'paused while hidden',
+      'pointer locked',
+      'pointer released',
+      'webgl2 ready',
+      'web block textures and models ready',
+      'web entity models, textures, and animations ready',
+      'remote chunk mesh uploaded'
+    ].includes(lower)) {
+      return '';
+    }
+    if ([
+      'loading runtime',
+      'mounting browser storage',
+      'loading browser storage',
+      'starting arvane web client'
+    ].includes(lower)) {
+      return 'Starting Arvane...';
+    }
+    if (lower === 'ready (storage unavailable)' || lower.includes('idbfs')) {
+      return "Couldn't prepare your browser save data. Refresh and try again.";
+    }
+    if (lower === 'runtime is not ready yet' ||
+        lower === 'browser storage is not ready') {
+      return 'Arvane is still starting. Try again in a moment.';
+    }
+    if (lower === 'enter a websocket url' || lower === 'missing websocket url') {
+      return 'Enter a server address.';
+    }
+    if (lower === 'server saved') {
+      return 'Server saved.';
+    }
+    if (lower === 'server removed') {
+      return 'Server removed.';
+    }
+    if (lower === 'failed to load runtime script' ||
+        lower.startsWith('runtime aborted') ||
+        lower === 'browser runtime error') {
+      return "Couldn't start Arvane. Refresh and try again.";
+    }
+    if (lower === 'connecting websocket' ||
+        lower === 'transport connected' ||
+        lower === 'protocol handshake' ||
+        lower === 'registry sync') {
+      return 'Joining server...';
+    }
+    if (lower === 'loading world') {
+      return 'Loading world...';
+    }
+    if (lower === 'in game') {
+      return 'Entering world...';
+    }
+    if (lower === 'disconnecting') {
+      return 'Leaving server...';
+    }
+    if (lower === 'disconnected') {
+      return 'Disconnected.';
+    }
+    if (lower.startsWith('disconnected:')) {
+      return 'Disconnected. You can choose another server.';
+    }
+    if (lower.startsWith('websocket connect failed')) {
+      return "Couldn't join that server. Check the address and try again.";
+    }
+    if (lower.startsWith('server registry verified')) {
+      return 'Preparing world...';
+    }
+    if (lower.endsWith('ready')) {
+      return '';
+    }
+    if (lower.startsWith('storage') && lower.includes('failed')) {
+      return "Couldn't save changes. Try again.";
+    }
+    if (lower.startsWith('server list save failed')) {
+      return "Couldn't save that server. Try again.";
+    }
+    if (lower.startsWith('profile saved')) {
+      return 'Profile saved.';
+    }
+    if (lower.startsWith('profile load failed')) {
+      return "Couldn't load your profile.";
+    }
+    if (lower.startsWith('profile save failed')) {
+      return "Couldn't save your profile.";
+    }
+    if (lower.startsWith('skin saved')) {
+      return 'Skin saved.';
+    }
+    if (lower.startsWith('skin model saved')) {
+      return 'Skin model saved.';
+    }
+    if (lower.startsWith('skin import failed')) {
+      return "Couldn't import that skin. Choose a PNG file and try again.";
+    }
+    if (lower.includes('websocket')) {
+      return lower.includes('failed')
+        ? "Couldn't join that server. Check the address and try again."
+        : 'Joining server...';
+    }
+    if (lower.includes('storage')) {
+      return lower.includes('failed') || lower.includes('unavailable')
+        ? "Couldn't save changes. Try again."
+        : 'Ready';
+    }
+    return raw;
+  }
+
+  function statusTone(raw, displayText) {
+    const lower = `${raw} ${displayText}`.toLowerCase();
+    return lower.includes('failed') ||
+      lower.includes("couldn't") ||
+      lower.includes('unavailable') ||
+      lower.includes('aborted') ||
+      lower.includes('error') ? 'error' : 'neutral';
+  }
+
+  function statusIsEphemeral(raw) {
+    const lower = String(raw || '').toLowerCase();
+    return lower === 'server saved' ||
+      lower === 'server removed' ||
+      lower.startsWith('profile saved') ||
+      lower.startsWith('skin saved') ||
+      lower.startsWith('skin model saved');
+  }
+
   function setStatus(text) {
-    if (String(text || '').trim() === '') {
+    const raw = String(text || '').trim();
+    if (!raw) {
       return;
     }
+    const displayText = friendlyStatus(raw);
     if (statusLine) {
-      statusLine.textContent = text;
+      if (statusClearTimer) {
+        window.clearTimeout(statusClearTimer);
+        statusClearTimer = 0;
+      }
+      if (displayText) {
+        statusLine.textContent = displayText;
+        statusLine.hidden = false;
+        statusLine.dataset.tone = statusTone(raw, displayText);
+        if (statusIsEphemeral(raw)) {
+          statusClearTimer = window.setTimeout(function () {
+            statusLine.textContent = '';
+            statusLine.hidden = true;
+            statusLine.dataset.tone = 'neutral';
+            statusClearTimer = 0;
+          }, 2800);
+        }
+      } else {
+        statusLine.textContent = '';
+        statusLine.hidden = true;
+        statusLine.dataset.tone = 'neutral';
+      }
     }
-    appendWebLog(text);
-    console.log('[arv_web]', text);
+    appendWebLog(raw);
+    console.log('[arv_web]', raw);
   }
 
   window.arvWebSetStatus = setStatus;
+
+  function isLocalServer(address) {
+    try {
+      const parsed = new URL(address);
+      return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    } catch (error) {
+      return String(address || '').includes('localhost') ||
+        String(address || '').includes('127.0.0.1');
+    }
+  }
+
+  function deriveServerName(address) {
+    try {
+      const parsed = new URL(address);
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+        return 'Local Game';
+      }
+      return parsed.hostname || 'Server';
+    } catch (error) {
+      const compact = String(address || '').replace(/^wss?:\/\//, '').split('/')[0];
+      return compact || 'Server';
+    }
+  }
+
+  function displayServerName(server) {
+    if (!server) {
+      return 'No server selected';
+    }
+    const name = String(server.name || '').trim();
+    if ((!name || name === 'Local') && isLocalServer(server.address)) {
+      return 'Local Game';
+    }
+    return name || deriveServerName(server.address);
+  }
+
+  function friendlyServerDetail(address) {
+    if (!address) {
+      return 'Add a server to play.';
+    }
+    if (isLocalServer(address)) {
+      return 'Local server';
+    }
+    try {
+      const parsed = new URL(address);
+      const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+      return `${parsed.host || parsed.hostname}${path}`;
+    } catch (error) {
+      return String(address).replace(/^wss?:\/\//, '') || 'Server address saved';
+    }
+  }
 
   function normalizeServer(entry) {
     const name = String(entry && entry.name ? entry.name : '').trim();
@@ -135,27 +359,27 @@
     };
   }
 
-  function deriveServerName(address) {
-    try {
-      const parsed = new URL(address);
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        return 'Local';
-      }
-      return parsed.hostname || 'Server';
-    } catch (error) {
-      const compact = String(address || '').replace(/^wss?:\/\//, '').split('/')[0];
-      return compact || 'Server';
+  function activeServer() {
+    if (selectedServerIndex >= 0 && selectedServerIndex < servers.length) {
+      return servers[selectedServerIndex];
     }
+    const address = serverUrl ? serverUrl.value.trim() : defaultServerUrl;
+    if (!address) {
+      return null;
+    }
+    return {
+      name: deriveServerName(address),
+      address
+    };
   }
 
   function activeServerAddress() {
-    return serverUrl ? serverUrl.value.trim() : defaultServerUrl;
+    const selected = activeServer();
+    return selected ? selected.address : '';
   }
 
   function updateSelectedServerLine() {
-    if (selectedServerLine) {
-      selectedServerLine.textContent = activeServerAddress() || 'No server selected';
-    }
+    updateControlState();
   }
 
   function setSelectedServer(index) {
@@ -185,39 +409,67 @@
       empty.className = 'empty-server-list';
       empty.textContent = 'No saved servers yet.';
       serverList.appendChild(empty);
-      if (removeServerButton) {
-        removeServerButton.disabled = true;
+      serverList.removeAttribute('aria-activedescendant');
+      if (editServerButton) {
+        editServerButton.disabled = true;
       }
       return;
     }
 
     servers.forEach((server, index) => {
       const entry = document.createElement('button');
+      const entryId = `server-option-${index}`;
+      entry.id = entryId;
       entry.type = 'button';
       entry.className = 'server-entry';
       entry.setAttribute('role', 'option');
       entry.setAttribute('aria-selected', index === selectedServerIndex ? 'true' : 'false');
+      entry.setAttribute(
+        'aria-label',
+        `${displayServerName(server)}, ${friendlyServerDetail(server.address)}`);
 
-      const copy = document.createElement('div');
+      const copy = document.createElement('span');
+      copy.className = 'server-copy';
       const title = document.createElement('strong');
-      title.textContent = server.name;
+      title.textContent = displayServerName(server);
       const address = document.createElement('span');
-      address.textContent = server.address;
+      address.textContent = friendlyServerDetail(server.address);
       copy.append(title, address);
 
-      const pill = document.createElement('span');
-      pill.className = 'server-pill';
-      pill.textContent = index === selectedServerIndex ? 'Selected' : 'Saved';
-
-      entry.append(copy, pill);
+      entry.append(copy);
       entry.addEventListener('click', function () {
+        const now = window.performance && typeof window.performance.now === 'function'
+          ? window.performance.now()
+          : Date.now();
+        const repeatedClick = lastServerClickIndex === index &&
+          now - lastServerClickTime <= serverDoubleClickWindowMs;
         setSelectedServer(index);
+        lastServerClickIndex = index;
+        lastServerClickTime = now;
+        if (repeatedClick) {
+          lastServerClickIndex = -1;
+          lastServerClickTime = 0;
+          joinActiveServer();
+        }
+      });
+      entry.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          setSelectedServer(index);
+          joinActiveServer();
+        }
       });
       serverList.appendChild(entry);
     });
 
-    if (removeServerButton) {
-      removeServerButton.disabled = selectedServerIndex < 0;
+    if (selectedServerIndex >= 0 && selectedServerIndex < servers.length) {
+      serverList.setAttribute('aria-activedescendant', `server-option-${selectedServerIndex}`);
+    } else {
+      serverList.removeAttribute('aria-activedescendant');
+    }
+    if (editServerButton) {
+      editServerButton.disabled = selectedServerIndex < 0;
     }
   }
 
@@ -247,12 +499,15 @@
       loadedServers = defaultServers.slice();
     }
     servers = loadedServers;
-    const configuredUrl = activeServerAddress();
+    const configuredUrl = serverUrl ? serverUrl.value.trim() : '';
     const configuredIndex = servers.findIndex((server) => server.address === configuredUrl);
     if (configuredIndex >= 0) {
       setSelectedServer(configuredIndex);
     } else {
-      selectedServerIndex = -1;
+      selectedServerIndex = configuredUrl ? -1 : (servers.length > 0 ? 0 : -1);
+      if (selectedServerIndex >= 0 && serverUrl) {
+        serverUrl.value = servers[selectedServerIndex].address;
+      }
       renderServerList();
       updateSelectedServerLine();
     }
@@ -273,6 +528,59 @@
     }
   }
 
+  function openDialog(dialog, focusTarget) {
+    if (!dialog || typeof dialog.showModal !== 'function') {
+      return;
+    }
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+    window.setTimeout(function () {
+      if (focusTarget && typeof focusTarget.focus === 'function') {
+        focusTarget.focus();
+      }
+    }, 0);
+  }
+
+  function closeDialog(dialog) {
+    if (dialog && dialog.open) {
+      dialog.close();
+    }
+  }
+
+  function closeAllDialogs() {
+    closeDialog(profileDialog);
+    closeDialog(serverDialog);
+  }
+
+  function openServerEditor(index) {
+    serverFormSnapshot = {
+      name: serverName ? serverName.value : '',
+      address: serverUrl ? serverUrl.value : ''
+    };
+    serverDialogCommitted = false;
+    const hasServer = Number.isInteger(index) && index >= 0 && index < servers.length;
+    editingServerIndex = hasServer ? index : -1;
+    const server = hasServer ? servers[index] : null;
+    if (serverDialogHeading) {
+      serverDialogHeading.textContent = hasServer ? 'Edit Server' : 'Add Server';
+    }
+    if (serverDialogMode) {
+      serverDialogMode.textContent = hasServer ? 'Saved Server' : 'New Server';
+    }
+    if (serverName) {
+      serverName.value = server ? displayServerName(server) : '';
+    }
+    if (serverUrl) {
+      serverUrl.value = server ? server.address : '';
+    }
+    if (removeServerButton) {
+      removeServerButton.hidden = !hasServer;
+      removeServerButton.disabled = !hasServer;
+    }
+    openDialog(serverDialog, serverName);
+  }
+
   function saveServerFromForm() {
     if (!serverUrl) {
       return false;
@@ -289,31 +597,39 @@
       address
     };
 
-    const existingIndex = servers.findIndex((server) => server.address === address);
-    if (selectedServerIndex >= 0 && selectedServerIndex < servers.length) {
-      servers[selectedServerIndex] = entry;
+    let targetIndex = editingServerIndex;
+    const existingIndex = servers.findIndex((server, index) =>
+      server.address === address && index !== editingServerIndex);
+    if (targetIndex >= 0 && targetIndex < servers.length) {
+      servers[targetIndex] = entry;
     } else if (existingIndex >= 0) {
       servers[existingIndex] = entry;
-      selectedServerIndex = existingIndex;
+      targetIndex = existingIndex;
     } else {
       servers.push(entry);
-      selectedServerIndex = servers.length - 1;
+      targetIndex = servers.length - 1;
     }
 
+    selectedServerIndex = targetIndex;
+    editingServerIndex = -1;
     saveServerList();
     saveClientSettings(address);
     syncBrowserStorage('server list');
     setSelectedServer(selectedServerIndex);
+    serverDialogCommitted = true;
+    closeDialog(serverDialog);
     setStatus('Server saved');
     return true;
   }
 
   function removeSelectedServer() {
-    if (selectedServerIndex < 0 || selectedServerIndex >= servers.length) {
+    const targetIndex = editingServerIndex >= 0 ? editingServerIndex : selectedServerIndex;
+    if (targetIndex < 0 || targetIndex >= servers.length) {
       return;
     }
-    servers.splice(selectedServerIndex, 1);
-    selectedServerIndex = servers.length === 0 ? -1 : Math.min(selectedServerIndex, servers.length - 1);
+    servers.splice(targetIndex, 1);
+    selectedServerIndex = servers.length === 0 ? -1 : Math.min(targetIndex, servers.length - 1);
+    editingServerIndex = -1;
     saveServerList();
     syncBrowserStorage('server removed');
     if (selectedServerIndex >= 0) {
@@ -322,9 +638,14 @@
       if (serverName) {
         serverName.value = '';
       }
+      if (serverUrl) {
+        serverUrl.value = '';
+      }
       renderServerList();
       updateSelectedServerLine();
     }
+    serverDialogCommitted = true;
+    closeDialog(serverDialog);
     setStatus('Server removed');
   }
 
@@ -401,11 +722,17 @@
   function updateControlState() {
     const storageReady = runtimeStorageReady();
     const busy = shellState === 'boot' || shellState === 'connecting';
+    const hasServer = Boolean(activeServerAddress());
     if (connectButton) {
-      connectButton.disabled = !storageReady || busy;
+      connectButton.disabled = !storageReady || busy || !hasServer;
+      connectButton.textContent = shellState === 'connecting' ? 'Joining...' : 'Join Server';
     }
     if (disconnectButton) {
-      disconnectButton.disabled = !runtimeReady || shellState === 'boot';
+      disconnectButton.hidden = shellState !== 'connecting';
+      disconnectButton.disabled = !runtimeReady || shellState !== 'connecting';
+    }
+    if (editServerButton) {
+      editServerButton.disabled = selectedServerIndex < 0 || selectedServerIndex >= servers.length;
     }
     if (saveProfileButton) {
       saveProfileButton.disabled = !storageReady;
@@ -418,6 +745,21 @@
   function refreshProfileFromRuntime() {
     if (runtimeStorageReady()) {
       Module.ccall('arv_web_refresh_profile', null, [], []);
+    }
+  }
+
+  function profileInitial(name) {
+    const trimmed = String(name || '').trim();
+    return trimmed ? trimmed.charAt(0).toUpperCase() : 'P';
+  }
+
+  function updateProfileChrome(name) {
+    const displayName = String(name || '').trim() || 'WebPlayer';
+    if (profileDisplayName) {
+      profileDisplayName.textContent = displayName;
+    }
+    if (profileAvatar) {
+      profileAvatar.textContent = profileInitial(displayName);
     }
   }
 
@@ -439,18 +781,12 @@
       [name]) !== 0;
     if (saved) {
       profileDirty = false;
+      updateProfileChrome(name);
       syncBrowserStorage('profile');
     } else if (!quiet) {
       setStatus('Profile save failed');
     }
     return saved;
-  }
-
-  function shortSkinHash(hash) {
-    if (!hash) {
-      return '';
-    }
-    return `${hash.slice(0, 8)}...${hash.slice(-6)}`;
   }
 
   window.arvWebApplyProfileState = function (state) {
@@ -459,6 +795,7 @@
     if (playerName && !profileDirty) {
       playerName.value = displayName;
     }
+    updateProfileChrome(displayName);
     if (skinModel && currentSkinHash) {
       skinModel.checked = Boolean(state.slimModel);
     }
@@ -468,9 +805,9 @@
     if (skinDetail) {
       const model = skinModel && skinModel.checked ? 'Slim model' : 'Classic model';
       if (currentSkinHash) {
-        skinDetail.textContent = `${state.skinWidth}x${state.skinHeight} PNG, ${model}, ${shortSkinHash(currentSkinHash)}`;
+        skinDetail.textContent = `${state.skinWidth} x ${state.skinHeight} PNG, ${model}`;
       } else {
-        skinDetail.textContent = `${model}; choose a PNG to replace it.`;
+        skinDetail.textContent = model;
       }
     }
   };
@@ -486,6 +823,9 @@
       shellRoot.dataset.arvState = normalized;
     }
     const showPanel = normalized !== 'game';
+    if (!showPanel) {
+      closeAllDialogs();
+    }
     if (connectionPanel) {
       connectionPanel.hidden = !showPanel;
       connectionPanel.inert = !showPanel;
@@ -594,7 +934,8 @@
       setStatus(text);
     },
     printErr(text) {
-      setStatus(text);
+      appendWebLog(text);
+      setStatus('Browser runtime error');
       console.error(text);
     },
     setStatus,
@@ -613,16 +954,80 @@
     document.body.appendChild(script);
   }
 
+  function joinActiveServer() {
+    const url = activeServerAddress();
+    if (!url) {
+      setStatus('Enter a WebSocket URL');
+      openServerEditor(-1);
+      return;
+    }
+    if (!runtimeStorageReady()) {
+      setStatus('Runtime is not ready yet');
+      return;
+    }
+    if (!saveProfileName(true)) {
+      return;
+    }
+    saveClientSettings(url);
+    syncBrowserStorage('connect settings');
+    setStatus('connecting WebSocket');
+    setShellState('connecting');
+    Module.ccall('arv_web_connect', null, ['string'], [url]);
+  }
+
+  document.querySelectorAll('.dialog-close').forEach(function (button) {
+    button.addEventListener('click', function () {
+      closeDialog(button.closest('dialog'));
+    });
+  });
+
+  [profileDialog, serverDialog].forEach(function (dialog) {
+    if (!dialog) {
+      return;
+    }
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog) {
+        closeDialog(dialog);
+      }
+    });
+  });
+
+  if (serverDialog) {
+    serverDialog.addEventListener('close', function () {
+      if (!serverDialogCommitted && serverFormSnapshot) {
+        if (serverName) {
+          serverName.value = serverFormSnapshot.name;
+        }
+        if (serverUrl) {
+          serverUrl.value = serverFormSnapshot.address;
+        }
+        updateSelectedServerLine();
+      }
+      serverFormSnapshot = null;
+      serverDialogCommitted = false;
+      editingServerIndex = -1;
+    });
+  }
+
+  if (profileButton) {
+    profileButton.addEventListener('click', function () {
+      openDialog(profileDialog, playerName);
+    });
+  }
+
   if (profileForm) {
     profileForm.addEventListener('submit', function (event) {
       event.preventDefault();
-      saveProfileName(false);
+      if (saveProfileName(false)) {
+        closeDialog(profileDialog);
+      }
     });
   }
 
   if (playerName) {
     playerName.addEventListener('input', function () {
       profileDirty = true;
+      updateProfileChrome(playerName.value);
     });
   }
 
@@ -634,9 +1039,9 @@
       }
       if (!currentSkinHash) {
         if (skinDetail) {
-          skinDetail.textContent = `${skinModel.checked ? 'Slim model' : 'Classic model'}; choose a PNG to replace it.`;
+          skinDetail.textContent = skinModel.checked ? 'Slim model' : 'Classic model';
         }
-        setStatus('Skin model will apply to the next imported skin');
+        setStatus('Skin model saved for default skin');
         return;
       }
       const saved = Module.ccall(
@@ -691,16 +1096,13 @@
 
   if (newServerButton) {
     newServerButton.addEventListener('click', function () {
-      selectedServerIndex = -1;
-      if (serverName) {
-        serverName.value = '';
-        serverName.focus();
-      }
-      if (serverUrl) {
-        serverUrl.value = '';
-      }
-      renderServerList();
-      updateSelectedServerLine();
+      openServerEditor(-1);
+    });
+  }
+
+  if (editServerButton) {
+    editServerButton.addEventListener('click', function () {
+      openServerEditor(selectedServerIndex);
     });
   }
 
@@ -715,37 +1117,33 @@
     removeServerButton.addEventListener('click', removeSelectedServer);
   }
 
-  if (serverUrl) {
-    serverUrl.addEventListener('input', function () {
-      const matchingIndex = servers.findIndex((server) => server.address === serverUrl.value.trim());
-      selectedServerIndex = matchingIndex;
-      if (matchingIndex >= 0 && serverName) {
-        serverName.value = servers[matchingIndex].name;
+  if (serverList) {
+    serverList.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        joinActiveServer();
+        return;
       }
-      renderServerList();
-      updateSelectedServerLine();
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+        return;
+      }
+      event.preventDefault();
+      if (servers.length === 0) {
+        return;
+      }
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      const current = selectedServerIndex >= 0 ? selectedServerIndex : 0;
+      const next = (current + direction + servers.length) % servers.length;
+      setSelectedServer(next);
+      const activeOption = document.getElementById(`server-option-${next}`);
+      if (activeOption) {
+        activeOption.scrollIntoView({ block: 'nearest' });
+      }
     });
   }
 
   if (connectButton) {
-    connectButton.addEventListener('click', function () {
-      const url = activeServerAddress();
-      if (!url) {
-        setStatus('Enter a WebSocket URL');
-        return;
-      }
-      if (!runtimeStorageReady()) {
-        setStatus('Runtime is not ready yet');
-        return;
-      }
-      if (!saveProfileName(true)) {
-        return;
-      }
-      saveClientSettings(url);
-      syncBrowserStorage('connect settings');
-      setShellState('connecting');
-      Module.ccall('arv_web_connect', null, ['string'], [url]);
-    });
+    connectButton.addEventListener('click', joinActiveServer);
   }
 
   if (disconnectButton) {
@@ -759,10 +1157,15 @@
   }
 
   window.addEventListener('error', function (event) {
-    setStatus(event.message || 'Browser runtime error');
+    appendWebLog(event.message || 'browser runtime error');
+    if (event.error) {
+      console.error('[arv_web] browser error', event.error);
+    }
+    setStatus('Browser runtime error');
   });
 
   renderServerList();
+  updateProfileChrome(playerName ? playerName.value : 'WebPlayer');
   updateSelectedServerLine();
   updateControlState();
   setStatus('Loading runtime');
