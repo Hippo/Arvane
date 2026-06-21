@@ -1,4 +1,5 @@
 #include "arv/protocol/chunk_streaming.hpp"
+#include "arv/protocol/message_envelope.hpp"
 #include "arv/server/chunk_streamer.hpp"
 
 #include <gtest/gtest.h>
@@ -265,6 +266,50 @@ TEST(ServerChunkStreamerTests, PendingChunkIsRetriedUntilSendConfirmed) {
 
   streamer.tick_streaming_budget(world, messages);
   EXPECT_TRUE(messages.empty());
+}
+
+TEST(ServerChunkStreamerTests, FluidChunkPayloadsStayUnderReliableFrameBudget) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  const arv::voxel::FluidDefinition water =
+      arv::voxel::make_water_fluid_definition();
+  ASSERT_TRUE(world.set_fluid(
+      {{8, 4, 8}},
+      arv::voxel::make_fluid_source(water),
+      water));
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 0,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 8,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, interest);
+  streamer.tick_streaming_budget(world, messages);
+
+  ASSERT_EQ(messages.size(), 1U);
+  EXPECT_EQ(
+      messages.front().message_type,
+      arv::protocol::MessageType::ClientboundChunkSectionData);
+  EXPECT_LT(
+      messages.front().payload.size() + arv::protocol::MessageEnvelopeHeaderSize,
+      1024U);
+  const auto data =
+      arv::protocol::deserialize_clientbound_chunk_section_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_TRUE(data.value().has_fluids);
+  EXPECT_TRUE(data.value().fluids[arv::voxel::local_index({{8, 4, 8}})].source());
 }
 
 TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchronousSend) {

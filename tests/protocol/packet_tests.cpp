@@ -39,7 +39,7 @@ namespace {
 } // namespace
 
 TEST(ProtocolTests, PacketEnvelopeRoundTripsPayload) {
-  EXPECT_EQ(arv::protocol::CurrentProtocolVersion, 2U);
+  EXPECT_EQ(arv::protocol::CurrentProtocolVersion, 3U);
 
   arv::protocol::MessageWriter payload_writer;
   payload_writer.write_string("hello");
@@ -854,6 +854,33 @@ TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
       decoded.value().lights[arv::voxel::local_index({{1, 2, 3}})],
       arv::voxel::pack_light(1, 2, 3, 4));
   EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{1, 2, 3}})].source());
+}
+
+TEST(ProtocolTests, ChunkSectionDataUsesCompactRunsForSparseFluidSections) {
+  arv::protocol::ClientboundChunkSectionData data;
+  data.world_id = arv::WorldID{5};
+  data.coord = {{1, 0, 3}};
+  data.chunk_version = 12;
+  data.chunk_content_version = 9;
+  data.chunk_light_version = 14;
+  data.has_lighting = true;
+  data.lighting_valid = true;
+  data.has_fluids = true;
+  data.blocks.fill(arv::voxel::AirBlockVariantID);
+  data.lights.fill(arv::voxel::NoLight);
+  data.fluids.fill(arv::voxel::empty_fluid_cell());
+  data.fluids[arv::voxel::local_index({{8, 4, 8}})] =
+      arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
+
+  const std::vector<arv::u8> bytes =
+      arv::protocol::serialize_clientbound_chunk_section_data(data);
+  EXPECT_LT(bytes.size() + arv::protocol::MessageEnvelopeHeaderSize, 1024U);
+
+  const auto decoded = arv::protocol::deserialize_clientbound_chunk_section_data(bytes);
+  ASSERT_TRUE(decoded);
+  EXPECT_TRUE(decoded.value().has_fluids);
+  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{8, 4, 8}})].source());
+  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{8, 4, 9}})].empty());
 }
 
 TEST(ProtocolTests, ChunkSectionUnloadRoundTripsThroughSerialization) {

@@ -174,7 +174,7 @@ The protocol version is separate from:
 
 The client and server must negotiate protocol compatibility during handshake.
 
-The current protocol version is `2`.
+The current protocol version is `3`.
 
 A server may reject a client when:
 
@@ -631,10 +631,18 @@ ClientboundChunkData
     u64 chunk_light_version;    // serialized section light-buffer version
     bool has_lighting;
     bool lighting_valid;
-    BlockStateID blocks[4096];
-    LightWord lighting[4096] if has_lighting;
+    bool has_fluids;
+    EncodedArray<BlockStateID, 4096> blocks;
+    EncodedArray<LightWord, 4096> lighting if has_lighting;
+    EncodedArray<FluidCell, 4096> fluids if has_fluids;
 }
 ```
+
+Chunk section arrays are encoded as either dense values or run-length values.
+The sender chooses the smaller form independently for blocks, lighting, and
+fluids. This keeps sparse fluid sections and uniform air/light sections small
+enough for the reliable chunk-streaming lane instead of expanding one fluid cell
+into a full dense fluid buffer.
 
 `chunk_light_version` describes the section's own light buffer. It does not advance for dependency-only neighbor `LightMesh` invalidations; those are derived by the receiver when changed boundary light data arrives.
 
