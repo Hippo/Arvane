@@ -123,6 +123,21 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   hash = ui_cache_hash_append_u64(
       hash,
       static_cast<u64>(session.client->player_menu_tab()));
+  hash = ui_cache_hash_append_u64(
+      hash,
+      static_cast<u64>(session.client->player_menu_settings_section()));
+  hash = ui_cache_hash_append_f32(hash, session.client->player_menu_settings_scroll_y());
+  hash = ui_cache_hash_append_bool(
+      hash,
+      session.client->player_menu_key_bind_capture().has_value());
+  if (session.client->player_menu_key_bind_capture().has_value()) {
+    hash = ui_cache_hash_append_string(
+        hash,
+        session.client->player_menu_key_bind_capture()->action_name);
+    hash = ui_cache_hash_append_u64(
+        hash,
+        session.client->player_menu_key_bind_capture()->slot);
+  }
   hash = ui_cache_hash_append_string(hash, session.client->player_menu_search());
   hash = ui_cache_hash_append_u64(hash, session.client->player_menu_search_cursor());
   hash = ui_cache_hash_append_u64(hash, session.client->player_menu_search_selection_start());
@@ -656,6 +671,8 @@ void DesktopFrameLoop::build_gameplay_ui(
     FunctionRef<void()> append_active_screens) {
   const f32 item_popup_alpha =
       client::hotbar_item_popup_alpha(hotbar_item_popup_, now);
+  const std::vector<ui::KeyBindEntryView> key_bind_entries =
+      menu_state_.key_bind_entries();
   (void)client::build_gameplay_ui_tree(
       {
           .tree = &ui_tree_,
@@ -686,6 +703,11 @@ void DesktopFrameLoop::build_gameplay_ui(
               .item_registry = &assets_.item_registry,
               .item_atlas = &assets_.item_atlas,
               .block_atlas = &assets_.block_atlas,
+              .render_settings = menu_state_.render_settings(),
+              .controls_settings = menu_state_.controls_settings(),
+              .interface_settings = menu_state_.interface_settings(),
+              .key_bind_entries = key_bind_entries,
+              .show_quit = true,
               .viewport = ui_metrics_.logical_size,
               .cursor_position = {
                   platform_input.cursor_x,

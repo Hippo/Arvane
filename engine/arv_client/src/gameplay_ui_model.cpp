@@ -80,6 +80,22 @@ namespace {
   return "inventory";
 }
 
+[[nodiscard]] std::string settings_section_id(PlayerMenuSettingsSection section) {
+  switch (section) {
+    case PlayerMenuSettingsSection::Overview:
+      return "overview";
+    case PlayerMenuSettingsSection::Render:
+      return "render";
+    case PlayerMenuSettingsSection::KeyBinds:
+      return "key_binds";
+    case PlayerMenuSettingsSection::Controls:
+      return "controls";
+    case PlayerMenuSettingsSection::Interface:
+      return "interface";
+  }
+  return "overview";
+}
+
 [[nodiscard]] std::vector<ui::PlayerMenuTabButtonView> player_menu_tabs(
     PlayerMenuTab active) {
   return {
@@ -401,6 +417,22 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
       input.item_registry,
       input.item_atlas,
       input.block_atlas);
+  player_menu.settings.active_section_id =
+      settings_section_id(input.client.player_menu_settings_section());
+  player_menu.settings.scroll_y = input.client.player_menu_settings_scroll_y();
+  player_menu.settings.render = input.render_settings;
+  player_menu.settings.controls = input.controls_settings;
+  player_menu.settings.interface = input.interface_settings;
+  player_menu.settings.key_binds.assign(
+      input.key_bind_entries.begin(),
+      input.key_bind_entries.end());
+  if (const std::optional<PlayerMenuKeyBindCapture>& capture =
+          input.client.player_menu_key_bind_capture();
+      capture.has_value()) {
+    player_menu.settings.capture =
+        ui::PlayerMenuSettingsCaptureView{capture->action_name, capture->slot};
+  }
+  player_menu.show_quit = input.show_quit;
 
   return {
       {
@@ -499,6 +531,11 @@ ui::GameplayUiModel build_gameplay_ui_model_from_snapshots(
           .item_registry = input.item_registry,
           .item_atlas = input.item_atlas,
           .block_atlas = input.block_atlas,
+          .render_settings = input.render_settings,
+          .controls_settings = input.controls_settings,
+          .interface_settings = input.interface_settings,
+          .key_bind_entries = input.key_bind_entries,
+          .show_quit = input.show_quit,
           .tab_title = tab_title,
           .viewport = input.viewport,
           .cursor_position = input.cursor_position,

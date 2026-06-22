@@ -51,6 +51,11 @@ struct GameplayUiModelInput {
   const player::ItemRegistry* item_registry{};
   const asset::TextureAtlas* item_atlas{};
   const asset::BlockTextureAtlas* block_atlas{};
+  ui::RenderSettingsView render_settings{};
+  ui::ControlsSettingsView controls_settings{};
+  ui::InterfaceSettingsView interface_settings{};
+  std::span<const ui::KeyBindEntryView> key_bind_entries{};
+  bool show_quit{true};
   std::string_view tab_title{};
   Vec2f viewport{};
   Vec2f cursor_position{};
@@ -80,6 +85,11 @@ struct GameplayUiSnapshotModelInput {
   const player::ItemRegistry* item_registry{};
   const asset::TextureAtlas* item_atlas{};
   const asset::BlockTextureAtlas* block_atlas{};
+  ui::RenderSettingsView render_settings{};
+  ui::ControlsSettingsView controls_settings{};
+  ui::InterfaceSettingsView interface_settings{};
+  std::span<const ui::KeyBindEntryView> key_bind_entries{};
+  bool show_quit{true};
   Vec2f viewport{};
   Vec2f cursor_position{};
   u32 displayed_fps{};

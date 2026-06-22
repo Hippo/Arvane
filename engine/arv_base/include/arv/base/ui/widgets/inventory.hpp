@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arv/base/ui/screens/screen.hpp"
 #include "arv/player/player_constants.hpp"
 #include "arv/base/ui/widgets/items.hpp"
 #include "arv/player/container.hpp"
@@ -87,6 +88,21 @@ struct CraftingUiModel {
   bool has_selected_recipe{};
 };
 
+struct PlayerMenuSettingsCaptureView {
+  std::string action_name{};
+  u8 slot{};
+};
+
+struct PlayerMenuSettingsUiModel {
+  std::string active_section_id{"overview"};
+  f32 scroll_y{};
+  RenderSettingsView render{};
+  ControlsSettingsView controls{};
+  InterfaceSettingsView interface{};
+  std::vector<KeyBindEntryView> key_binds{};
+  std::optional<PlayerMenuSettingsCaptureView> capture{};
+};
+
 struct PlayerMenuUiModel {
   bool visible{};
   std::string title{"Player Menu"};
@@ -96,6 +112,8 @@ struct PlayerMenuUiModel {
   std::vector<PlayerMenuTabButtonView> tabs{};
   InventoryUiModel inventory{};
   CraftingUiModel crafting{};
+  PlayerMenuSettingsUiModel settings{};
+  bool show_quit{true};
 };
 
 void build_inventory_ui(UiTree& tree, InventoryUiModel model);

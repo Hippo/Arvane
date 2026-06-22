@@ -54,6 +54,19 @@ PlayerMenuTab ClientUiState::player_menu_tab() const noexcept {
   return player_menu_tab_;
 }
 
+PlayerMenuSettingsSection ClientUiState::player_menu_settings_section() const noexcept {
+  return player_menu_settings_section_;
+}
+
+f32 ClientUiState::player_menu_settings_scroll_y() const noexcept {
+  return player_menu_settings_scroll_y_;
+}
+
+const std::optional<PlayerMenuKeyBindCapture>&
+ClientUiState::player_menu_key_bind_capture() const noexcept {
+  return player_menu_key_bind_capture_;
+}
+
 const std::string& ClientUiState::player_menu_search() const noexcept {
   return player_menu_search_.value;
 }
@@ -107,6 +120,46 @@ void ClientUiState::set_player_menu_tab(PlayerMenuTab tab) noexcept {
   if (tab != PlayerMenuTab::Crafting) {
     selected_crafting_recipe_id_.clear();
   }
+  if (tab != PlayerMenuTab::Settings) {
+    player_menu_settings_section_ = PlayerMenuSettingsSection::Overview;
+    player_menu_settings_scroll_y_ = 0.0F;
+    player_menu_key_bind_capture_.reset();
+  }
+}
+
+void ClientUiState::set_player_menu_settings_section(
+    PlayerMenuSettingsSection section) noexcept {
+  if (player_menu_settings_section_ == section) {
+    return;
+  }
+  player_menu_settings_section_ = section;
+  player_menu_settings_scroll_y_ = 0.0F;
+  player_menu_key_bind_capture_.reset();
+}
+
+void ClientUiState::scroll_player_menu_settings(
+    f32 wheel_y,
+    usize row_count,
+    f32 row_height,
+    f32 viewport_height) noexcept {
+  if (wheel_y == 0.0F || row_count == 0U || row_height <= 0.0F || viewport_height <= 0.0F) {
+    return;
+  }
+  constexpr f32 RowSpacing = 6.0F;
+  const f32 content_height =
+      static_cast<f32>(row_count) * row_height +
+      static_cast<f32>(row_count - 1U) * RowSpacing;
+  const f32 max_scroll = std::max(0.0F, content_height - viewport_height);
+  player_menu_settings_scroll_y_ =
+      std::clamp(player_menu_settings_scroll_y_ - wheel_y * 38.0F, 0.0F, max_scroll);
+}
+
+void ClientUiState::set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture) {
+  player_menu_key_bind_capture_ = std::move(capture);
+}
+
+void ClientUiState::clear_player_menu_key_bind_capture() noexcept {
+  player_menu_key_bind_capture_.reset();
 }
 
 void ClientUiState::clear_player_menu_search() noexcept {

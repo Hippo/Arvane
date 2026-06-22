@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -92,6 +93,56 @@ public:
   bool last_text_edit_extend_selection{};
   arv::f32 last_scroll{};
 };
+
+class CapturingCommandSink final : public arv::ui::UICommandSink {
+public:
+  void submit(arv::ui::UICommand command) override {
+    commands.push_back(std::move(command));
+  }
+
+  std::vector<arv::ui::UICommand> commands{};
+};
+
+class FixedSettingsData final : public arv::ui::UIScreenDataSource {
+public:
+  [[nodiscard]] arv::ui::RenderSettingsView render_settings() const override {
+    return render;
+  }
+
+  [[nodiscard]] arv::ui::ControlsSettingsView controls_settings() const override {
+    return controls;
+  }
+
+  [[nodiscard]] arv::ui::InterfaceSettingsView interface_settings() const override {
+    return interface;
+  }
+
+  [[nodiscard]] std::vector<arv::ui::KeyBindEntryView> key_bind_entries() const override {
+    return key_binds;
+  }
+
+  arv::ui::RenderSettingsView render{};
+  arv::ui::ControlsSettingsView controls{};
+  arv::ui::InterfaceSettingsView interface{};
+  std::vector<arv::ui::KeyBindEntryView> key_binds{};
+};
+
+[[nodiscard]] arv::ui::UiTree make_action_button_tree(
+    std::string stable_id,
+    std::string action_id) {
+  arv::ui::UiTree tree;
+  arv::ui::UiElement button;
+  button.stable_id = std::move(stable_id);
+  button.type = arv::ui::UiElementType::Button;
+  button.layout.width_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.height_mode = arv::ui::UiSizeMode::Fixed;
+  button.layout.width = 160.0F;
+  button.layout.height = 34.0F;
+  button.action = std::move(action_id);
+  tree.add_child(tree.root_id(), std::move(button));
+  tree.layout({240.0F, 120.0F}, nullptr);
+  return tree;
+}
 
 [[nodiscard]] arv::ui::UiTree make_inventory_slot_tree() {
   arv::ui::UiTree tree;
@@ -182,6 +233,114 @@ TEST(ClientUiRoutingTests, InventoryOutsideClickDropsCarriedStack) {
       client,
       input,
       true));
+}
+
+TEST(ClientUiRoutingTests, PlayerMenuSettingsAndExitActionsSubmitSharedCommands) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  client.set_player_menu_tab(arv::client::PlayerMenuTab::Settings);
+
+  FixedSettingsData data;
+  data.render.load_distance = 4;
+  data.render.view_distance = 2;
+  data.render.stream_distance = 3;
+  data.render.simulation_distance = 1;
+  CapturingCommandSink sink;
+
+  arv::platform::InputSnapshot input;
+  input.mouse_left_pressed = true;
+  input.cursor_x = 10.0F;
+  input.cursor_y = 10.0F;
+
+  arv::ui::UiTree view_distance_tree =
+      make_action_button_tree("render.view_distance.inc", "render.view_distance.inc");
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      view_distance_tree,
+      client,
+      input,
+      false,
+      &sink,
+      &data));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  const auto& render =
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings;
+  EXPECT_EQ(render.view_distance, 3);
+  EXPECT_EQ(render.stream_distance, 3);
+
+  sink.commands.clear();
+  arv::ui::UiTree main_menu_tree =
+      make_action_button_tree("player_menu.exit.main_menu", "player_menu.exit.main_menu");
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      main_menu_tree,
+      client,
+      input,
+      false,
+      &sink,
+      &data));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
+
+  sink.commands.clear();
+  arv::ui::UiTree quit_tree =
+      make_action_button_tree("player_menu.exit.quit", "player_menu.exit.quit");
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      quit_tree,
+      client,
+      input,
+      false,
+      &sink,
+      &data));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<arv::ui::QuitGameCommand>(sink.commands[0]));
+}
+
+TEST(ClientUiRoutingTests, PlayerMenuKeyBindCaptureSubmitsBindingCommand) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  client.set_player_menu_tab(arv::client::PlayerMenuTab::Settings);
+  client.set_player_menu_settings_section(arv::client::PlayerMenuSettingsSection::KeyBinds);
+
+  FixedSettingsData data;
+  arv::ui::KeyBindEntryView jump;
+  jump.action_name = "Jump";
+  jump.display_name = "Jump";
+  data.key_binds.push_back(jump);
+  CapturingCommandSink sink;
+
+  arv::platform::InputSnapshot input;
+  input.mouse_left_pressed = true;
+  input.cursor_x = 10.0F;
+  input.cursor_y = 10.0F;
+  arv::ui::UiTree capture_tree =
+      make_action_button_tree("key_binds.row.0.primary", "key_bind.capture_primary");
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      capture_tree,
+      client,
+      input,
+      false,
+      &sink,
+      &data));
+  ASSERT_TRUE(client.player_menu_key_bind_capture().has_value());
+  EXPECT_EQ(client.player_menu_key_bind_capture()->action_name, "Jump");
+  EXPECT_EQ(client.player_menu_key_bind_capture()->slot, 0U);
+
+  EXPECT_TRUE(arv::client::route_player_menu_captured_input(
+      client,
+      &sink,
+      arv::ui::CapturedInputView{
+          arv::ui::InputBindingDevice::Keyboard,
+          "KeyF",
+          "F",
+          0U}));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetKeyBindCommand>(sink.commands[0]));
+  const auto& command = std::get<arv::ui::SetKeyBindCommand>(sink.commands[0]);
+  EXPECT_EQ(command.action_name, "Jump");
+  EXPECT_EQ(command.slot, 0U);
+  ASSERT_TRUE(command.binding.has_value());
+  EXPECT_EQ(command.binding->input_code, "KeyF");
+  EXPECT_FALSE(client.player_menu_key_bind_capture().has_value());
 }
 
 TEST(ClientUiRoutingTests, UiMouseFocusRoutesButtonEdges) {

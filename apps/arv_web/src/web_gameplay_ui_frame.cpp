@@ -2,6 +2,7 @@
 
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/client_settings.hpp"
 #include "arv/client/gameplay_ui_frame.hpp"
 #include "arv/client/gameplay_ui_model.hpp"
 #include "arv/client/item_ui_model.hpp"
@@ -72,6 +73,8 @@ void append_web_gameplay_ui_to_frame(
                 g_app.input.snapshot.cursor_x,
                 g_app.input.snapshot.cursor_y}
           : arv::Vec2f{viewport.x * 0.5F, viewport.y * 0.5F};
+  const std::vector<arv::ui::KeyBindEntryView> key_bind_entries =
+      arv::client::key_bind_entries_from_input_bindings(g_app.input_bindings);
 
   arv::ui::GameplayUiModel model =
       arv::client::build_gameplay_ui_model_from_snapshots(
@@ -100,6 +103,11 @@ void append_web_gameplay_ui_to_frame(
               .item_registry = &g_app.entity_assets.loaded.item_registry,
               .item_atlas = &g_app.entity_assets.item_atlas,
               .block_atlas = &g_app.block_assets.loaded.block_atlas,
+              .render_settings = web_render_settings(),
+              .controls_settings = web_controls_settings(),
+              .interface_settings = web_interface_settings(),
+              .key_bind_entries = key_bind_entries,
+              .show_quit = true,
               .viewport = viewport,
               .cursor_position = cursor_position,
               .hotbar_item_popup_name = g_app.ui.hotbar_item_popup.popup_name,

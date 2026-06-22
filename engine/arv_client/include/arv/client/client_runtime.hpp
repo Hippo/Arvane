@@ -117,6 +117,10 @@ public:
   void configure_vehicles(const entity::VehicleDefinitionRegistry* registry) noexcept;
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] PlayerMenuTab player_menu_tab() const noexcept;
+  [[nodiscard]] PlayerMenuSettingsSection player_menu_settings_section() const noexcept;
+  [[nodiscard]] f32 player_menu_settings_scroll_y() const noexcept;
+  [[nodiscard]] const std::optional<PlayerMenuKeyBindCapture>&
+  player_menu_key_bind_capture() const noexcept;
   [[nodiscard]] const std::string& player_menu_search() const noexcept;
   [[nodiscard]] usize player_menu_search_cursor() const noexcept;
   [[nodiscard]] usize player_menu_search_selection_start() const noexcept;
@@ -124,6 +128,14 @@ public:
   [[nodiscard]] const std::string& selected_crafting_category_id() const noexcept;
   [[nodiscard]] const std::string& selected_crafting_recipe_id() const noexcept;
   void set_player_menu_tab(PlayerMenuTab tab) noexcept;
+  void set_player_menu_settings_section(PlayerMenuSettingsSection section) noexcept;
+  void scroll_player_menu_settings(
+      f32 wheel_y,
+      usize row_count,
+      f32 row_height,
+      f32 viewport_height) noexcept;
+  void set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture);
+  void clear_player_menu_key_bind_capture() noexcept;
   void clear_player_menu_search() noexcept;
   void select_crafting_category(std::string category_id);
   void select_crafting_recipe(std::string recipe_id);

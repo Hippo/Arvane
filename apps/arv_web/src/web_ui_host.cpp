@@ -308,11 +308,14 @@ namespace {
   if (g_app.session == nullptr || !g_app.session->inventory_open()) {
     return false;
   }
+  arv::ui::UIContext context = make_web_ui_context();
   return arv::client::route_inventory_mouse_input(
       g_app.ui.tree,
       *g_app.session,
       browser_input_snapshot(),
-      g_app.session->inventory_cursor_stack().has_value());
+      g_app.session->inventory_cursor_stack().has_value(),
+      context.command_sink,
+      context.data_source);
 }
 
 void route_screen_mouse_input(arv::ui::UIContext& context) {
@@ -375,6 +378,15 @@ void clear_input_after_captured_binding() {
 }
 
 [[nodiscard]] bool route_captured_screen_input(arv::ui::UIContext& context) {
+  if (g_app.session != nullptr &&
+      arv::client::route_player_menu_captured_input(
+          g_app.ui.tree,
+          *g_app.session,
+          context.command_sink,
+          browser_input_snapshot())) {
+    clear_input_after_captured_binding();
+    return true;
+  }
   if (!arv::client::route_captured_screen_input(
           g_app.ui.screen_manager,
           context,

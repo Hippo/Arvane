@@ -5,7 +5,10 @@
 #include "widget_common.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,11 +24,20 @@ constexpr u32 InventoryGridColumns = 9;
 constexpr f32 PlayerMenuWidth = 720.0F;
 constexpr f32 PlayerMenuInventoryHeight = 392.0F;
 constexpr f32 PlayerMenuCraftingHeight = 520.0F;
+constexpr f32 PlayerMenuSettingsHeight = 520.0F;
+constexpr f32 PlayerMenuExitHeight = 320.0F;
 constexpr f32 PlayerMenuPlaceholderHeight = 320.0F;
 constexpr f32 PlayerMenuMinimumTopOffset = 16.0F;
 constexpr f32 PlayerMenuContentTop = 66.0F;
 constexpr f32 RecipeSlotSize = 44.0F;
 constexpr f32 RecipeSlotSpacing = 6.0F;
+constexpr f32 PlayerMenuSettingsX = 24.0F;
+constexpr f32 PlayerMenuSettingsTop = 76.0F;
+constexpr f32 PlayerMenuSettingsWidth = 672.0F;
+constexpr f32 PlayerMenuSettingsViewportHeight = 344.0F;
+constexpr f32 PlayerMenuSettingsRowHeight = 42.0F;
+constexpr f32 PlayerMenuSettingsRowSpacing = 6.0F;
+constexpr f32 PlayerMenuKeyBindRowHeight = 54.0F;
 
 [[nodiscard]] constexpr f32 inventory_grid_width(f32 slot_size, f32 slot_spacing) noexcept {
   return static_cast<f32>(InventoryGridColumns) * slot_size +
@@ -117,6 +129,246 @@ UiNodeID add_menu_button(
   return button_id;
 }
 
+[[nodiscard]] std::string fixed_decimal(f32 value, int precision) {
+  std::ostringstream output;
+  output << std::fixed << std::setprecision(precision) << value;
+  return output.str();
+}
+
+[[nodiscard]] std::string percent_text(f32 value) {
+  return fixed_decimal(value, value < 100.0F ? 1 : 0) + "%";
+}
+
+[[nodiscard]] std::string bind_label(const KeyBindSlotView& slot) {
+  if (!slot.has_binding || !slot.binding.valid) {
+    return "Unbound";
+  }
+  return slot.binding.label.empty() ? slot.binding.input_code : slot.binding.label;
+}
+
+[[nodiscard]] bool settings_capture_matches(
+    const std::optional<PlayerMenuSettingsCaptureView>& capture,
+    const KeyBindEntryView& entry,
+    u8 slot) {
+  return capture.has_value() &&
+         capture->action_name == entry.action_name &&
+         capture->slot == slot;
+}
+
+UiNodeID add_settings_row(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string label,
+    f32 row_height = PlayerMenuSettingsRowHeight) {
+  const UiTheme& theme = tree.theme();
+  UiElement row = fixed_panel(
+      std::move(stable_id),
+      PlayerMenuSettingsWidth,
+      row_height,
+      theme.colors.surface_alt);
+  row.style.background.w = 0.54F;
+  row.style.border = theme.colors.border;
+  row.style.border_width = theme.layout.border_width;
+  row.style.radius = theme.layout.radius_sm;
+  const UiNodeID row_id = tree.add_child(parent, std::move(row));
+
+  UiElement label_element = text_element(
+      tree.element(row_id)->stable_id + ".label",
+      std::move(label),
+      theme.colors.text,
+      UiTextRole::Small);
+  label_element.layout.offset = {12.0F, 12.0F};
+  tree.add_child(row_id, std::move(label_element));
+  return row_id;
+}
+
+void add_settings_value_text(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string value,
+    Vec2f offset,
+    f32 width = 82.0F) {
+  const UiTheme& theme = tree.theme();
+  UiElement box = fixed_panel(
+      std::move(stable_id),
+      width,
+      28.0F,
+      theme.colors.surface);
+  box.layout.offset = offset;
+  box.style.background.w = 0.74F;
+  box.style.border = theme.colors.border;
+  box.style.border_width = theme.layout.border_width;
+  box.style.radius = theme.layout.radius_sm;
+  const UiNodeID box_id = tree.add_child(parent, std::move(box));
+
+  UiElement text = text_element(
+      tree.element(box_id)->stable_id + ".value",
+      std::move(value),
+      theme.colors.text,
+      UiTextRole::Small);
+  text.layout.anchor = UiAnchor::Center;
+  tree.add_child(box_id, std::move(text));
+}
+
+void add_settings_small_button(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string action,
+    std::string label,
+    Vec2f offset,
+    f32 width,
+    bool enabled = true,
+    bool selected = false,
+    UiControlRole role = UiControlRole::Neutral) {
+  UiElement button = menu_button(
+      std::move(stable_id),
+      enabled ? std::move(action) : std::string{},
+      std::move(label),
+      selected,
+      width,
+      28.0F,
+      tree.theme());
+  button.layout.offset = offset;
+  button.enabled = enabled;
+  button.hit_test = enabled;
+  button.focusable = enabled;
+  button.style.control_role = role;
+  if (role == UiControlRole::Danger) {
+    button.style.background = tree.theme().colors.danger;
+    button.style.background_hover = tree.theme().colors.danger_hover;
+    button.style.background_pressed = tree.theme().colors.danger_pressed;
+    button.style.border = tree.theme().colors.danger_hover;
+  } else if (role == UiControlRole::Primary) {
+    button.style.background =
+        selected ? tree.theme().colors.accent : tree.theme().colors.surface_alt;
+    button.style.background_hover =
+        selected ? tree.theme().colors.accent_hover : tree.theme().colors.surface_hover;
+    button.style.background_pressed =
+        selected ? tree.theme().colors.accent_pressed : tree.theme().colors.surface_pressed;
+    button.style.border =
+        selected ? tree.theme().colors.accent_hover : tree.theme().colors.border;
+  }
+  add_menu_button(tree, parent, std::move(button), tree.theme());
+}
+
+void add_stepper_row(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string label,
+    std::string value,
+    std::string action_prefix,
+    bool decrement_enabled = true,
+    bool increment_enabled = true) {
+  const UiNodeID row = add_settings_row(tree, parent, std::move(stable_id), std::move(label));
+  constexpr f32 ButtonWidth = 30.0F;
+  constexpr f32 ValueWidth = 86.0F;
+  constexpr f32 Gap = 6.0F;
+  constexpr f32 ControlsWidth = ButtonWidth * 2.0F + ValueWidth + Gap * 2.0F;
+  const f32 x = PlayerMenuSettingsWidth - ControlsWidth - 12.0F;
+  add_settings_small_button(
+      tree,
+      row,
+      action_prefix + ".dec",
+      action_prefix + ".dec",
+      "-",
+      {x, 7.0F},
+      ButtonWidth,
+      decrement_enabled);
+  add_settings_value_text(
+      tree,
+      row,
+      action_prefix + ".value",
+      std::move(value),
+      {x + ButtonWidth + Gap, 7.0F},
+      ValueWidth);
+  add_settings_small_button(
+      tree,
+      row,
+      action_prefix + ".inc",
+      action_prefix + ".inc",
+      "+",
+      {x + ButtonWidth + Gap + ValueWidth + Gap, 7.0F},
+      ButtonWidth,
+      increment_enabled);
+}
+
+void add_toggle_row(
+    UiTree& tree,
+    UiNodeID parent,
+    std::string stable_id,
+    std::string label,
+    bool value,
+    std::string action) {
+  const UiNodeID row = add_settings_row(tree, parent, std::move(stable_id), std::move(label));
+  add_settings_small_button(
+      tree,
+      row,
+      action + ".toggle",
+      action,
+      value ? "On" : "Off",
+      {PlayerMenuSettingsWidth - 92.0F, 7.0F},
+      80.0F,
+      true,
+      value,
+      value ? UiControlRole::Primary : UiControlRole::Neutral);
+}
+
+UiNodeID add_settings_scroll_stack(
+    UiTree& tree,
+    UiNodeID panel_id,
+    std::string stable_id,
+    f32 scroll_y,
+    f32 viewport_height = PlayerMenuSettingsViewportHeight) {
+  UiElement viewport = fixed_panel(
+      stable_id + ".viewport",
+      PlayerMenuSettingsWidth,
+      viewport_height,
+      {0.0F, 0.0F, 0.0F, 0.0F});
+  viewport.layout.offset = {PlayerMenuSettingsX, PlayerMenuSettingsTop + 48.0F};
+  viewport.clip_children = true;
+  viewport.hit_test = true;
+  const UiNodeID viewport_id = tree.add_child(panel_id, std::move(viewport));
+
+  UiElement stack;
+  stack.stable_id = stable_id + ".rows";
+  stack.type = UiElementType::VerticalStack;
+  stack.layout.spacing = PlayerMenuSettingsRowSpacing;
+  stack.layout.offset = {0.0F, -std::max(0.0F, scroll_y)};
+  stack.hit_test = false;
+  return tree.add_child(viewport_id, std::move(stack));
+}
+
+void add_settings_section_header(
+    UiTree& tree,
+    UiNodeID panel_id,
+    std::string stable_id,
+    std::string title,
+    bool show_back = true) {
+  if (show_back) {
+    add_settings_small_button(
+        tree,
+        panel_id,
+        stable_id + ".back",
+        "settings.overview",
+        "Back",
+        {PlayerMenuSettingsX, PlayerMenuSettingsTop},
+        92.0F);
+  }
+
+  UiElement title_element = text_element(
+      stable_id + ".title",
+      std::move(title),
+      tree.theme().colors.text,
+      UiTextRole::Heading);
+  title_element.layout.anchor = UiAnchor::TopCenter;
+  title_element.layout.offset = {0.0F, PlayerMenuSettingsTop + 2.0F};
+  tree.add_child(panel_id, std::move(title_element));
+}
+
 void append_inventory_section(
     UiTree& tree,
     UiNodeID parent,
@@ -185,6 +437,12 @@ void append_inventory_section(
 [[nodiscard]] f32 player_menu_height(std::string_view active_tab_id) noexcept {
   if (active_tab_id == "crafting") {
     return PlayerMenuCraftingHeight;
+  }
+  if (active_tab_id == "settings") {
+    return PlayerMenuSettingsHeight;
+  }
+  if (active_tab_id == "exit") {
+    return PlayerMenuExitHeight;
   }
   if (active_tab_id == "inventory") {
     return PlayerMenuInventoryHeight;
@@ -391,6 +649,501 @@ void append_crafting_ui(
       theme.layout.spacing_md);
 }
 
+void append_settings_overview_ui(
+    UiTree& tree,
+    UiNodeID panel_id) {
+  add_settings_section_header(
+      tree,
+      panel_id,
+      "player_menu.settings.overview",
+      "Settings",
+      false);
+
+  UiElement stack;
+  stack.stable_id = "player_menu.settings.overview.options";
+  stack.type = UiElementType::VerticalStack;
+  stack.layout.spacing = 10.0F;
+  stack.layout.width_mode = UiSizeMode::Fixed;
+  stack.layout.width = 360.0F;
+  stack.layout.anchor = UiAnchor::TopCenter;
+  stack.layout.offset = {0.0F, 134.0F};
+  stack.hit_test = false;
+  const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
+
+  add_menu_button(
+      tree,
+      stack_id,
+      menu_button(
+          "player_menu.settings.render",
+          "settings.render",
+          "Render",
+          false,
+          360.0F,
+          38.0F,
+          tree.theme()),
+      tree.theme());
+  add_menu_button(
+      tree,
+      stack_id,
+      menu_button(
+          "player_menu.settings.key_binds",
+          "settings.key_binds",
+          "Key Binds",
+          false,
+          360.0F,
+          38.0F,
+          tree.theme()),
+      tree.theme());
+  add_menu_button(
+      tree,
+      stack_id,
+      menu_button(
+          "player_menu.settings.controls",
+          "settings.controls",
+          "Controls",
+          false,
+          360.0F,
+          38.0F,
+          tree.theme()),
+      tree.theme());
+  add_menu_button(
+      tree,
+      stack_id,
+      menu_button(
+          "player_menu.settings.interface",
+          "settings.interface",
+          "Interface",
+          false,
+          360.0F,
+          38.0F,
+          tree.theme()),
+      tree.theme());
+}
+
+void append_render_settings_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuSettingsUiModel& settings) {
+  add_settings_section_header(tree, panel_id, "player_menu.settings.render", "Render");
+  const UiNodeID stack =
+      add_settings_scroll_stack(tree, panel_id, "player_menu.settings.render", settings.scroll_y);
+  const RenderSettingsView& render = settings.render;
+
+  const UiNodeID frame_row =
+      add_settings_row(tree, stack, "render.frame_sync", "Frame Sync");
+  add_settings_small_button(
+      tree,
+      frame_row,
+      "render.frame_sync.off",
+      "render.frame_sync.off",
+      "Off",
+      {PlayerMenuSettingsWidth - 250.0F, 7.0F},
+      70.0F,
+      true,
+      render.frame_sync == SettingsFrameSyncMode::Off,
+      render.frame_sync == SettingsFrameSyncMode::Off ? UiControlRole::Primary
+                                                      : UiControlRole::Neutral);
+  add_settings_small_button(
+      tree,
+      frame_row,
+      "render.frame_sync.vsync",
+      "render.frame_sync.vsync",
+      "VSync",
+      {PlayerMenuSettingsWidth - 174.0F, 7.0F},
+      76.0F,
+      true,
+      render.frame_sync == SettingsFrameSyncMode::VSync,
+      render.frame_sync == SettingsFrameSyncMode::VSync ? UiControlRole::Primary
+                                                        : UiControlRole::Neutral);
+  add_settings_small_button(
+      tree,
+      frame_row,
+      "render.frame_sync.fps_cap",
+      "render.frame_sync.fps_cap",
+      "Cap",
+      {PlayerMenuSettingsWidth - 92.0F, 7.0F},
+      80.0F,
+      true,
+      render.frame_sync == SettingsFrameSyncMode::FpsCap,
+      render.frame_sync == SettingsFrameSyncMode::FpsCap ? UiControlRole::Primary
+                                                         : UiControlRole::Neutral);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.fps_cap",
+      "FPS Cap",
+      std::to_string(render.fps_cap),
+      "render.fps_cap",
+      render.fps_cap > 30U,
+      render.fps_cap < 240U);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.load_distance",
+      "Load Distance",
+      std::to_string(render.load_distance),
+      "render.load_distance",
+      render.load_distance > 1,
+      render.load_distance < 32);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.simulation_distance",
+      "Simulation Distance",
+      std::to_string(render.simulation_distance),
+      "render.simulation_distance",
+      render.simulation_distance > 0,
+      render.simulation_distance < render.load_distance);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.view_distance",
+      "View Distance",
+      std::to_string(render.view_distance),
+      "render.view_distance",
+      render.view_distance > 1,
+      render.view_distance < render.stream_distance);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.stream_distance",
+      "Stream Distance",
+      std::to_string(render.stream_distance),
+      "render.stream_distance",
+      render.stream_distance > std::max(1, render.view_distance),
+      render.stream_distance < render.load_distance);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.mesh_upload_budget",
+      "Mesh Upload Budget",
+      std::to_string(render.mesh_upload_budget),
+      "render.mesh_upload_budget",
+      render.mesh_upload_budget > 1U,
+      render.mesh_upload_budget < 32U);
+  add_toggle_row(
+      tree,
+      stack,
+      "render.local_player_body",
+      "Local Player Body",
+      render.show_local_player_body,
+      "render.local_player_body");
+  add_stepper_row(
+      tree,
+      stack,
+      "render.sky.star_intensity",
+      "Star Intensity",
+      fixed_decimal(render.star_intensity, 2),
+      "render.star_intensity",
+      render.star_intensity > 0.0F,
+      render.star_intensity < 3.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.sky.cloud_intensity",
+      "Cloud Intensity",
+      fixed_decimal(render.cloud_intensity, 2),
+      "render.cloud_intensity",
+      render.cloud_intensity > 0.0F,
+      render.cloud_intensity < 3.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.sky.cirrus",
+      "Cirrus",
+      fixed_decimal(render.cirrus_amount, 2),
+      "render.cirrus",
+      render.cirrus_amount > 0.0F,
+      render.cirrus_amount < 1.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.sky.cumulus",
+      "Cumulus",
+      fixed_decimal(render.cumulus_amount, 2),
+      "render.cumulus",
+      render.cumulus_amount > 0.0F,
+      render.cumulus_amount < 1.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.outline.red",
+      "Outline Red",
+      fixed_decimal(render.outline_red, 2),
+      "render.outline_red",
+      render.outline_red > 0.0F,
+      render.outline_red < 1.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.outline.green",
+      "Outline Green",
+      fixed_decimal(render.outline_green, 2),
+      "render.outline_green",
+      render.outline_green > 0.0F,
+      render.outline_green < 1.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.outline.blue",
+      "Outline Blue",
+      fixed_decimal(render.outline_blue, 2),
+      "render.outline_blue",
+      render.outline_blue > 0.0F,
+      render.outline_blue < 1.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "render.outline.thickness",
+      "Outline Thickness",
+      fixed_decimal(render.outline_thickness, 2),
+      "render.outline_thickness",
+      render.outline_thickness > 0.1F,
+      render.outline_thickness < 2.0F);
+}
+
+void append_controls_settings_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuSettingsUiModel& settings) {
+  add_settings_section_header(tree, panel_id, "player_menu.settings.controls", "Controls");
+  const UiNodeID stack =
+      add_settings_scroll_stack(tree, panel_id, "player_menu.settings.controls", 0.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "controls.mouse_sensitivity",
+      "Mouse Sensitivity",
+      percent_text(settings.controls.mouse_sensitivity_percent),
+      "controls.mouse_sensitivity",
+      settings.controls.mouse_sensitivity_percent > 10.0F,
+      settings.controls.mouse_sensitivity_percent < 300.0F);
+}
+
+void append_interface_settings_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuSettingsUiModel& settings) {
+  add_settings_section_header(tree, panel_id, "player_menu.settings.interface", "Interface");
+  const UiNodeID stack =
+      add_settings_scroll_stack(tree, panel_id, "player_menu.settings.interface", settings.scroll_y);
+  const InterfaceSettingsView& interface = settings.interface;
+  add_stepper_row(
+      tree,
+      stack,
+      "interface.chat_history",
+      "Chat History",
+      std::to_string(interface.chat_history_max),
+      "interface.chat_history",
+      interface.chat_history_max > 100U,
+      interface.chat_history_max < 5000U);
+  add_stepper_row(
+      tree,
+      stack,
+      "interface.open_lines",
+      "Open Chat Lines",
+      std::to_string(interface.chat_open_lines),
+      "interface.open_lines",
+      interface.chat_open_lines > 1U,
+      interface.chat_open_lines < 16U);
+  add_stepper_row(
+      tree,
+      stack,
+      "interface.passive_lines",
+      "Passive Chat Lines",
+      std::to_string(interface.chat_passive_lines),
+      "interface.passive_lines",
+      interface.chat_passive_lines > 0U,
+      interface.chat_passive_lines < 16U);
+  add_stepper_row(
+      tree,
+      stack,
+      "interface.visible_seconds",
+      "Passive Visible Seconds",
+      fixed_decimal(interface.chat_passive_visible_seconds, 1),
+      "interface.visible_seconds",
+      interface.chat_passive_visible_seconds > 0.0F,
+      interface.chat_passive_visible_seconds < 30.0F);
+  add_stepper_row(
+      tree,
+      stack,
+      "interface.fade_seconds",
+      "Passive Fade Seconds",
+      fixed_decimal(interface.chat_passive_fade_seconds, 1),
+      "interface.fade_seconds",
+      interface.chat_passive_fade_seconds > 0.0F,
+      interface.chat_passive_fade_seconds < 30.0F);
+}
+
+void append_key_bind_row(
+    UiTree& tree,
+    UiNodeID parent,
+    const KeyBindEntryView& entry,
+    usize index,
+    const std::optional<PlayerMenuSettingsCaptureView>& capture) {
+  const std::string prefix = "key_binds.row." + std::to_string(index);
+  const UiNodeID row =
+      add_settings_row(tree, parent, prefix, entry.display_name, PlayerMenuKeyBindRowHeight);
+  if (entry.primary.conflict || entry.secondary.conflict) {
+    UiElement warning = text_element(
+        prefix + ".warning",
+        "Conflict",
+        tree.theme().colors.warning,
+        UiTextRole::Small);
+    warning.layout.offset = {12.0F, 32.0F};
+    tree.add_child(row, std::move(warning));
+  }
+
+  const bool capture_primary = settings_capture_matches(capture, entry, 0U);
+  const bool capture_secondary = settings_capture_matches(capture, entry, 1U);
+  constexpr f32 PrimaryWidth = 116.0F;
+  constexpr f32 SecondaryWidth = 116.0F;
+  constexpr f32 ClearWidth = 54.0F;
+  constexpr f32 ResetWidth = 64.0F;
+  constexpr f32 Gap = 6.0F;
+  constexpr f32 ControlsWidth =
+      PrimaryWidth + SecondaryWidth + ClearWidth + ResetWidth + Gap * 3.0F;
+  const f32 x = PlayerMenuSettingsWidth - ControlsWidth - 12.0F;
+  add_settings_small_button(
+      tree,
+      row,
+      prefix + ".primary",
+      "key_bind.capture_primary",
+      capture_primary ? "Listening" : bind_label(entry.primary),
+      {x, 13.0F},
+      PrimaryWidth,
+      true,
+      capture_primary,
+      capture_primary ? UiControlRole::Primary : UiControlRole::Neutral);
+  add_settings_small_button(
+      tree,
+      row,
+      prefix + ".secondary",
+      "key_bind.capture_secondary",
+      capture_secondary ? "Listening" : bind_label(entry.secondary),
+      {x + PrimaryWidth + Gap, 13.0F},
+      SecondaryWidth,
+      true,
+      capture_secondary,
+      capture_secondary ? UiControlRole::Primary : UiControlRole::Neutral);
+  add_settings_small_button(
+      tree,
+      row,
+      prefix + ".clear_secondary",
+      "key_bind.clear_secondary",
+      "Clear",
+      {x + PrimaryWidth + Gap + SecondaryWidth + Gap, 13.0F},
+      ClearWidth,
+      entry.secondary.has_binding);
+  add_settings_small_button(
+      tree,
+      row,
+      prefix + ".reset",
+      "key_bind.reset",
+      "Reset",
+      {x + PrimaryWidth + Gap + SecondaryWidth + Gap + ClearWidth + Gap, 13.0F},
+      ResetWidth);
+}
+
+void append_key_binds_settings_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuSettingsUiModel& settings) {
+  add_settings_section_header(tree, panel_id, "player_menu.settings.key_binds", "Key Binds");
+  if (settings.capture.has_value()) {
+    add_settings_small_button(
+        tree,
+        panel_id,
+        "key_binds.cancel_capture",
+        "key_bind.cancel_capture",
+        "Cancel",
+        {PlayerMenuSettingsWidth - 92.0F + PlayerMenuSettingsX, PlayerMenuSettingsTop},
+        92.0F,
+        true,
+        false,
+        UiControlRole::Danger);
+  }
+  const UiNodeID stack = add_settings_scroll_stack(
+      tree,
+      panel_id,
+      "player_menu.settings.key_binds",
+      settings.scroll_y,
+      PlayerMenuSettingsViewportHeight);
+  for (usize index = 0; index < settings.key_binds.size(); ++index) {
+    append_key_bind_row(tree, stack, settings.key_binds[index], index, settings.capture);
+  }
+}
+
+void append_settings_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    const PlayerMenuSettingsUiModel& settings) {
+  if (settings.active_section_id == "render") {
+    append_render_settings_ui(tree, panel_id, settings);
+  } else if (settings.active_section_id == "key_binds") {
+    append_key_binds_settings_ui(tree, panel_id, settings);
+  } else if (settings.active_section_id == "controls") {
+    append_controls_settings_ui(tree, panel_id, settings);
+  } else if (settings.active_section_id == "interface") {
+    append_interface_settings_ui(tree, panel_id, settings);
+  } else {
+    append_settings_overview_ui(tree, panel_id);
+  }
+}
+
+void append_exit_game_ui(
+    UiTree& tree,
+    UiNodeID panel_id,
+    bool show_quit) {
+  UiElement title = text_element(
+      "player_menu.exit.title",
+      "Exit Game",
+      tree.theme().colors.text,
+      UiTextRole::Heading);
+  title.layout.anchor = UiAnchor::TopCenter;
+  title.layout.offset = {0.0F, 94.0F};
+  tree.add_child(panel_id, std::move(title));
+
+  UiElement stack;
+  stack.stable_id = "player_menu.exit.actions";
+  stack.type = UiElementType::VerticalStack;
+  stack.layout.spacing = 10.0F;
+  stack.layout.width_mode = UiSizeMode::Fixed;
+  stack.layout.width = 300.0F;
+  stack.layout.anchor = UiAnchor::TopCenter;
+  stack.layout.offset = {0.0F, 150.0F};
+  stack.hit_test = false;
+  const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
+
+  add_menu_button(
+      tree,
+      stack_id,
+      menu_button(
+          "player_menu.exit.main_menu",
+          "player_menu.exit.main_menu",
+          "Back to Main Menu",
+          false,
+          300.0F,
+          38.0F,
+          tree.theme()),
+      tree.theme());
+  if (show_quit) {
+    UiElement quit = menu_button(
+        "player_menu.exit.quit",
+        "player_menu.exit.quit",
+        "Quit",
+        false,
+        300.0F,
+        38.0F,
+        tree.theme());
+    quit.style.background = tree.theme().colors.danger;
+    quit.style.background_hover = tree.theme().colors.danger_hover;
+    quit.style.background_pressed = tree.theme().colors.danger_pressed;
+    quit.style.border = tree.theme().colors.danger_hover;
+    add_menu_button(tree, stack_id, std::move(quit), tree.theme());
+  }
+}
+
 void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
   if (!model.visible) {
     return;
@@ -528,21 +1281,9 @@ void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
   if (model.active_tab_id == "crafting") {
     append_crafting_ui(tree, panel_id, model);
   } else if (model.active_tab_id == "settings") {
-    UiElement text = text_element(
-        "player_menu.settings.placeholder",
-        "Settings",
-        theme.colors.text,
-        UiTextRole::Heading);
-    text.layout.anchor = UiAnchor::Center;
-    tree.add_child(panel_id, std::move(text));
+    append_settings_ui(tree, panel_id, model.settings);
   } else if (model.active_tab_id == "exit") {
-    UiElement text = text_element(
-        "player_menu.exit.placeholder",
-        "Exit Game",
-        theme.colors.text,
-        UiTextRole::Heading);
-    text.layout.anchor = UiAnchor::Center;
-    tree.add_child(panel_id, std::move(text));
+    append_exit_game_ui(tree, panel_id, model.show_quit);
   } else {
     append_inventory_section(
         tree,

@@ -1098,6 +1098,105 @@ TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
       0.001F);
 }
 
+TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::PlayerMenuUiModel settings_menu;
+  settings_menu.visible = true;
+  settings_menu.active_tab_id = "settings";
+  settings_menu.viewport = {800.0F, 600.0F};
+  settings_menu.tabs = {
+      {"inventory", "Inventory", false},
+      {"crafting", "Crafting", false},
+      {"settings", "Settings", true},
+      {"exit", "Exit Game", false},
+  };
+  settings_menu.settings.render.frame_sync = arv::ui::SettingsFrameSyncMode::FpsCap;
+  settings_menu.settings.render.fps_cap = 60U;
+  settings_menu.settings.render.load_distance = 4;
+  settings_menu.settings.render.simulation_distance = 1;
+  settings_menu.settings.render.view_distance = 2;
+  settings_menu.settings.render.stream_distance = 3;
+  settings_menu.settings.controls.mouse_sensitivity_percent = 100.0F;
+  settings_menu.settings.interface.chat_history_max = 1000U;
+  settings_menu.settings.interface.chat_open_lines = 8U;
+  settings_menu.settings.interface.chat_passive_lines = 4U;
+  settings_menu.settings.interface.chat_passive_visible_seconds = 8.0F;
+  settings_menu.settings.interface.chat_passive_fade_seconds = 2.0F;
+  arv::ui::KeyBindEntryView jump;
+  jump.action_name = "Jump";
+  jump.display_name = "Jump";
+  jump.primary.has_binding = true;
+  jump.primary.binding = {
+      true,
+      arv::ui::InputBindingDevice::Keyboard,
+      "Space",
+      "Space",
+      0U};
+  settings_menu.settings.key_binds.push_back(jump);
+
+  arv::ui::append_player_menu_ui(tree, settings_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+
+  const auto* settings_panel = tree.find_by_stable_id("player_menu.panel");
+  ASSERT_NE(settings_panel, nullptr);
+  EXPECT_NEAR(settings_panel->rect.width, 720.0F, 0.001F);
+  EXPECT_NEAR(settings_panel->rect.height, 520.0F, 0.001F);
+  EXPECT_NE(tree.find_by_stable_id("player_menu.settings.render.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("player_menu.settings.key_binds.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("player_menu.settings.controls.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("player_menu.settings.interface.label"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("player_menu.settings.placeholder"), nullptr);
+  const auto* settings_tabs = tree.find_by_stable_id("player_menu.tabs");
+  ASSERT_NE(settings_tabs, nullptr);
+  const arv::ui::UiRect tab_rect = settings_tabs->rect;
+  const arv::ui::UiRect panel_rect = settings_panel->rect;
+
+  tree.clear();
+  arv::ui::PlayerMenuUiModel render_menu = settings_menu;
+  render_menu.settings.active_section_id = "render";
+  render_menu.settings.scroll_y = 0.0F;
+  arv::ui::append_player_menu_ui(tree, render_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+  EXPECT_NE(tree.find_by_stable_id("render.frame_sync.fps_cap.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.view_distance.inc.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.local_player_body.label"), nullptr);
+  const auto* render_tabs = tree.find_by_stable_id("player_menu.tabs");
+  ASSERT_NE(render_tabs, nullptr);
+  EXPECT_NEAR(render_tabs->rect.x, tab_rect.x, 0.001F);
+  EXPECT_NEAR(render_tabs->rect.y, tab_rect.y, 0.001F);
+
+  tree.clear();
+  arv::ui::PlayerMenuUiModel key_binds_menu = settings_menu;
+  key_binds_menu.settings.active_section_id = "key_binds";
+  key_binds_menu.settings.capture =
+      arv::ui::PlayerMenuSettingsCaptureView{"Jump", 0U};
+  arv::ui::append_player_menu_ui(tree, key_binds_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+  const auto* listening = tree.find_by_stable_id("key_binds.row.0.primary.label");
+  ASSERT_NE(listening, nullptr);
+  EXPECT_EQ(listening->text, "Listening");
+  EXPECT_NE(tree.find_by_stable_id("key_binds.cancel_capture.label"), nullptr);
+
+  tree.clear();
+  arv::ui::PlayerMenuUiModel exit_menu = settings_menu;
+  exit_menu.active_tab_id = "exit";
+  exit_menu.tabs[2].selected = false;
+  exit_menu.tabs[3].selected = true;
+  arv::ui::append_player_menu_ui(tree, exit_menu);
+  tree.layout({800.0F, 600.0F}, &text);
+  const auto* exit_panel = tree.find_by_stable_id("player_menu.panel");
+  ASSERT_NE(exit_panel, nullptr);
+  EXPECT_NEAR(exit_panel->rect.y, panel_rect.y, 0.001F);
+  const auto* main_menu = tree.find_by_stable_id("player_menu.exit.main_menu.label");
+  const auto* quit = tree.find_by_stable_id("player_menu.exit.quit.label");
+  ASSERT_NE(main_menu, nullptr);
+  ASSERT_NE(quit, nullptr);
+  EXPECT_EQ(main_menu->text, "Back to Main Menu");
+  EXPECT_EQ(quit->text, "Quit");
+}
+
 TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;

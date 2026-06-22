@@ -329,6 +329,19 @@ PlayerMenuTab ClientRuntime::player_menu_tab() const noexcept {
   return impl_->ui.player_menu_tab();
 }
 
+PlayerMenuSettingsSection ClientRuntime::player_menu_settings_section() const noexcept {
+  return impl_->ui.player_menu_settings_section();
+}
+
+f32 ClientRuntime::player_menu_settings_scroll_y() const noexcept {
+  return impl_->ui.player_menu_settings_scroll_y();
+}
+
+const std::optional<PlayerMenuKeyBindCapture>&
+ClientRuntime::player_menu_key_bind_capture() const noexcept {
+  return impl_->ui.player_menu_key_bind_capture();
+}
+
 const std::string& ClientRuntime::player_menu_search() const noexcept {
   return impl_->ui.player_menu_search();
 }
@@ -355,6 +368,27 @@ const std::string& ClientRuntime::selected_crafting_category_id() const noexcept
 
 void ClientRuntime::set_player_menu_tab(PlayerMenuTab tab) noexcept {
   impl_->ui.set_player_menu_tab(tab);
+}
+
+void ClientRuntime::set_player_menu_settings_section(
+    PlayerMenuSettingsSection section) noexcept {
+  impl_->ui.set_player_menu_settings_section(section);
+}
+
+void ClientRuntime::scroll_player_menu_settings(
+    f32 wheel_y,
+    usize row_count,
+    f32 row_height,
+    f32 viewport_height) noexcept {
+  impl_->ui.scroll_player_menu_settings(wheel_y, row_count, row_height, viewport_height);
+}
+
+void ClientRuntime::set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture) {
+  impl_->ui.set_player_menu_key_bind_capture(std::move(capture));
+}
+
+void ClientRuntime::clear_player_menu_key_bind_capture() noexcept {
+  impl_->ui.clear_player_menu_key_bind_capture();
 }
 
 void ClientRuntime::clear_player_menu_search() noexcept {

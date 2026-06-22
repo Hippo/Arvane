@@ -208,7 +208,7 @@ int DesktopFrameLoop::run() {
 
     ui::UIScreenManager& active_screens = active_screen_manager();
     ui::UIContext menu_context = make_menu_context(active_screens);
-    handle_captured_menu_input(platform_input, menu_context, active_screens);
+    handle_captured_menu_input(platform_input, menu_context, active_screens, active_session);
     handle_pause_menu_input(
         platform_input,
         menu_context,
@@ -518,7 +518,19 @@ void DesktopFrameLoop::handle_pause_menu_input(
 void DesktopFrameLoop::handle_captured_menu_input(
     platform::InputSnapshot& platform_input,
     ui::UIContext& menu_context,
-    ui::UIScreenManager& screens) {
+    ui::UIScreenManager& screens,
+    DesktopGameSession* active_session) {
+  if (!debug_menu_.open &&
+      active_session != nullptr &&
+      active_session->client != nullptr &&
+      client::route_player_menu_captured_input(
+          ui_tree_,
+          *active_session->client,
+          menu_context.command_sink,
+          platform_input)) {
+    client::clear_platform_input_captured_binding_edges(platform_input);
+    return;
+  }
   if (debug_menu_.open ||
       !client::route_captured_screen_input(screens, menu_context, platform_input)) {
     return;
@@ -546,7 +558,9 @@ bool DesktopFrameLoop::route_input(
         ui_tree_,
         *active_session->client,
         platform_input,
-        active_session->client->inventory_cursor_stack().has_value());
+        active_session->client->inventory_cursor_stack().has_value(),
+        menu_context.command_sink,
+        menu_context.data_source);
   } else if (!debug_menu_.open && has_session && active_session->client->chat_open()) {
     (void)route_chat_mouse_input(*active_session, platform_input);
   }

@@ -185,7 +185,8 @@ private:
   void handle_captured_menu_input(
       platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,
-      ui::UIScreenManager& screens);
+      ui::UIScreenManager& screens,
+      DesktopGameSession* active_session);
   [[nodiscard]] bool route_input(
       const platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,

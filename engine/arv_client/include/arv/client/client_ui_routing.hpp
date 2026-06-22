@@ -46,7 +46,20 @@ struct GameplayPauseMenuRoutingResult {
     ui::UiTree& ui_tree,
     ClientRuntime& client,
     const platform::InputSnapshot& platform_input,
-    bool has_carried_stack);
+    bool has_carried_stack,
+    ui::UICommandSink* command_sink = nullptr,
+    const ui::UIScreenDataSource* data_source = nullptr);
+
+[[nodiscard]] bool route_player_menu_captured_input(
+    ClientRuntime& client,
+    ui::UICommandSink* command_sink,
+    const std::optional<ui::CapturedInputView>& captured_input);
+
+[[nodiscard]] bool route_player_menu_captured_input(
+    ui::UiTree& ui_tree,
+    ClientRuntime& client,
+    ui::UICommandSink* command_sink,
+    const platform::InputSnapshot& platform_input);
 
 [[nodiscard]] bool route_screen_mouse_input(
     ui::UIScreenManager& screen_manager,

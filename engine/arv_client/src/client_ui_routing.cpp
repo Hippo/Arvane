@@ -8,11 +8,19 @@
 #include "arv/player/inventory.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace arv::client {
 namespace {
+
+constexpr i32 MaxConfigurableChunkDistance = 32;
+constexpr f32 PlayerMenuSettingsViewportHeight = 344.0F;
+constexpr f32 PlayerMenuSettingsRowHeight = 42.0F;
+constexpr f32 PlayerMenuKeyBindRowHeight = 54.0F;
 
 [[nodiscard]] bool shift_modifier_pressed(const platform::InputSnapshot& input) noexcept {
   return input.shift_modifier_held ||
@@ -124,6 +132,43 @@ namespace {
   return true;
 }
 
+[[nodiscard]] bool consume_suffix(
+    std::string_view value,
+    std::string_view suffix,
+    std::string_view& prefix) noexcept {
+  if (!value.ends_with(suffix)) {
+    return false;
+  }
+  prefix = value.substr(0U, value.size() - suffix.size());
+  return true;
+}
+
+[[nodiscard]] bool parse_index_after_prefix(
+    std::string_view value,
+    std::string_view prefix,
+    usize& index) noexcept {
+  if (!value.starts_with(prefix)) {
+    return false;
+  }
+  value = value.substr(prefix.size());
+  const usize dot = value.find('.');
+  if (dot != std::string_view::npos) {
+    value = value.substr(0U, dot);
+  }
+  if (value.empty()) {
+    return false;
+  }
+  usize parsed = 0U;
+  for (char ch : value) {
+    if (ch < '0' || ch > '9') {
+      return false;
+    }
+    parsed = parsed * 10U + static_cast<usize>(ch - '0');
+  }
+  index = parsed;
+  return true;
+}
+
 [[nodiscard]] std::optional<PlayerMenuTab> player_menu_tab_from_id(
     std::string_view id) noexcept {
   if (id == "inventory") {
@@ -141,9 +186,347 @@ namespace {
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<PlayerMenuSettingsSection> settings_section_from_action(
+    std::string_view action_id) noexcept {
+  if (action_id == "settings.overview") {
+    return PlayerMenuSettingsSection::Overview;
+  }
+  if (action_id == "settings.render") {
+    return PlayerMenuSettingsSection::Render;
+  }
+  if (action_id == "settings.key_binds") {
+    return PlayerMenuSettingsSection::KeyBinds;
+  }
+  if (action_id == "settings.controls") {
+    return PlayerMenuSettingsSection::Controls;
+  }
+  if (action_id == "settings.interface") {
+    return PlayerMenuSettingsSection::Interface;
+  }
+  return std::nullopt;
+}
+
+void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept {
+  settings.load_distance =
+      std::clamp(settings.load_distance, 1, MaxConfigurableChunkDistance);
+  settings.simulation_distance =
+      std::clamp(settings.simulation_distance, 0, settings.load_distance);
+  settings.stream_distance =
+      std::clamp(settings.stream_distance, 1, settings.load_distance);
+  settings.view_distance =
+      std::clamp(settings.view_distance, 1, settings.stream_distance);
+}
+
+[[nodiscard]] bool set_if_changed(i32& target, i32 next) noexcept {
+  if (target == next) {
+    return false;
+  }
+  target = next;
+  return true;
+}
+
+[[nodiscard]] bool set_if_changed(u32& target, u32 next) noexcept {
+  if (target == next) {
+    return false;
+  }
+  target = next;
+  return true;
+}
+
+[[nodiscard]] bool set_if_changed(f32& target, f32 next) noexcept {
+  if (std::abs(target - next) <= 0.0001F) {
+    return false;
+  }
+  target = next;
+  return true;
+}
+
+[[nodiscard]] f32 stepped(f32 value, f32 delta, f32 min, f32 max) noexcept {
+  return std::clamp(value + delta, min, max);
+}
+
+[[nodiscard]] bool apply_render_step(
+    ui::RenderSettingsView& settings,
+    std::string_view action_id) {
+  std::string_view prefix;
+  f32 direction = 0.0F;
+  if (consume_suffix(action_id, ".inc", prefix)) {
+    direction = 1.0F;
+  } else if (consume_suffix(action_id, ".dec", prefix)) {
+    direction = -1.0F;
+  }
+  if (direction == 0.0F) {
+    return false;
+  }
+
+  bool changed = false;
+  if (prefix == "render.fps_cap") {
+    changed = set_if_changed(
+        settings.fps_cap,
+        static_cast<u32>(std::lround(stepped(
+            static_cast<f32>(settings.fps_cap),
+            direction * 5.0F,
+            30.0F,
+            240.0F))));
+  } else if (prefix == "render.load_distance") {
+    changed = set_if_changed(
+        settings.load_distance,
+        static_cast<i32>(std::lround(stepped(
+            static_cast<f32>(settings.load_distance),
+            direction,
+            1.0F,
+            static_cast<f32>(MaxConfigurableChunkDistance)))));
+    normalize_render_chunk_distances(settings);
+  } else if (prefix == "render.simulation_distance") {
+    changed = set_if_changed(
+        settings.simulation_distance,
+        static_cast<i32>(std::lround(stepped(
+            static_cast<f32>(settings.simulation_distance),
+            direction,
+            0.0F,
+            static_cast<f32>(settings.load_distance)))));
+    normalize_render_chunk_distances(settings);
+  } else if (prefix == "render.view_distance") {
+    changed = set_if_changed(
+        settings.view_distance,
+        static_cast<i32>(std::lround(stepped(
+            static_cast<f32>(settings.view_distance),
+            direction,
+            1.0F,
+            static_cast<f32>(std::max(1, settings.stream_distance))))));
+    settings.stream_distance = std::max(settings.stream_distance, settings.view_distance);
+    normalize_render_chunk_distances(settings);
+  } else if (prefix == "render.stream_distance") {
+    changed = set_if_changed(
+        settings.stream_distance,
+        static_cast<i32>(std::lround(stepped(
+            static_cast<f32>(settings.stream_distance),
+            direction,
+            static_cast<f32>(std::max(1, settings.view_distance)),
+            static_cast<f32>(settings.load_distance)))));
+    settings.view_distance = std::min(settings.view_distance, settings.stream_distance);
+    normalize_render_chunk_distances(settings);
+  } else if (prefix == "render.mesh_upload_budget") {
+    changed = set_if_changed(
+        settings.mesh_upload_budget,
+        static_cast<u32>(std::lround(stepped(
+            static_cast<f32>(settings.mesh_upload_budget),
+            direction,
+            1.0F,
+            32.0F))));
+  } else if (prefix == "render.star_intensity") {
+    changed = set_if_changed(settings.star_intensity, stepped(settings.star_intensity, direction * 0.05F, 0.0F, 3.0F));
+  } else if (prefix == "render.cloud_intensity") {
+    changed = set_if_changed(settings.cloud_intensity, stepped(settings.cloud_intensity, direction * 0.05F, 0.0F, 3.0F));
+  } else if (prefix == "render.cirrus") {
+    changed = set_if_changed(settings.cirrus_amount, stepped(settings.cirrus_amount, direction * 0.05F, 0.0F, 1.0F));
+  } else if (prefix == "render.cumulus") {
+    changed = set_if_changed(settings.cumulus_amount, stepped(settings.cumulus_amount, direction * 0.05F, 0.0F, 1.0F));
+  } else if (prefix == "render.outline_red") {
+    changed = set_if_changed(settings.outline_red, stepped(settings.outline_red, direction * 0.05F, 0.0F, 1.0F));
+  } else if (prefix == "render.outline_green") {
+    changed = set_if_changed(settings.outline_green, stepped(settings.outline_green, direction * 0.05F, 0.0F, 1.0F));
+  } else if (prefix == "render.outline_blue") {
+    changed = set_if_changed(settings.outline_blue, stepped(settings.outline_blue, direction * 0.05F, 0.0F, 1.0F));
+  } else if (prefix == "render.outline_thickness") {
+    changed = set_if_changed(settings.outline_thickness, stepped(settings.outline_thickness, direction * 0.05F, 0.1F, 2.0F));
+  }
+  return changed;
+}
+
+[[nodiscard]] bool apply_controls_step(
+    ui::ControlsSettingsView& settings,
+    std::string_view action_id) {
+  std::string_view prefix;
+  f32 direction = 0.0F;
+  if (consume_suffix(action_id, ".inc", prefix)) {
+    direction = 1.0F;
+  } else if (consume_suffix(action_id, ".dec", prefix)) {
+    direction = -1.0F;
+  }
+  if (prefix != "controls.mouse_sensitivity" || direction == 0.0F) {
+    return false;
+  }
+  return set_if_changed(
+      settings.mouse_sensitivity_percent,
+      stepped(settings.mouse_sensitivity_percent, direction * 5.0F, 10.0F, 300.0F));
+}
+
+[[nodiscard]] bool apply_interface_step(
+    ui::InterfaceSettingsView& settings,
+    std::string_view action_id) {
+  std::string_view prefix;
+  f32 direction = 0.0F;
+  if (consume_suffix(action_id, ".inc", prefix)) {
+    direction = 1.0F;
+  } else if (consume_suffix(action_id, ".dec", prefix)) {
+    direction = -1.0F;
+  }
+  if (direction == 0.0F) {
+    return false;
+  }
+  if (prefix == "interface.chat_history") {
+    return set_if_changed(
+        settings.chat_history_max,
+        static_cast<u32>(std::lround(stepped(
+            static_cast<f32>(settings.chat_history_max),
+            direction * 100.0F,
+            100.0F,
+            5000.0F))));
+  }
+  if (prefix == "interface.open_lines") {
+    return set_if_changed(
+        settings.chat_open_lines,
+        static_cast<u32>(std::lround(stepped(
+            static_cast<f32>(settings.chat_open_lines),
+            direction,
+            1.0F,
+            16.0F))));
+  }
+  if (prefix == "interface.passive_lines") {
+    return set_if_changed(
+        settings.chat_passive_lines,
+        static_cast<u32>(std::lround(stepped(
+            static_cast<f32>(settings.chat_passive_lines),
+            direction,
+            0.0F,
+            16.0F))));
+  }
+  if (prefix == "interface.visible_seconds") {
+    return set_if_changed(
+        settings.chat_passive_visible_seconds,
+        stepped(settings.chat_passive_visible_seconds, direction * 0.5F, 0.0F, 30.0F));
+  }
+  if (prefix == "interface.fade_seconds") {
+    return set_if_changed(
+        settings.chat_passive_fade_seconds,
+        stepped(settings.chat_passive_fade_seconds, direction * 0.5F, 0.0F, 30.0F));
+  }
+  return false;
+}
+
+[[nodiscard]] bool submit_player_menu_settings_action(
+    const ui::UiAction& action,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
+  if (command_sink == nullptr || data_source == nullptr) {
+    return false;
+  }
+  if (action.action_id == "render.frame_sync.off" ||
+      action.action_id == "render.frame_sync.vsync" ||
+      action.action_id == "render.frame_sync.fps_cap" ||
+      action.action_id == "render.local_player_body" ||
+      action.action_id.starts_with("render.")) {
+    ui::RenderSettingsView settings = data_source->render_settings();
+    bool changed = true;
+    if (action.action_id == "render.frame_sync.off") {
+      settings.frame_sync = ui::SettingsFrameSyncMode::Off;
+    } else if (action.action_id == "render.frame_sync.vsync") {
+      settings.frame_sync = ui::SettingsFrameSyncMode::VSync;
+    } else if (action.action_id == "render.frame_sync.fps_cap") {
+      settings.frame_sync = ui::SettingsFrameSyncMode::FpsCap;
+    } else if (action.action_id == "render.local_player_body") {
+      settings.show_local_player_body = !settings.show_local_player_body;
+    } else {
+      changed = apply_render_step(settings, action.action_id);
+    }
+    if (changed) {
+      command_sink->submit(ui::SetRenderSettingsCommand{settings});
+    }
+    return changed;
+  }
+  if (action.action_id.starts_with("controls.")) {
+    ui::ControlsSettingsView settings = data_source->controls_settings();
+    if (!apply_controls_step(settings, action.action_id)) {
+      return false;
+    }
+    command_sink->submit(ui::SetControlsSettingsCommand{settings});
+    return true;
+  }
+  if (action.action_id.starts_with("interface.")) {
+    ui::InterfaceSettingsView settings = data_source->interface_settings();
+    if (!apply_interface_step(settings, action.action_id)) {
+      return false;
+    }
+    command_sink->submit(ui::SetInterfaceSettingsCommand{settings});
+    return true;
+  }
+  return false;
+}
+
+[[nodiscard]] bool apply_player_menu_key_bind_action(
+    ClientRuntime& client,
+    const ui::UiAction& action,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
+  if (action.action_id == "key_bind.cancel_capture") {
+    client.clear_player_menu_key_bind_capture();
+    return true;
+  }
+
+  usize index = 0U;
+  if (!parse_index_after_prefix(action.element_id, "key_binds.row.", index) ||
+      data_source == nullptr) {
+    return false;
+  }
+  const std::vector<ui::KeyBindEntryView> entries = data_source->key_bind_entries();
+  if (index >= entries.size()) {
+    return false;
+  }
+  const std::string& action_name = entries[index].action_name;
+  if (action.action_id == "key_bind.capture_primary") {
+    client.set_player_menu_key_bind_capture({action_name, 0U});
+    return true;
+  }
+  if (action.action_id == "key_bind.capture_secondary") {
+    client.set_player_menu_key_bind_capture({action_name, 1U});
+    return true;
+  }
+  if (command_sink == nullptr) {
+    return false;
+  }
+  if (action.action_id == "key_bind.clear_secondary") {
+    command_sink->submit(ui::SetKeyBindCommand{action_name, 1U, std::nullopt});
+    client.clear_player_menu_key_bind_capture();
+    return true;
+  }
+  if (action.action_id == "key_bind.reset") {
+    command_sink->submit(ui::ResetKeyBindCommand{action_name});
+    client.clear_player_menu_key_bind_capture();
+    return true;
+  }
+  return false;
+}
+
+[[nodiscard]] usize player_menu_settings_row_count(
+    PlayerMenuSettingsSection section,
+    const ui::UIScreenDataSource* data_source) {
+  switch (section) {
+    case PlayerMenuSettingsSection::Render:
+      return 16U;
+    case PlayerMenuSettingsSection::KeyBinds:
+      return data_source == nullptr ? 0U : data_source->key_bind_entries().size();
+    case PlayerMenuSettingsSection::Controls:
+      return 1U;
+    case PlayerMenuSettingsSection::Interface:
+      return 5U;
+    case PlayerMenuSettingsSection::Overview:
+      return 0U;
+  }
+  return 0U;
+}
+
+[[nodiscard]] f32 player_menu_settings_row_height(PlayerMenuSettingsSection section) noexcept {
+  return section == PlayerMenuSettingsSection::KeyBinds
+             ? PlayerMenuKeyBindRowHeight
+             : PlayerMenuSettingsRowHeight;
+}
+
 [[nodiscard]] bool apply_player_menu_action(
     ClientRuntime& client,
-    const std::optional<ui::UiAction>& action) {
+    const std::optional<ui::UiAction>& action,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
   if (!action.has_value()) {
     return false;
   }
@@ -177,6 +560,33 @@ namespace {
   }
   if (action->action_id == "crafting.search.focus") {
     client.set_player_menu_tab(PlayerMenuTab::Crafting);
+    return true;
+  }
+  if (const std::optional<PlayerMenuSettingsSection> section =
+          settings_section_from_action(action->action_id);
+      section.has_value()) {
+    client.set_player_menu_tab(PlayerMenuTab::Settings);
+    client.set_player_menu_settings_section(section.value());
+    return true;
+  }
+  if (action->action_id == "player_menu.exit.main_menu") {
+    if (command_sink != nullptr) {
+      command_sink->submit(ui::BackToMainMenuCommand{});
+      return true;
+    }
+    return false;
+  }
+  if (action->action_id == "player_menu.exit.quit") {
+    if (command_sink != nullptr) {
+      command_sink->submit(ui::QuitGameCommand{});
+      return true;
+    }
+    return false;
+  }
+  if (action->action_id.starts_with("key_bind.")) {
+    return apply_player_menu_key_bind_action(client, action.value(), command_sink, data_source);
+  }
+  if (submit_player_menu_settings_action(action.value(), command_sink, data_source)) {
     return true;
   }
   return false;
@@ -227,15 +637,28 @@ bool route_inventory_mouse_input(
     ui::UiTree& ui_tree,
     ClientRuntime& client,
     const platform::InputSnapshot& platform_input,
-    bool has_carried_stack) {
+    bool has_carried_stack,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
   bool changed = false;
   const Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree.route_mouse_move(cursor);
+  if (client.inventory_open() &&
+      client.player_menu_tab() == PlayerMenuTab::Settings &&
+      platform_input.mouse_wheel_y != 0.0F) {
+    const PlayerMenuSettingsSection section = client.player_menu_settings_section();
+    client.scroll_player_menu_settings(
+        platform_input.mouse_wheel_y,
+        player_menu_settings_row_count(section, data_source),
+        player_menu_settings_row_height(section),
+        PlayerMenuSettingsViewportHeight);
+    changed = true;
+  }
   if (platform_input.mouse_left_pressed) {
     const std::optional<ui::UiNodeID> hit = ui_tree.hit_test(cursor);
     const std::optional<ui::UiAction> action =
         ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Left);
-    if (apply_player_menu_action(client, action)) {
+    if (apply_player_menu_action(client, action, command_sink, data_source)) {
       return true;
     }
     if (client.container_open() && shift_modifier_pressed(platform_input)) {
@@ -281,6 +704,61 @@ bool route_inventory_mouse_input(
     (void)ui_tree.route_mouse_up(cursor, ui::UiMouseButton::Right);
   }
   return changed;
+}
+
+bool route_player_menu_captured_input(
+    ClientRuntime& client,
+    ui::UICommandSink* command_sink,
+    const std::optional<ui::CapturedInputView>& captured_input) {
+  if (command_sink == nullptr ||
+      !captured_input.has_value() ||
+      !client.inventory_open() ||
+      client.player_menu_tab() != PlayerMenuTab::Settings) {
+    return false;
+  }
+  const std::optional<PlayerMenuKeyBindCapture>& capture =
+      client.player_menu_key_bind_capture();
+  if (!capture.has_value()) {
+    return false;
+  }
+
+  ui::InputBindingView binding;
+  binding.valid = true;
+  binding.device = captured_input->device;
+  binding.input_code = captured_input->input_code;
+  binding.label = captured_input->label.empty()
+                      ? captured_input->input_code
+                      : captured_input->label;
+  binding.modifiers = captured_input->modifiers;
+  command_sink->submit(
+      ui::SetKeyBindCommand{capture->action_name, capture->slot, std::move(binding)});
+  client.clear_player_menu_key_bind_capture();
+  return true;
+}
+
+bool route_player_menu_captured_input(
+    ui::UiTree& ui_tree,
+    ClientRuntime& client,
+    ui::UICommandSink* command_sink,
+    const platform::InputSnapshot& platform_input) {
+  if (!platform_input.raw_input.has_value()) {
+    return false;
+  }
+  if (platform_input.raw_input->binding.device_type ==
+      platform::InputDeviceType::MouseButton) {
+    const std::optional<ui::UiNodeID> hit =
+        ui_tree.hit_test({platform_input.cursor_x, platform_input.cursor_y});
+    if (hit.has_value()) {
+      const ui::UiElement* element = ui_tree.element(hit.value());
+      if (element != nullptr && element->action == "key_bind.cancel_capture") {
+        return false;
+      }
+    }
+  }
+  return route_player_menu_captured_input(
+      client,
+      command_sink,
+      captured_input_from_platform(platform_input.raw_input.value()));
 }
 
 bool route_screen_mouse_input(
