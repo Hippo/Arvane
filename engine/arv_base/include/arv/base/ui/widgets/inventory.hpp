@@ -73,6 +73,10 @@ struct CraftingRecipeTileView {
 struct CraftingUiModel {
   std::string title{"Crafting"};
   std::string search{};
+  usize search_cursor{};
+  usize search_selection_start{};
+  usize search_selection_end{};
+  bool search_active{true};
   std::vector<CraftingCategoryTabView> categories{};
   std::vector<CraftingRecipeTileView> recipes{};
   std::string selected_recipe_id{};

@@ -614,6 +614,66 @@ TEST(ClientRuntimeTests, ChatDraftSupportsCursorSelectionClipboardAndPaste) {
   EXPECT_EQ(client.chat_draft(), "World");
 }
 
+TEST(ClientRuntimeTests, PlayerMenuSearchSupportsCursorSelectionClipboardAndPaste) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  ASSERT_TRUE(client.inventory_open());
+  client.set_player_menu_tab(arv::client::PlayerMenuTab::Crafting);
+  client.submit_input(arv::client::InputFrame{.text_input = "Alpha"});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {
+              text_edit(arv::core::TextEditCommand::MoveLeft),
+              text_edit(arv::core::TextEditCommand::MoveLeft),
+          }});
+  client.submit_input(arv::client::InputFrame{.text_input = "X"});
+  EXPECT_EQ(client.player_menu_search(), "AlpXha");
+  EXPECT_EQ(client.player_menu_search_cursor(), 4U);
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::MoveLeft, true)}});
+  EXPECT_EQ(client.player_menu_search_selection_start(), 3U);
+  EXPECT_EQ(client.player_menu_search_selection_end(), 4U);
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::Copy)}});
+  EXPECT_EQ(client.consume_pending_clipboard_text(), std::optional<std::string>{"X"});
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {text_edit(arv::core::TextEditCommand::Cut)}});
+  EXPECT_EQ(client.player_menu_search(), "Alpha");
+  EXPECT_EQ(client.consume_pending_clipboard_text(), std::optional<std::string>{"X"});
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .text_edit_events = {
+              text_edit(arv::core::TextEditCommand::SelectAll),
+              text_edit(arv::core::TextEditCommand::Paste, false, "World"),
+          }});
+  EXPECT_EQ(client.player_menu_search(), "World");
+}
+
+TEST(ClientRuntimeTests, PlayerMenuSearchTypingDoesNotToggleInventoryOnBoundKey) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  ASSERT_TRUE(client.inventory_open());
+  client.set_player_menu_tab(arv::client::PlayerMenuTab::Crafting);
+
+  client.submit_input(
+      arv::client::InputFrame{
+          .open_inventory_pressed = true,
+          .text_input = "e",
+      });
+
+  EXPECT_TRUE(client.inventory_open());
+  EXPECT_EQ(client.player_menu_search(), "e");
+  EXPECT_EQ(client.player_menu_search_cursor(), 1U);
+}
+
 TEST(ClientRuntimeTests, ChatHistoryNavigationBottomsOutAtUncommittedDraft) {
   arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
 

@@ -968,7 +968,7 @@ TEST(GameplayUiTests, BuildsInventoryChatTabAndScoreboardSurfaces) {
   EXPECT_FLOAT_EQ(fps->rect.y, 8.0F);
 }
 
-TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
+TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
 
@@ -993,8 +993,13 @@ TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
 
   const auto* inventory_panel = tree.find_by_stable_id("player_menu.panel");
   ASSERT_NE(inventory_panel, nullptr);
-  EXPECT_NEAR(inventory_panel->rect.width, 560.0F, 0.001F);
-  EXPECT_NEAR(inventory_panel->rect.height, 344.0F, 0.001F);
+  EXPECT_NEAR(inventory_panel->rect.width, 720.0F, 0.001F);
+  EXPECT_NEAR(inventory_panel->rect.height, 392.0F, 0.001F);
+  EXPECT_NEAR(inventory_panel->rect.y, 72.0F, 0.001F);
+  const auto* inventory_tabs = tree.find_by_stable_id("player_menu.tabs");
+  ASSERT_NE(inventory_tabs, nullptr);
+  const arv::ui::UiRect tab_rect = inventory_tabs->rect;
+  const arv::ui::UiRect inventory_panel_rect = inventory_panel->rect;
   const auto* inventory_tab_label =
       tree.find_by_stable_id("player_menu.tab.inventory.label");
   ASSERT_NE(inventory_tab_label, nullptr);
@@ -1003,6 +1008,18 @@ TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
       tree.find_by_stable_id("player_menu.tab.crafting.label");
   ASSERT_NE(crafting_tab_label, nullptr);
   EXPECT_EQ(crafting_tab_label->text, "Crafting");
+  const auto* inventory_grid = tree.find_by_stable_id("player_menu.inventory.grid");
+  const auto* inventory_first_slot = tree.find_by_stable_id("inventory.slot.9");
+  const auto* inventory_hotbar = tree.find_by_stable_id("player_menu.inventory.hotbar");
+  ASSERT_NE(inventory_grid, nullptr);
+  ASSERT_NE(inventory_first_slot, nullptr);
+  ASSERT_NE(inventory_hotbar, nullptr);
+  EXPECT_NEAR(inventory_grid->rect.width, 480.0F, 0.001F);
+  EXPECT_NEAR(inventory_first_slot->rect.width, 48.0F, 0.001F);
+  EXPECT_LE(
+      inventory_panel->rect.y + inventory_panel->rect.height -
+          (inventory_hotbar->rect.y + inventory_hotbar->rect.height),
+      72.0F);
 
   tree.clear();
   arv::ui::PlayerMenuUiModel crafting_menu = inventory_menu;
@@ -1013,6 +1030,10 @@ TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
       {"arvane:building", "Building", {}, false},
       {"arvane:combat", "Combat", {}, true},
   };
+  crafting_menu.crafting.search = "sword";
+  crafting_menu.crafting.search_cursor = 5U;
+  crafting_menu.crafting.search_selection_start = 1U;
+  crafting_menu.crafting.search_selection_end = 3U;
   crafting_menu.crafting.recipes = {
       {"arvane:wood_sword", "Wood Sword", slots[0], true, true},
   };
@@ -1031,15 +1052,50 @@ TEST(GameplayUiTests, PlayerMenuRendersButtonLabelsAndUsesCompactFrames) {
   ASSERT_NE(crafting_panel, nullptr);
   EXPECT_NEAR(crafting_panel->rect.width, 720.0F, 0.001F);
   EXPECT_NEAR(crafting_panel->rect.height, 520.0F, 0.001F);
+  EXPECT_NEAR(crafting_panel->rect.y, inventory_panel_rect.y, 0.001F);
+  const auto* crafting_tabs = tree.find_by_stable_id("player_menu.tabs");
+  ASSERT_NE(crafting_tabs, nullptr);
+  EXPECT_NEAR(crafting_tabs->rect.x, tab_rect.x, 0.001F);
+  EXPECT_NEAR(crafting_tabs->rect.y, tab_rect.y, 0.001F);
   const auto* category_label = tree.find_by_stable_id("crafting.category.0.label");
   ASSERT_NE(category_label, nullptr);
   EXPECT_EQ(category_label->text, "Building");
+  const auto* search = tree.find_by_stable_id("crafting.search");
+  ASSERT_NE(search, nullptr);
+  ASSERT_TRUE(search->text_input.has_value());
+  EXPECT_TRUE(search->text_input->active);
+  EXPECT_EQ(search->text, "sword");
+  EXPECT_EQ(search->text_input->cursor, 5U);
+  EXPECT_EQ(search->text_input->selection_start, 1U);
+  EXPECT_EQ(search->text_input->selection_end, 3U);
+  const auto* search_text = tree.find_by_stable_id("crafting.search.text");
+  ASSERT_NE(search_text, nullptr);
+  EXPECT_EQ(search_text->text, "sword");
   const auto* clear_label = tree.find_by_stable_id("crafting.search.clear.label");
   ASSERT_NE(clear_label, nullptr);
   EXPECT_EQ(clear_label->text, "X");
   const auto* craft_label = tree.find_by_stable_id("crafting.craft.label");
   ASSERT_NE(craft_label, nullptr);
   EXPECT_EQ(craft_label->text, "Craft");
+  const auto* recipes_panel = tree.find_by_stable_id("crafting.recipes.panel");
+  const auto* inventory_stack =
+      tree.find_by_stable_id("player_menu.inventory.compact_stack");
+  const auto* detail = tree.find_by_stable_id("crafting.detail");
+  const auto* detail_title = tree.find_by_stable_id("crafting.detail.title");
+  ASSERT_NE(recipes_panel, nullptr);
+  ASSERT_NE(inventory_stack, nullptr);
+  ASSERT_NE(detail, nullptr);
+  ASSERT_NE(detail_title, nullptr);
+  EXPECT_GE(inventory_stack->rect.y, recipes_panel->rect.y + recipes_panel->rect.height);
+  EXPECT_LE(
+      inventory_stack->rect.x + inventory_stack->rect.width,
+      detail->rect.x);
+  const arv::f32 detail_title_center =
+      detail_title->rect.x + detail_title->rect.width * 0.5F;
+  EXPECT_NEAR(
+      detail_title_center,
+      detail->rect.x + detail->rect.width * 0.5F,
+      0.001F);
 }
 
 TEST(GameplayUiTests, RichChatRunsExposeColorAndHitActions) {

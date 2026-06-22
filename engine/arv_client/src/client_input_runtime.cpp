@@ -31,6 +31,16 @@ inline constexpr u32 MaxDropItemRequestsPerTick = 4U;
   return !input.text_input.empty() && input.text_input.front() == '/';
 }
 
+[[nodiscard]] bool player_menu_search_is_receiving_text(
+    const ClientUiState& ui,
+    const InputFrame& input) noexcept {
+  return ui.inventory_open() &&
+         ui.player_menu_tab() == PlayerMenuTab::Crafting &&
+         (!input.text_input.empty() ||
+          input.text_backspace_pressed ||
+          !input.text_edit_events.empty());
+}
+
 [[nodiscard]] bool has_action(protocol::PlayerActionFlags flags) noexcept {
   return flags != protocol::PlayerActionFlags::None;
 }
@@ -529,7 +539,8 @@ void ClientInputRuntime::submit_input(
 
   if (input.text_cancel_pressed && (ui.inventory_open() || ui.chat_open())) {
     ui.close_ui();
-  } else if (!ui.chat_open() && input.open_inventory_pressed) {
+  } else if (!ui.chat_open() && input.open_inventory_pressed &&
+             !player_menu_search_is_receiving_text(ui, input)) {
     ui.toggle_inventory_if_allowed(player_controller.resolved_permissions());
   }
   if (!was_chat_open && input.open_chat_pressed) {

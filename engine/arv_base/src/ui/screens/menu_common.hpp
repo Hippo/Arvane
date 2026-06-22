@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arv/base/ui/screens/screen.hpp"
+#include "arv/base/ui/widgets/text_input.hpp"
 #include "arv/core/text_edit.hpp"
 
 #include <algorithm>
@@ -364,25 +365,21 @@ inline void add_text_box(
       theme.widgets.input.padding_y};
   box.focusable = true;
   box.selected = active;
-  box.clip_children = true;
-  box.text = value.value;
-  box.text_input = UiTextInputVisual{
-      active,
-      value.cursor,
-      value.selection_start(),
-      value.selection_end()};
   apply_control_style(box, theme, UiControlRole::Neutral, true, active);
   box.style.radius = theme.widgets.input.radius;
-  box.style.text_role = UiTextRole::Body;
   box.action = std::move(action);
-  const UiNodeID box_id = tree.add_child(parent, std::move(box));
-  const bool empty = value.value.empty();
-  tree.add_child(
-      box_id,
-      make_text(
-          stable_id + ".text",
-          empty ? std::move(placeholder) : value.value,
-          empty ? theme.colors.text_muted : theme.colors.text));
+
+  TextInputFieldView input;
+  input.text = value.value;
+  input.placeholder = std::move(placeholder);
+  input.cursor = value.cursor;
+  input.selection_start = value.selection_start();
+  input.selection_end = value.selection_end();
+  input.active = active;
+  input.text_color = theme.colors.text;
+  input.placeholder_color = theme.colors.text_muted;
+  input.text_role = UiTextRole::Body;
+  add_text_input_field(tree, parent, std::move(box), input);
 }
 
 [[nodiscard]] inline bool parse_index_suffix(

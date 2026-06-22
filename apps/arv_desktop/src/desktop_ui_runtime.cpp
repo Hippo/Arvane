@@ -120,6 +120,15 @@ constexpr f32 TwoPi = 6.2831853071795864769F;
   hash = ui_cache_hash_append_bool(hash, session.client->inventory_open());
   hash = ui_cache_hash_append_bool(hash, session.client->chat_open());
   hash = ui_cache_hash_append_bool(hash, session.client->tab_menu_visible());
+  hash = ui_cache_hash_append_u64(
+      hash,
+      static_cast<u64>(session.client->player_menu_tab()));
+  hash = ui_cache_hash_append_string(hash, session.client->player_menu_search());
+  hash = ui_cache_hash_append_u64(hash, session.client->player_menu_search_cursor());
+  hash = ui_cache_hash_append_u64(hash, session.client->player_menu_search_selection_start());
+  hash = ui_cache_hash_append_u64(hash, session.client->player_menu_search_selection_end());
+  hash = ui_cache_hash_append_string(hash, session.client->selected_crafting_category_id());
+  hash = ui_cache_hash_append_string(hash, session.client->selected_crafting_recipe_id());
   hash = ui_cache_hash_append_string(hash, session.client->chat_draft());
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_cursor());
   hash = ui_cache_hash_append_u64(hash, session.client->chat_draft_selection_start());

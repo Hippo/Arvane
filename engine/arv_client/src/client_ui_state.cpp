@@ -62,6 +62,14 @@ usize ClientUiState::player_menu_search_cursor() const noexcept {
   return player_menu_search_.cursor;
 }
 
+usize ClientUiState::player_menu_search_selection_start() const noexcept {
+  return player_menu_search_.selection_start();
+}
+
+usize ClientUiState::player_menu_search_selection_end() const noexcept {
+  return player_menu_search_.selection_end();
+}
+
 const std::string& ClientUiState::selected_crafting_recipe_id() const noexcept {
   return selected_crafting_recipe_id_;
 }

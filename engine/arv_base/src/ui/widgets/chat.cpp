@@ -1,5 +1,6 @@
 #include "arv/base/ui/widgets/chat.hpp"
 
+#include "arv/base/ui/widgets/text_input.hpp"
 #include "widget_common.hpp"
 
 #include "arv/core/text_edit.hpp"
@@ -509,22 +510,19 @@ void append_chat_ui(UiTree& tree, ChatUiModel model) {
     input.style.letter_spacing = ChatLetterSpacing;
     input.focusable = true;
     input.action = "chat_input";
-    input.clip_children = true;
-    input.text = "> " + model.draft;
+    std::string visual_text = "> " + model.draft;
     constexpr usize PromptBytes = 2U;
-    const usize visual_text_size = input.text.size();
-    input.text_input = UiTextInputVisual{
-        true,
-        std::min(visual_text_size, PromptBytes + model.draft_cursor),
-        std::min(visual_text_size, PromptBytes + model.draft_selection_start),
-        std::min(visual_text_size, PromptBytes + model.draft_selection_end)};
-    const UiNodeID input_id = tree.add_child(stack_id, std::move(input));
-    tree.add_child(
-        input_id,
-        chat_line_text(
-            "chat.input.text",
-            "> " + model.draft,
-            theme.colors.text));
+    TextInputFieldView input_view;
+    input_view.text = std::move(visual_text);
+    input_view.cursor = PromptBytes + model.draft_cursor;
+    input_view.selection_start = PromptBytes + model.draft_selection_start;
+    input_view.selection_end = PromptBytes + model.draft_selection_end;
+    input_view.active = true;
+    input_view.text_color = theme.colors.text;
+    input_view.placeholder_color = theme.colors.text_muted;
+    input_view.text_role = UiTextRole::Body;
+    input_view.letter_spacing = ChatLetterSpacing;
+    add_text_input_field(tree, stack_id, std::move(input), input_view);
   }
 
   append_url_confirmation(tree, stack_id, model, chat_text_width);

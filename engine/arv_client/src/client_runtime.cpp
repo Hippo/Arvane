@@ -333,6 +333,18 @@ const std::string& ClientRuntime::player_menu_search() const noexcept {
   return impl_->ui.player_menu_search();
 }
 
+usize ClientRuntime::player_menu_search_cursor() const noexcept {
+  return impl_->ui.player_menu_search_cursor();
+}
+
+usize ClientRuntime::player_menu_search_selection_start() const noexcept {
+  return impl_->ui.player_menu_search_selection_start();
+}
+
+usize ClientRuntime::player_menu_search_selection_end() const noexcept {
+  return impl_->ui.player_menu_search_selection_end();
+}
+
 const std::string& ClientRuntime::selected_crafting_recipe_id() const noexcept {
   return impl_->ui.selected_crafting_recipe_id();
 }

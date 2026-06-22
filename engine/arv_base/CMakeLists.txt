@@ -24,6 +24,7 @@ set(ARV_BASE_UI_HEADERS
   include/arv/base/ui/widgets/items.hpp
   include/arv/base/ui/widgets/scoreboard.hpp
   include/arv/base/ui/widgets/tab_menu.hpp
+  include/arv/base/ui/widgets/text_input.hpp
 )
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
@@ -40,6 +41,7 @@ if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
     include/arv/base/ui/widgets/items.hpp
     include/arv/base/ui/widgets/scoreboard.hpp
     include/arv/base/ui/widgets/tab_menu.hpp
+    include/arv/base/ui/widgets/text_input.hpp
     src/ui/screens/pause_menu.cpp
     src/ui/screens/screen_manager.cpp
     src/ui/screens/settings.cpp

@@ -118,6 +118,9 @@ public:
   [[nodiscard]] bool inventory_open() const noexcept;
   [[nodiscard]] PlayerMenuTab player_menu_tab() const noexcept;
   [[nodiscard]] const std::string& player_menu_search() const noexcept;
+  [[nodiscard]] usize player_menu_search_cursor() const noexcept;
+  [[nodiscard]] usize player_menu_search_selection_start() const noexcept;
+  [[nodiscard]] usize player_menu_search_selection_end() const noexcept;
   [[nodiscard]] const std::string& selected_crafting_category_id() const noexcept;
   [[nodiscard]] const std::string& selected_crafting_recipe_id() const noexcept;
   void set_player_menu_tab(PlayerMenuTab tab) noexcept;

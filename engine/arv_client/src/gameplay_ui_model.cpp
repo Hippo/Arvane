@@ -169,6 +169,10 @@ namespace {
     const asset::BlockTextureAtlas* block_atlas) {
   ui::CraftingUiModel model;
   model.search = client.player_menu_search();
+  model.search_cursor = client.player_menu_search_cursor();
+  model.search_selection_start = client.player_menu_search_selection_start();
+  model.search_selection_end = client.player_menu_search_selection_end();
+  model.search_active = true;
   if (registry == nullptr || item_registry == nullptr) {
     return model;
   }

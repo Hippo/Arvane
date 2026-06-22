@@ -1,5 +1,6 @@
 #include "arv/base/ui/widgets/inventory.hpp"
 
+#include "arv/base/ui/widgets/text_input.hpp"
 #include "item_slot.hpp"
 #include "widget_common.hpp"
 
@@ -14,25 +15,30 @@ namespace widgets_detail {
 
 constexpr f32 InventorySlotSize = 40.0F;
 constexpr f32 InventorySlotSpacing = 4.0F;
+constexpr f32 PlayerMenuInventorySlotSize = 48.0F;
+constexpr f32 PlayerMenuInventorySlotSpacing = 6.0F;
 constexpr u32 InventoryGridColumns = 9;
-constexpr f32 PlayerMenuInventoryWidth = 560.0F;
-constexpr f32 PlayerMenuInventoryHeight = 344.0F;
-constexpr f32 PlayerMenuCraftingWidth = 720.0F;
+constexpr f32 PlayerMenuWidth = 720.0F;
+constexpr f32 PlayerMenuInventoryHeight = 392.0F;
 constexpr f32 PlayerMenuCraftingHeight = 520.0F;
 constexpr f32 PlayerMenuPlaceholderHeight = 320.0F;
+constexpr f32 PlayerMenuMinimumTopOffset = 16.0F;
 constexpr f32 PlayerMenuContentTop = 66.0F;
 constexpr f32 RecipeSlotSize = 44.0F;
 constexpr f32 RecipeSlotSpacing = 6.0F;
-constexpr f32 InventoryGridWidth =
-    static_cast<f32>(InventoryGridColumns) * InventorySlotSize +
-    static_cast<f32>(InventoryGridColumns - 1U) * InventorySlotSpacing;
+
+[[nodiscard]] constexpr f32 inventory_grid_width(f32 slot_size, f32 slot_spacing) noexcept {
+  return static_cast<f32>(InventoryGridColumns) * slot_size +
+         static_cast<f32>(InventoryGridColumns - 1U) * slot_spacing;
+}
 
 void append_inventory_slot_range(
     UiTree& tree,
     UiNodeID grid_id,
     const InventoryUiModel& model,
     usize first_slot,
-    usize last_slot_exclusive) {
+    usize last_slot_exclusive,
+    f32 slot_size) {
   for (usize slot_index = first_slot; slot_index < last_slot_exclusive; ++slot_index) {
     const UiItemStackView* stack_view =
         slot_index < model.slots.size() ? &model.slots[slot_index] : nullptr;
@@ -44,16 +50,16 @@ void append_inventory_slot_range(
         stack_view,
         false,
         false,
-        InventorySlotSize);
+        slot_size);
   }
 }
 
-UiElement inventory_grid(std::string stable_id) {
+UiElement inventory_grid(std::string stable_id, f32 slot_spacing) {
   UiElement grid;
   grid.stable_id = std::move(stable_id);
   grid.type = UiElementType::Grid;
   grid.layout.grid_columns = InventoryGridColumns;
-  grid.layout.spacing = InventorySlotSpacing;
+  grid.layout.spacing = slot_spacing;
   grid.hit_test = false;
   return grid;
 }
@@ -111,32 +117,21 @@ UiNodeID add_menu_button(
   return button_id;
 }
 
-[[nodiscard]] f32 player_menu_width(std::string_view active_tab_id) noexcept {
-  return active_tab_id == "inventory" ? PlayerMenuInventoryWidth : PlayerMenuCraftingWidth;
-}
-
-[[nodiscard]] f32 player_menu_height(std::string_view active_tab_id) noexcept {
-  if (active_tab_id == "inventory") {
-    return PlayerMenuInventoryHeight;
-  }
-  if (active_tab_id == "crafting") {
-    return PlayerMenuCraftingHeight;
-  }
-  return PlayerMenuPlaceholderHeight;
-}
-
 void append_inventory_section(
     UiTree& tree,
     UiNodeID parent,
     InventoryUiModel model,
     Vec2f offset,
-    bool show_title) {
+    bool show_title,
+    f32 slot_size,
+    f32 slot_spacing,
+    f32 stack_spacing) {
   const UiTheme& theme = tree.theme();
 
   UiElement stack;
   stack.stable_id = show_title ? "player_menu.inventory.stack" : "player_menu.inventory.compact_stack";
   stack.type = UiElementType::VerticalStack;
-  stack.layout.spacing = theme.layout.spacing_md;
+  stack.layout.spacing = stack_spacing;
   stack.layout.offset = offset;
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(parent, std::move(stack));
@@ -153,20 +148,21 @@ void append_inventory_section(
       std::min<usize>(model.hotbar_slot_count, slot_total);
 
   const UiNodeID grid_id =
-      tree.add_child(stack_id, inventory_grid("player_menu.inventory.grid"));
+      tree.add_child(stack_id, inventory_grid("player_menu.inventory.grid", slot_spacing));
   append_inventory_slot_range(
       tree,
       grid_id,
       model,
       hotbar_slot_count,
-      slot_total);
+      slot_total,
+      slot_size);
 
   UiElement hotbar_separator;
   hotbar_separator.stable_id = "player_menu.inventory.hotbar_separator";
   hotbar_separator.type = UiElementType::Panel;
   hotbar_separator.layout.width_mode = UiSizeMode::Fixed;
   hotbar_separator.layout.height_mode = UiSizeMode::Fixed;
-  hotbar_separator.layout.width = InventoryGridWidth;
+  hotbar_separator.layout.width = inventory_grid_width(slot_size, slot_spacing);
   hotbar_separator.layout.height = 2.0F;
   hotbar_separator.style.background = theme.colors.border_focus;
   hotbar_separator.style.background.w = 0.58F;
@@ -175,14 +171,32 @@ void append_inventory_section(
 
   if (hotbar_slot_count > 0U) {
     const UiNodeID hotbar_id =
-        tree.add_child(stack_id, inventory_grid("player_menu.inventory.hotbar"));
+        tree.add_child(stack_id, inventory_grid("player_menu.inventory.hotbar", slot_spacing));
     append_inventory_slot_range(
         tree,
         hotbar_id,
         model,
         0U,
-        hotbar_slot_count);
+        hotbar_slot_count,
+        slot_size);
   }
+}
+
+[[nodiscard]] f32 player_menu_height(std::string_view active_tab_id) noexcept {
+  if (active_tab_id == "crafting") {
+    return PlayerMenuCraftingHeight;
+  }
+  if (active_tab_id == "inventory") {
+    return PlayerMenuInventoryHeight;
+  }
+  return PlayerMenuPlaceholderHeight;
+}
+
+[[nodiscard]] f32 player_menu_top_offset(Vec2f viewport) noexcept {
+  constexpr f32 StableVisualHeight =
+      (PlayerMenuInventoryHeight + PlayerMenuCraftingHeight) * 0.5F;
+  const f32 centered_top = (viewport.y - StableVisualHeight) * 0.5F;
+  return std::max(PlayerMenuMinimumTopOffset, centered_top);
 }
 
 void append_recipe_slot(
@@ -255,19 +269,25 @@ void append_crafting_ui(
       34.0F,
       theme.colors.surface_alt);
   search.layout.offset = {154.0F, PlayerMenuContentTop};
+  search.layout.padding = {12.0F, 12.0F, 7.0F, 7.0F};
   search.style.background.w = 0.78F;
   search.action = "crafting.search.focus";
+  search.focusable = true;
+  search.style.border_focus = theme.colors.border_focus;
+  search.style.accent = theme.colors.accent;
+  search.style.text_role = UiTextRole::Body;
   style_surface(search, theme, theme.layout.radius_sm);
-  const UiNodeID search_id = tree.add_child(panel_id, std::move(search));
-  const std::string search_text =
-      crafting.search.empty() ? std::string{"Search"} : crafting.search;
-  UiElement search_label = text_element(
-      "crafting.search.text",
-      search_text,
-      crafting.search.empty() ? theme.colors.text_muted : theme.colors.text,
-      UiTextRole::Body);
-  search_label.layout.anchor = UiAnchor::Center;
-  tree.add_child(search_id, std::move(search_label));
+  TextInputFieldView search_input;
+  search_input.text = crafting.search;
+  search_input.placeholder = "Search";
+  search_input.cursor = crafting.search_cursor;
+  search_input.selection_start = crafting.search_selection_start;
+  search_input.selection_end = crafting.search_selection_end;
+  search_input.active = crafting.search_active;
+  search_input.text_color = theme.colors.text;
+  search_input.placeholder_color = theme.colors.text_muted;
+  search_input.placeholder_anchor = UiAnchor::Center;
+  add_text_input_field(tree, panel_id, std::move(search), search_input);
 
   UiElement clear_button = menu_button(
       "crafting.search.clear",
@@ -318,13 +338,14 @@ void append_crafting_ui(
   style_surface(detail, theme, theme.layout.radius_sm);
   const UiNodeID detail_id = tree.add_child(panel_id, std::move(detail));
   if (crafting.has_selected_recipe) {
-    tree.add_child(
-        detail_id,
-        text_element(
-            "crafting.detail.title",
-            crafting.selected_recipe_label,
-            theme.colors.text,
-            UiTextRole::Body));
+    UiElement title = text_element(
+        "crafting.detail.title",
+        crafting.selected_recipe_label,
+        theme.colors.text,
+        UiTextRole::Body);
+    title.layout.anchor = UiAnchor::TopCenter;
+    title.layout.offset = {0.0F, 8.0F};
+    tree.add_child(detail_id, std::move(title));
     for (usize index = 0; index < crafting.selected_ingredients.size() && index < 4U; ++index) {
       const CraftingIngredientLineView& ingredient = crafting.selected_ingredients[index];
       UiElement line = text_element(
@@ -333,7 +354,8 @@ void append_crafting_ui(
               std::to_string(ingredient.required),
           ingredient.satisfied ? theme.colors.success : theme.colors.warning,
           UiTextRole::Small);
-      line.layout.offset = {0.0F, 32.0F + static_cast<f32>(index) * 22.0F};
+      line.layout.anchor = UiAnchor::TopCenter;
+      line.layout.offset = {0.0F, 38.0F + static_cast<f32>(index) * 22.0F};
       tree.add_child(detail_id, std::move(line));
     }
     UiElement craft = menu_button(
@@ -362,8 +384,11 @@ void append_crafting_ui(
       tree,
       panel_id,
       model.inventory,
-      {164.0F, 302.0F},
-      false);
+      {154.0F, 324.0F},
+      false,
+      InventorySlotSize,
+      InventorySlotSpacing,
+      theme.layout.spacing_md);
 }
 
 void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
@@ -404,20 +429,22 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
       std::min<usize>(model.hotbar_slot_count, slot_total);
 
   const UiNodeID grid_id =
-      tree.add_child(stack_id, inventory_grid("inventory.grid"));
+      tree.add_child(stack_id, inventory_grid("inventory.grid", InventorySlotSpacing));
   append_inventory_slot_range(
       tree,
       grid_id,
       model,
       hotbar_slot_count,
-      slot_total);
+      slot_total,
+      InventorySlotSize);
 
   UiElement hotbar_separator;
   hotbar_separator.stable_id = "inventory.hotbar_separator";
   hotbar_separator.type = UiElementType::Panel;
   hotbar_separator.layout.width_mode = UiSizeMode::Fixed;
   hotbar_separator.layout.height_mode = UiSizeMode::Fixed;
-  hotbar_separator.layout.width = InventoryGridWidth;
+  hotbar_separator.layout.width =
+      inventory_grid_width(InventorySlotSize, InventorySlotSpacing);
   hotbar_separator.layout.height = 2.0F;
   hotbar_separator.style.background = theme.colors.border_focus;
   hotbar_separator.style.background.w = 0.58F;
@@ -426,13 +453,14 @@ void append_inventory_ui(UiTree& tree, InventoryUiModel model) {
 
   if (hotbar_slot_count > 0U) {
     const UiNodeID hotbar_id =
-        tree.add_child(stack_id, inventory_grid("inventory.hotbar"));
+        tree.add_child(stack_id, inventory_grid("inventory.hotbar", InventorySlotSpacing));
     append_inventory_slot_range(
         tree,
         hotbar_id,
         model,
         0U,
-        hotbar_slot_count);
+        hotbar_slot_count,
+        InventorySlotSize);
   }
 
   if (model.cursor_stack.has_value() && !model.cursor_stack->empty()) {
@@ -468,10 +496,11 @@ void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
   const UiTheme& theme = tree.theme();
   UiElement panel = fixed_panel(
       "player_menu.panel",
-      player_menu_width(model.active_tab_id),
+      PlayerMenuWidth,
       player_menu_height(model.active_tab_id),
       theme.colors.surface);
-  panel.layout.anchor = UiAnchor::Center;
+  panel.layout.anchor = UiAnchor::TopCenter;
+  panel.layout.offset = {0.0F, player_menu_top_offset(model.viewport)};
   panel.style.background.w = std::min(panel.style.background.w, 0.96F);
   style_surface(panel, theme, theme.widgets.panel.radius);
   panel.hit_test = true;
@@ -519,8 +548,17 @@ void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
         tree,
         panel_id,
         std::move(model.inventory),
-        {84.0F, PlayerMenuContentTop},
-        true);
+        {
+            (PlayerMenuWidth - inventory_grid_width(
+                                   PlayerMenuInventorySlotSize,
+                                   PlayerMenuInventorySlotSpacing)) *
+                0.5F,
+            PlayerMenuContentTop,
+        },
+        true,
+        PlayerMenuInventorySlotSize,
+        PlayerMenuInventorySlotSpacing,
+        theme.layout.spacing_lg);
   }
 
   if (model.inventory.cursor_stack.has_value() &&
