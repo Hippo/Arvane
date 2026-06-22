@@ -982,7 +982,7 @@ TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
       {"inventory", "Inventory", true},
       {"crafting", "Crafting", false},
       {"settings", "Settings", false},
-      {"exit", "Exit Game", false},
+      {"exit", "Quit", false},
   };
   inventory_menu.inventory.visible = true;
   inventory_menu.inventory.title = "Inventory";
@@ -1110,7 +1110,7 @@ TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
       {"inventory", "Inventory", false},
       {"crafting", "Crafting", false},
       {"settings", "Settings", true},
-      {"exit", "Exit Game", false},
+      {"exit", "Quit", false},
   };
   settings_menu.settings.render.frame_sync = arv::ui::SettingsFrameSyncMode::FpsCap;
   settings_menu.settings.render.fps_cap = 60U;
@@ -1147,6 +1147,7 @@ TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
   EXPECT_NE(tree.find_by_stable_id("player_menu.settings.key_binds.label"), nullptr);
   EXPECT_NE(tree.find_by_stable_id("player_menu.settings.controls.label"), nullptr);
   EXPECT_NE(tree.find_by_stable_id("player_menu.settings.interface.label"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("player_menu.settings.overview.title"), nullptr);
   EXPECT_EQ(tree.find_by_stable_id("player_menu.settings.placeholder"), nullptr);
   const auto* settings_tabs = tree.find_by_stable_id("player_menu.tabs");
   ASSERT_NE(settings_tabs, nullptr);
@@ -1160,8 +1161,11 @@ TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
   arv::ui::append_player_menu_ui(tree, render_menu);
   tree.layout({800.0F, 600.0F}, &text);
   EXPECT_NE(tree.find_by_stable_id("render.frame_sync.fps_cap.label"), nullptr);
-  EXPECT_NE(tree.find_by_stable_id("render.view_distance.inc.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.view_distance.slider.track"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.view_distance.slider.knob"), nullptr);
+  EXPECT_EQ(tree.find_by_stable_id("render.view_distance.inc.label"), nullptr);
   EXPECT_NE(tree.find_by_stable_id("render.local_player_body.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.local_player_body.toggle.knob"), nullptr);
   const auto* render_tabs = tree.find_by_stable_id("player_menu.tabs");
   ASSERT_NE(render_tabs, nullptr);
   EXPECT_NEAR(render_tabs->rect.x, tab_rect.x, 0.001F);
@@ -1191,6 +1195,7 @@ TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
   EXPECT_NEAR(exit_panel->rect.y, panel_rect.y, 0.001F);
   const auto* main_menu = tree.find_by_stable_id("player_menu.exit.main_menu.label");
   const auto* quit = tree.find_by_stable_id("player_menu.exit.quit.label");
+  EXPECT_EQ(tree.find_by_stable_id("player_menu.exit.title"), nullptr);
   ASSERT_NE(main_menu, nullptr);
   ASSERT_NE(quit, nullptr);
   EXPECT_EQ(main_menu->text, "Back to Main Menu");

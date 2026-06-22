@@ -674,6 +674,24 @@ TEST(ClientRuntimeTests, PlayerMenuSearchTypingDoesNotToggleInventoryOnBoundKey)
   EXPECT_EQ(client.player_menu_search_cursor(), 1U);
 }
 
+TEST(ClientRuntimeTests, EscapeBacksOutOfPlayerMenuSettingsSubpageBeforeClosing) {
+  arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
+
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  ASSERT_TRUE(client.inventory_open());
+  client.set_player_menu_tab(arv::client::PlayerMenuTab::Settings);
+  client.set_player_menu_settings_section(arv::client::PlayerMenuSettingsSection::Render);
+
+  client.submit_input(arv::client::InputFrame{.text_cancel_pressed = true});
+  EXPECT_TRUE(client.inventory_open());
+  EXPECT_EQ(
+      client.player_menu_settings_section(),
+      arv::client::PlayerMenuSettingsSection::Overview);
+
+  client.submit_input(arv::client::InputFrame{.text_cancel_pressed = true});
+  EXPECT_FALSE(client.inventory_open());
+}
+
 TEST(ClientRuntimeTests, ChatHistoryNavigationBottomsOutAtUncommittedDraft) {
   arv::client::ClientRuntime client{std::unique_ptr<arv::net::ITransport>{}};
 

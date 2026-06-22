@@ -22,6 +22,12 @@ constexpr f32 PlayerMenuSettingsViewportHeight = 344.0F;
 constexpr f32 PlayerMenuSettingsRowHeight = 42.0F;
 constexpr f32 PlayerMenuKeyBindRowHeight = 54.0F;
 
+struct SliderSpec {
+  f32 min{};
+  f32 max{};
+  f32 step{};
+};
+
 [[nodiscard]] bool shift_modifier_pressed(const platform::InputSnapshot& input) noexcept {
   return input.shift_modifier_held ||
          (input.raw_input.has_value() &&
@@ -132,17 +138,6 @@ constexpr f32 PlayerMenuKeyBindRowHeight = 54.0F;
   return true;
 }
 
-[[nodiscard]] bool consume_suffix(
-    std::string_view value,
-    std::string_view suffix,
-    std::string_view& prefix) noexcept {
-  if (!value.ends_with(suffix)) {
-    return false;
-  }
-  prefix = value.substr(0U, value.size() - suffix.size());
-  return true;
-}
-
 [[nodiscard]] bool parse_index_after_prefix(
     std::string_view value,
     std::string_view prefix,
@@ -241,168 +236,286 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
   return true;
 }
 
-[[nodiscard]] f32 stepped(f32 value, f32 delta, f32 min, f32 max) noexcept {
-  return std::clamp(value + delta, min, max);
+[[nodiscard]] f32 snap_slider_value(f32 value, SliderSpec spec) noexcept {
+  if (spec.step <= 0.0F) {
+    return std::clamp(value, spec.min, spec.max);
+  }
+  const f32 stepped =
+      spec.min + std::round((value - spec.min) / spec.step) * spec.step;
+  return std::clamp(stepped, spec.min, spec.max);
 }
 
-[[nodiscard]] bool apply_render_step(
+[[nodiscard]] std::optional<f32> slider_value_from_cursor(
+    const ui::UiTree& ui_tree,
+    std::string_view stable_id,
+    Vec2f cursor,
+    SliderSpec spec) {
+  const ui::UiElement* slider = ui_tree.find_by_stable_id(std::string{stable_id});
+  if (slider == nullptr || slider->rect.width <= 0.0F) {
+    return std::nullopt;
+  }
+  const f32 fraction =
+      std::clamp((cursor.x - slider->rect.x) / slider->rect.width, 0.0F, 1.0F);
+  return snap_slider_value(spec.min + fraction * (spec.max - spec.min), spec);
+}
+
+[[nodiscard]] std::optional<SliderSpec> render_slider_spec(
+    std::string_view action_id,
+    const ui::RenderSettingsView& settings) noexcept {
+  if (action_id == "render.fps_cap.slider") {
+    return SliderSpec{30.0F, 240.0F, 5.0F};
+  }
+  if (action_id == "render.load_distance.slider") {
+    return SliderSpec{1.0F, static_cast<f32>(MaxConfigurableChunkDistance), 1.0F};
+  }
+  if (action_id == "render.simulation_distance.slider") {
+    return SliderSpec{0.0F, static_cast<f32>(std::max(0, settings.load_distance)), 1.0F};
+  }
+  if (action_id == "render.view_distance.slider") {
+    return SliderSpec{1.0F, static_cast<f32>(std::max(1, settings.load_distance)), 1.0F};
+  }
+  if (action_id == "render.stream_distance.slider") {
+    return SliderSpec{
+        static_cast<f32>(std::max(1, settings.view_distance)),
+        static_cast<f32>(std::max(1, settings.load_distance)),
+        1.0F};
+  }
+  if (action_id == "render.mesh_upload_budget.slider") {
+    return SliderSpec{1.0F, 32.0F, 1.0F};
+  }
+  if (action_id == "render.star_intensity.slider" ||
+      action_id == "render.cloud_intensity.slider") {
+    return SliderSpec{0.0F, 3.0F, 0.05F};
+  }
+  if (action_id == "render.cirrus.slider" ||
+      action_id == "render.cumulus.slider" ||
+      action_id == "render.outline_red.slider" ||
+      action_id == "render.outline_green.slider" ||
+      action_id == "render.outline_blue.slider") {
+    return SliderSpec{0.0F, 1.0F, 0.05F};
+  }
+  if (action_id == "render.outline_thickness.slider") {
+    return SliderSpec{0.1F, 2.0F, 0.05F};
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool apply_render_slider_value(
     ui::RenderSettingsView& settings,
-    std::string_view action_id) {
-  std::string_view prefix;
-  f32 direction = 0.0F;
-  if (consume_suffix(action_id, ".inc", prefix)) {
-    direction = 1.0F;
-  } else if (consume_suffix(action_id, ".dec", prefix)) {
-    direction = -1.0F;
+    std::string_view action_id,
+    f32 value) noexcept {
+  if (action_id == "render.fps_cap.slider") {
+    return set_if_changed(settings.fps_cap, static_cast<u32>(std::lround(value)));
   }
-  if (direction == 0.0F) {
-    return false;
+  if (action_id == "render.load_distance.slider") {
+    const bool changed =
+        set_if_changed(settings.load_distance, static_cast<i32>(std::lround(value)));
+    normalize_render_chunk_distances(settings);
+    return changed;
   }
-
-  bool changed = false;
-  if (prefix == "render.fps_cap") {
-    changed = set_if_changed(
-        settings.fps_cap,
-        static_cast<u32>(std::lround(stepped(
-            static_cast<f32>(settings.fps_cap),
-            direction * 5.0F,
-            30.0F,
-            240.0F))));
-  } else if (prefix == "render.load_distance") {
-    changed = set_if_changed(
-        settings.load_distance,
-        static_cast<i32>(std::lround(stepped(
-            static_cast<f32>(settings.load_distance),
-            direction,
-            1.0F,
-            static_cast<f32>(MaxConfigurableChunkDistance)))));
+  if (action_id == "render.simulation_distance.slider") {
+    const bool changed =
+        set_if_changed(settings.simulation_distance, static_cast<i32>(std::lround(value)));
     normalize_render_chunk_distances(settings);
-  } else if (prefix == "render.simulation_distance") {
-    changed = set_if_changed(
-        settings.simulation_distance,
-        static_cast<i32>(std::lround(stepped(
-            static_cast<f32>(settings.simulation_distance),
-            direction,
-            0.0F,
-            static_cast<f32>(settings.load_distance)))));
+    return changed;
+  }
+  if (action_id == "render.view_distance.slider") {
+    const i32 next = static_cast<i32>(std::lround(value));
+    if (settings.view_distance == next) {
+      return false;
+    }
+    settings.view_distance = next;
+    settings.stream_distance = std::max(settings.stream_distance, next);
     normalize_render_chunk_distances(settings);
-  } else if (prefix == "render.view_distance") {
-    changed = set_if_changed(
-        settings.view_distance,
-        static_cast<i32>(std::lround(stepped(
-            static_cast<f32>(settings.view_distance),
-            direction,
-            1.0F,
-            static_cast<f32>(std::max(1, settings.stream_distance))))));
-    settings.stream_distance = std::max(settings.stream_distance, settings.view_distance);
+    return true;
+  }
+  if (action_id == "render.stream_distance.slider") {
+    const i32 next = static_cast<i32>(std::lround(value));
+    if (settings.stream_distance == next) {
+      return false;
+    }
+    settings.stream_distance = next;
+    settings.view_distance = std::min(settings.view_distance, next);
     normalize_render_chunk_distances(settings);
-  } else if (prefix == "render.stream_distance") {
-    changed = set_if_changed(
-        settings.stream_distance,
-        static_cast<i32>(std::lround(stepped(
-            static_cast<f32>(settings.stream_distance),
-            direction,
-            static_cast<f32>(std::max(1, settings.view_distance)),
-            static_cast<f32>(settings.load_distance)))));
-    settings.view_distance = std::min(settings.view_distance, settings.stream_distance);
-    normalize_render_chunk_distances(settings);
-  } else if (prefix == "render.mesh_upload_budget") {
-    changed = set_if_changed(
+    return true;
+  }
+  if (action_id == "render.mesh_upload_budget.slider") {
+    return set_if_changed(
         settings.mesh_upload_budget,
-        static_cast<u32>(std::lround(stepped(
-            static_cast<f32>(settings.mesh_upload_budget),
-            direction,
-            1.0F,
-            32.0F))));
-  } else if (prefix == "render.star_intensity") {
-    changed = set_if_changed(settings.star_intensity, stepped(settings.star_intensity, direction * 0.05F, 0.0F, 3.0F));
-  } else if (prefix == "render.cloud_intensity") {
-    changed = set_if_changed(settings.cloud_intensity, stepped(settings.cloud_intensity, direction * 0.05F, 0.0F, 3.0F));
-  } else if (prefix == "render.cirrus") {
-    changed = set_if_changed(settings.cirrus_amount, stepped(settings.cirrus_amount, direction * 0.05F, 0.0F, 1.0F));
-  } else if (prefix == "render.cumulus") {
-    changed = set_if_changed(settings.cumulus_amount, stepped(settings.cumulus_amount, direction * 0.05F, 0.0F, 1.0F));
-  } else if (prefix == "render.outline_red") {
-    changed = set_if_changed(settings.outline_red, stepped(settings.outline_red, direction * 0.05F, 0.0F, 1.0F));
-  } else if (prefix == "render.outline_green") {
-    changed = set_if_changed(settings.outline_green, stepped(settings.outline_green, direction * 0.05F, 0.0F, 1.0F));
-  } else if (prefix == "render.outline_blue") {
-    changed = set_if_changed(settings.outline_blue, stepped(settings.outline_blue, direction * 0.05F, 0.0F, 1.0F));
-  } else if (prefix == "render.outline_thickness") {
-    changed = set_if_changed(settings.outline_thickness, stepped(settings.outline_thickness, direction * 0.05F, 0.1F, 2.0F));
+        static_cast<u32>(std::lround(value)));
   }
-  return changed;
-}
-
-[[nodiscard]] bool apply_controls_step(
-    ui::ControlsSettingsView& settings,
-    std::string_view action_id) {
-  std::string_view prefix;
-  f32 direction = 0.0F;
-  if (consume_suffix(action_id, ".inc", prefix)) {
-    direction = 1.0F;
-  } else if (consume_suffix(action_id, ".dec", prefix)) {
-    direction = -1.0F;
+  if (action_id == "render.star_intensity.slider") {
+    return set_if_changed(settings.star_intensity, value);
   }
-  if (prefix != "controls.mouse_sensitivity" || direction == 0.0F) {
-    return false;
+  if (action_id == "render.cloud_intensity.slider") {
+    return set_if_changed(settings.cloud_intensity, value);
   }
-  return set_if_changed(
-      settings.mouse_sensitivity_percent,
-      stepped(settings.mouse_sensitivity_percent, direction * 5.0F, 10.0F, 300.0F));
-}
-
-[[nodiscard]] bool apply_interface_step(
-    ui::InterfaceSettingsView& settings,
-    std::string_view action_id) {
-  std::string_view prefix;
-  f32 direction = 0.0F;
-  if (consume_suffix(action_id, ".inc", prefix)) {
-    direction = 1.0F;
-  } else if (consume_suffix(action_id, ".dec", prefix)) {
-    direction = -1.0F;
+  if (action_id == "render.cirrus.slider") {
+    return set_if_changed(settings.cirrus_amount, value);
   }
-  if (direction == 0.0F) {
-    return false;
+  if (action_id == "render.cumulus.slider") {
+    return set_if_changed(settings.cumulus_amount, value);
   }
-  if (prefix == "interface.chat_history") {
-    return set_if_changed(
-        settings.chat_history_max,
-        static_cast<u32>(std::lround(stepped(
-            static_cast<f32>(settings.chat_history_max),
-            direction * 100.0F,
-            100.0F,
-            5000.0F))));
+  if (action_id == "render.outline_red.slider") {
+    return set_if_changed(settings.outline_red, value);
   }
-  if (prefix == "interface.open_lines") {
-    return set_if_changed(
-        settings.chat_open_lines,
-        static_cast<u32>(std::lround(stepped(
-            static_cast<f32>(settings.chat_open_lines),
-            direction,
-            1.0F,
-            16.0F))));
+  if (action_id == "render.outline_green.slider") {
+    return set_if_changed(settings.outline_green, value);
   }
-  if (prefix == "interface.passive_lines") {
-    return set_if_changed(
-        settings.chat_passive_lines,
-        static_cast<u32>(std::lround(stepped(
-            static_cast<f32>(settings.chat_passive_lines),
-            direction,
-            0.0F,
-            16.0F))));
+  if (action_id == "render.outline_blue.slider") {
+    return set_if_changed(settings.outline_blue, value);
   }
-  if (prefix == "interface.visible_seconds") {
-    return set_if_changed(
-        settings.chat_passive_visible_seconds,
-        stepped(settings.chat_passive_visible_seconds, direction * 0.5F, 0.0F, 30.0F));
-  }
-  if (prefix == "interface.fade_seconds") {
-    return set_if_changed(
-        settings.chat_passive_fade_seconds,
-        stepped(settings.chat_passive_fade_seconds, direction * 0.5F, 0.0F, 30.0F));
+  if (action_id == "render.outline_thickness.slider") {
+    return set_if_changed(settings.outline_thickness, value);
   }
   return false;
+}
+
+[[nodiscard]] std::optional<SliderSpec> controls_slider_spec(std::string_view action_id) noexcept {
+  if (action_id == "controls.mouse_sensitivity.slider") {
+    return SliderSpec{10.0F, 300.0F, 5.0F};
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool apply_controls_slider_value(
+    ui::ControlsSettingsView& settings,
+    std::string_view action_id,
+    f32 value) noexcept {
+  if (action_id != "controls.mouse_sensitivity.slider") {
+    return false;
+  }
+  return set_if_changed(settings.mouse_sensitivity_percent, value);
+}
+
+[[nodiscard]] std::optional<SliderSpec> interface_slider_spec(std::string_view action_id) noexcept {
+  if (action_id == "interface.chat_history.slider") {
+    return SliderSpec{100.0F, 5000.0F, 100.0F};
+  }
+  if (action_id == "interface.open_lines.slider") {
+    return SliderSpec{1.0F, 16.0F, 1.0F};
+  }
+  if (action_id == "interface.passive_lines.slider") {
+    return SliderSpec{0.0F, 16.0F, 1.0F};
+  }
+  if (action_id == "interface.visible_seconds.slider" ||
+      action_id == "interface.fade_seconds.slider") {
+    return SliderSpec{0.0F, 30.0F, 0.5F};
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool apply_interface_slider_value(
+    ui::InterfaceSettingsView& settings,
+    std::string_view action_id,
+    f32 value) noexcept {
+  if (action_id == "interface.chat_history.slider") {
+    return set_if_changed(settings.chat_history_max, static_cast<u32>(std::lround(value)));
+  }
+  if (action_id == "interface.open_lines.slider") {
+    return set_if_changed(settings.chat_open_lines, static_cast<u32>(std::lround(value)));
+  }
+  if (action_id == "interface.passive_lines.slider") {
+    return set_if_changed(settings.chat_passive_lines, static_cast<u32>(std::lround(value)));
+  }
+  if (action_id == "interface.visible_seconds.slider") {
+    return set_if_changed(settings.chat_passive_visible_seconds, value);
+  }
+  if (action_id == "interface.fade_seconds.slider") {
+    return set_if_changed(settings.chat_passive_fade_seconds, value);
+  }
+  return false;
+}
+
+[[nodiscard]] bool is_player_menu_settings_slider_action(
+    std::string_view action_id,
+    const ui::UIScreenDataSource* data_source) {
+  if (data_source == nullptr) {
+    return false;
+  }
+  if (action_id.starts_with("render.")) {
+    return render_slider_spec(action_id, data_source->render_settings()).has_value();
+  }
+  if (action_id.starts_with("controls.")) {
+    return controls_slider_spec(action_id).has_value();
+  }
+  if (action_id.starts_with("interface.")) {
+    return interface_slider_spec(action_id).has_value();
+  }
+  return false;
+}
+
+[[nodiscard]] bool apply_player_menu_settings_slider(
+    const ui::UiTree& ui_tree,
+    std::string_view action_id,
+    Vec2f cursor,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
+  if (command_sink == nullptr || data_source == nullptr) {
+    return false;
+  }
+  if (action_id.starts_with("render.")) {
+    ui::RenderSettingsView settings = data_source->render_settings();
+    const std::optional<SliderSpec> spec = render_slider_spec(action_id, settings);
+    if (!spec.has_value()) {
+      return false;
+    }
+    const std::optional<f32> value =
+        slider_value_from_cursor(ui_tree, action_id, cursor, spec.value());
+    if (value.has_value() && apply_render_slider_value(settings, action_id, value.value())) {
+      command_sink->submit(ui::SetRenderSettingsCommand{settings});
+      return true;
+    }
+    return false;
+  }
+  if (action_id.starts_with("controls.")) {
+    ui::ControlsSettingsView settings = data_source->controls_settings();
+    const std::optional<SliderSpec> spec = controls_slider_spec(action_id);
+    if (!spec.has_value()) {
+      return false;
+    }
+    const std::optional<f32> value =
+        slider_value_from_cursor(ui_tree, action_id, cursor, spec.value());
+    if (value.has_value() && apply_controls_slider_value(settings, action_id, value.value())) {
+      command_sink->submit(ui::SetControlsSettingsCommand{settings});
+      return true;
+    }
+    return false;
+  }
+  if (action_id.starts_with("interface.")) {
+    ui::InterfaceSettingsView settings = data_source->interface_settings();
+    const std::optional<SliderSpec> spec = interface_slider_spec(action_id);
+    if (!spec.has_value()) {
+      return false;
+    }
+    const std::optional<f32> value =
+        slider_value_from_cursor(ui_tree, action_id, cursor, spec.value());
+    if (value.has_value() && apply_interface_slider_value(settings, action_id, value.value())) {
+      command_sink->submit(ui::SetInterfaceSettingsCommand{settings});
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] bool start_player_menu_settings_slider(
+    ui::UiTree& ui_tree,
+    ClientRuntime& client,
+    const ui::UiAction& action,
+    Vec2f cursor,
+    ui::UICommandSink* command_sink,
+    const ui::UIScreenDataSource* data_source) {
+  if (!is_player_menu_settings_slider_action(action.action_id, data_source)) {
+    return false;
+  }
+  client.set_player_menu_active_settings_slider(action.action_id);
+  (void)apply_player_menu_settings_slider(
+      ui_tree,
+      client.player_menu_active_settings_slider(),
+      cursor,
+      command_sink,
+      data_source);
+  return true;
 }
 
 [[nodiscard]] bool submit_player_menu_settings_action(
@@ -415,8 +528,7 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
   if (action.action_id == "render.frame_sync.off" ||
       action.action_id == "render.frame_sync.vsync" ||
       action.action_id == "render.frame_sync.fps_cap" ||
-      action.action_id == "render.local_player_body" ||
-      action.action_id.starts_with("render.")) {
+      action.action_id == "render.local_player_body") {
     ui::RenderSettingsView settings = data_source->render_settings();
     bool changed = true;
     if (action.action_id == "render.frame_sync.off") {
@@ -428,28 +540,12 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
     } else if (action.action_id == "render.local_player_body") {
       settings.show_local_player_body = !settings.show_local_player_body;
     } else {
-      changed = apply_render_step(settings, action.action_id);
+      changed = false;
     }
     if (changed) {
       command_sink->submit(ui::SetRenderSettingsCommand{settings});
     }
     return changed;
-  }
-  if (action.action_id.starts_with("controls.")) {
-    ui::ControlsSettingsView settings = data_source->controls_settings();
-    if (!apply_controls_step(settings, action.action_id)) {
-      return false;
-    }
-    command_sink->submit(ui::SetControlsSettingsCommand{settings});
-    return true;
-  }
-  if (action.action_id.starts_with("interface.")) {
-    ui::InterfaceSettingsView settings = data_source->interface_settings();
-    if (!apply_interface_step(settings, action.action_id)) {
-      return false;
-    }
-    command_sink->submit(ui::SetInterfaceSettingsCommand{settings});
-    return true;
   }
   return false;
 }
@@ -643,6 +739,25 @@ bool route_inventory_mouse_input(
   bool changed = false;
   const Vec2f cursor{platform_input.cursor_x, platform_input.cursor_y};
   (void)ui_tree.route_mouse_move(cursor);
+  if (!client.player_menu_active_settings_slider().empty() &&
+      (platform_input.mouse_left_held || platform_input.mouse_left_released)) {
+    (void)apply_player_menu_settings_slider(
+        ui_tree,
+        client.player_menu_active_settings_slider(),
+        cursor,
+        command_sink,
+        data_source);
+    if (platform_input.mouse_left_released) {
+      (void)ui_tree.route_mouse_up(cursor, ui::UiMouseButton::Left);
+      client.clear_player_menu_active_settings_slider();
+    }
+    return true;
+  }
+  if (!client.player_menu_active_settings_slider().empty() &&
+      !platform_input.mouse_left_pressed &&
+      !platform_input.mouse_left_held) {
+    client.clear_player_menu_active_settings_slider();
+  }
   if (client.inventory_open() &&
       client.player_menu_tab() == PlayerMenuTab::Settings &&
       platform_input.mouse_wheel_y != 0.0F) {
@@ -658,6 +773,16 @@ bool route_inventory_mouse_input(
     const std::optional<ui::UiNodeID> hit = ui_tree.hit_test(cursor);
     const std::optional<ui::UiAction> action =
         ui_tree.route_mouse_down(cursor, ui::UiMouseButton::Left);
+    if (action.has_value() &&
+        start_player_menu_settings_slider(
+            ui_tree,
+            client,
+            action.value(),
+            cursor,
+            command_sink,
+            data_source)) {
+      return true;
+    }
     if (apply_player_menu_action(client, action, command_sink, data_source)) {
       return true;
     }

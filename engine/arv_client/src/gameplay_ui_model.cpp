@@ -102,7 +102,7 @@ namespace {
       {"inventory", "Inventory", active == PlayerMenuTab::Inventory},
       {"crafting", "Crafting", active == PlayerMenuTab::Crafting},
       {"settings", "Settings", active == PlayerMenuTab::Settings},
-      {"exit", "Exit Game", active == PlayerMenuTab::ExitGame},
+      {"exit", "Quit", active == PlayerMenuTab::ExitGame},
   };
 }
 

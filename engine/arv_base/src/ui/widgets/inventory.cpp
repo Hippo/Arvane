@@ -39,6 +39,12 @@ constexpr f32 PlayerMenuSettingsRowHeight = 42.0F;
 constexpr f32 PlayerMenuSettingsRowSpacing = 6.0F;
 constexpr f32 PlayerMenuKeyBindRowHeight = 54.0F;
 
+struct SliderSpec {
+  f32 min{};
+  f32 max{};
+  f32 step{};
+};
+
 [[nodiscard]] constexpr f32 inventory_grid_width(f32 slot_size, f32 slot_spacing) noexcept {
   return static_cast<f32>(InventoryGridColumns) * slot_size +
          static_cast<f32>(InventoryGridColumns - 1U) * slot_spacing;
@@ -137,6 +143,22 @@ UiNodeID add_menu_button(
 
 [[nodiscard]] std::string percent_text(f32 value) {
   return fixed_decimal(value, value < 100.0F ? 1 : 0) + "%";
+}
+
+[[nodiscard]] Vec4f mix_color(Vec4f from, Vec4f to, f32 t) noexcept {
+  const f32 amount = std::clamp(t, 0.0F, 1.0F);
+  return {
+      from.x + (to.x - from.x) * amount,
+      from.y + (to.y - from.y) * amount,
+      from.z + (to.z - from.z) * amount,
+      from.w + (to.w - from.w) * amount};
+}
+
+[[nodiscard]] f32 slider_fraction(f32 value, SliderSpec spec) noexcept {
+  if (spec.max <= spec.min) {
+    return 0.0F;
+  }
+  return std::clamp((value - spec.min) / (spec.max - spec.min), 0.0F, 1.0F);
 }
 
 [[nodiscard]] std::string bind_label(const KeyBindSlotView& slot) {
@@ -254,46 +276,84 @@ void add_settings_small_button(
   add_menu_button(tree, parent, std::move(button), tree.theme());
 }
 
-void add_stepper_row(
+void add_slider_row(
     UiTree& tree,
     UiNodeID parent,
     std::string stable_id,
     std::string label,
     std::string value,
     std::string action_prefix,
-    bool decrement_enabled = true,
-    bool increment_enabled = true) {
+    f32 slider_value,
+    SliderSpec spec,
+    bool enabled = true) {
   const UiNodeID row = add_settings_row(tree, parent, std::move(stable_id), std::move(label));
-  constexpr f32 ButtonWidth = 30.0F;
-  constexpr f32 ValueWidth = 86.0F;
-  constexpr f32 Gap = 6.0F;
-  constexpr f32 ControlsWidth = ButtonWidth * 2.0F + ValueWidth + Gap * 2.0F;
+  const UiTheme& theme = tree.theme();
+  constexpr f32 SliderWidth = 228.0F;
+  constexpr f32 ValueWidth = 84.0F;
+  constexpr f32 Gap = 12.0F;
+  constexpr f32 ControlsWidth = SliderWidth + Gap + ValueWidth;
   const f32 x = PlayerMenuSettingsWidth - ControlsWidth - 12.0F;
-  add_settings_small_button(
-      tree,
-      row,
-      action_prefix + ".dec",
-      action_prefix + ".dec",
-      "-",
-      {x, 7.0F},
-      ButtonWidth,
-      decrement_enabled);
+  const std::string slider_id = action_prefix + ".slider";
+  const f32 fraction = slider_fraction(slider_value, spec);
+
+  UiElement slider;
+  slider.stable_id = slider_id;
+  slider.type = UiElementType::Button;
+  slider.layout.width_mode = UiSizeMode::Fixed;
+  slider.layout.height_mode = UiSizeMode::Fixed;
+  slider.layout.width = SliderWidth;
+  slider.layout.height = 30.0F;
+  slider.layout.offset = {x, 6.0F};
+  slider.layout.padding = {};
+  slider.style.background = {0.0F, 0.0F, 0.0F, 0.0F};
+  slider.style.background_hover = {0.0F, 0.0F, 0.0F, 0.0F};
+  slider.style.background_pressed = {0.0F, 0.0F, 0.0F, 0.0F};
+  slider.enabled = enabled;
+  slider.focusable = enabled;
+  slider.hit_test = enabled;
+  slider.action = enabled ? slider_id : std::string{};
+  const UiNodeID slider_id_node = tree.add_child(row, std::move(slider));
+
+  UiElement track =
+      fixed_panel(slider_id + ".track", SliderWidth, 6.0F, theme.colors.surface);
+  track.layout.offset = {0.0F, 12.0F};
+  track.style.radius = 3.0F;
+  track.style.border = enabled ? theme.colors.border : theme.colors.surface;
+  track.style.border_width = theme.layout.border_width;
+  track.hit_test = false;
+  tree.add_child(slider_id_node, std::move(track));
+
+  UiElement fill = fixed_panel(
+      slider_id + ".fill",
+      std::max(0.0F, SliderWidth * fraction),
+      6.0F,
+      enabled ? theme.colors.accent : theme.colors.text_disabled);
+  fill.layout.offset = {0.0F, 12.0F};
+  fill.style.radius = 3.0F;
+  fill.hit_test = false;
+  tree.add_child(slider_id_node, std::move(fill));
+
+  UiElement knob = fixed_panel(
+      slider_id + ".knob",
+      18.0F,
+      18.0F,
+      enabled ? theme.colors.accent_text : theme.colors.text_disabled);
+  knob.layout.offset = {
+      std::clamp(SliderWidth * fraction - 9.0F, 0.0F, SliderWidth - 18.0F),
+      6.0F};
+  knob.style.radius = 9.0F;
+  knob.style.border = enabled ? theme.colors.accent : theme.colors.border;
+  knob.style.border_width = theme.layout.border_width;
+  knob.hit_test = false;
+  tree.add_child(slider_id_node, std::move(knob));
+
   add_settings_value_text(
       tree,
       row,
       action_prefix + ".value",
       std::move(value),
-      {x + ButtonWidth + Gap, 7.0F},
+      {x + SliderWidth + Gap, 7.0F},
       ValueWidth);
-  add_settings_small_button(
-      tree,
-      row,
-      action_prefix + ".inc",
-      action_prefix + ".inc",
-      "+",
-      {x + ButtonWidth + Gap + ValueWidth + Gap, 7.0F},
-      ButtonWidth,
-      increment_enabled);
 }
 
 void add_toggle_row(
@@ -304,17 +364,41 @@ void add_toggle_row(
     bool value,
     std::string action) {
   const UiNodeID row = add_settings_row(tree, parent, std::move(stable_id), std::move(label));
-  add_settings_small_button(
-      tree,
-      row,
-      action + ".toggle",
-      action,
-      value ? "On" : "Off",
-      {PlayerMenuSettingsWidth - 92.0F, 7.0F},
-      80.0F,
-      true,
-      value,
-      value ? UiControlRole::Primary : UiControlRole::Neutral);
+  const UiTheme& theme = tree.theme();
+  constexpr f32 SwitchWidth = 58.0F;
+  constexpr f32 SwitchHeight = 30.0F;
+  const f32 amount = value ? 1.0F : 0.0F;
+  UiElement toggle;
+  toggle.stable_id = action + ".toggle";
+  toggle.type = UiElementType::Button;
+  toggle.layout.width_mode = UiSizeMode::Fixed;
+  toggle.layout.height_mode = UiSizeMode::Fixed;
+  toggle.layout.width = SwitchWidth;
+  toggle.layout.height = SwitchHeight;
+  toggle.layout.offset = {PlayerMenuSettingsWidth - SwitchWidth - 12.0F, 6.0F};
+  toggle.layout.padding = {};
+  toggle.style.background = mix_color(theme.colors.surface, theme.colors.accent, amount);
+  toggle.style.background_hover =
+      mix_color(theme.colors.surface_hover, theme.colors.accent_hover, amount);
+  toggle.style.background_pressed =
+      mix_color(theme.colors.surface_pressed, theme.colors.accent_pressed, amount);
+  toggle.style.border = theme.colors.border;
+  toggle.style.border_width = theme.layout.border_width;
+  toggle.style.radius = SwitchHeight * 0.5F;
+  toggle.enabled = true;
+  toggle.focusable = true;
+  toggle.hit_test = true;
+  toggle.action = action;
+  const UiNodeID toggle_id = tree.add_child(row, std::move(toggle));
+
+  UiElement knob =
+      fixed_panel(action + ".toggle.knob", 24.0F, 24.0F, theme.colors.accent_text);
+  knob.layout.offset = {3.0F + amount * (SwitchWidth - 30.0F), 3.0F};
+  knob.style.radius = 12.0F;
+  knob.style.border = mix_color(theme.colors.border, theme.colors.accent, amount);
+  knob.style.border_width = theme.layout.border_width;
+  knob.hit_test = false;
+  tree.add_child(toggle_id, std::move(knob));
 }
 
 UiNodeID add_settings_scroll_stack(
@@ -652,13 +736,6 @@ void append_crafting_ui(
 void append_settings_overview_ui(
     UiTree& tree,
     UiNodeID panel_id) {
-  add_settings_section_header(
-      tree,
-      panel_id,
-      "player_menu.settings.overview",
-      "Settings",
-      false);
-
   UiElement stack;
   stack.stable_id = "player_menu.settings.overview.options";
   stack.type = UiElementType::VerticalStack;
@@ -666,7 +743,7 @@ void append_settings_overview_ui(
   stack.layout.width_mode = UiSizeMode::Fixed;
   stack.layout.width = 360.0F;
   stack.layout.anchor = UiAnchor::TopCenter;
-  stack.layout.offset = {0.0F, 134.0F};
+  stack.layout.offset = {0.0F, 112.0F};
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
 
@@ -767,60 +844,63 @@ void append_render_settings_ui(
       render.frame_sync == SettingsFrameSyncMode::FpsCap,
       render.frame_sync == SettingsFrameSyncMode::FpsCap ? UiControlRole::Primary
                                                          : UiControlRole::Neutral);
-  add_stepper_row(
+  add_slider_row(
       tree,
       stack,
       "render.fps_cap",
       "FPS Cap",
       std::to_string(render.fps_cap),
       "render.fps_cap",
-      render.fps_cap > 30U,
-      render.fps_cap < 240U);
-  add_stepper_row(
+      static_cast<f32>(render.fps_cap),
+      {30.0F, 240.0F, 5.0F},
+      render.frame_sync == SettingsFrameSyncMode::FpsCap);
+  add_slider_row(
       tree,
       stack,
       "render.load_distance",
       "Load Distance",
       std::to_string(render.load_distance),
       "render.load_distance",
-      render.load_distance > 1,
-      render.load_distance < 32);
-  add_stepper_row(
+      static_cast<f32>(render.load_distance),
+      {1.0F, 32.0F, 1.0F});
+  add_slider_row(
       tree,
       stack,
       "render.simulation_distance",
       "Simulation Distance",
       std::to_string(render.simulation_distance),
       "render.simulation_distance",
-      render.simulation_distance > 0,
-      render.simulation_distance < render.load_distance);
-  add_stepper_row(
+      static_cast<f32>(render.simulation_distance),
+      {0.0F, static_cast<f32>(std::max(0, render.load_distance)), 1.0F});
+  add_slider_row(
       tree,
       stack,
       "render.view_distance",
       "View Distance",
       std::to_string(render.view_distance),
       "render.view_distance",
-      render.view_distance > 1,
-      render.view_distance < render.stream_distance);
-  add_stepper_row(
+      static_cast<f32>(render.view_distance),
+      {1.0F, static_cast<f32>(std::max(1, render.load_distance)), 1.0F});
+  add_slider_row(
       tree,
       stack,
       "render.stream_distance",
       "Stream Distance",
       std::to_string(render.stream_distance),
       "render.stream_distance",
-      render.stream_distance > std::max(1, render.view_distance),
-      render.stream_distance < render.load_distance);
-  add_stepper_row(
+      static_cast<f32>(render.stream_distance),
+      {static_cast<f32>(std::max(1, render.view_distance)),
+       static_cast<f32>(std::max(1, render.load_distance)),
+       1.0F});
+  add_slider_row(
       tree,
       stack,
       "render.mesh_upload_budget",
       "Mesh Upload Budget",
       std::to_string(render.mesh_upload_budget),
       "render.mesh_upload_budget",
-      render.mesh_upload_budget > 1U,
-      render.mesh_upload_budget < 32U);
+      static_cast<f32>(render.mesh_upload_budget),
+      {1.0F, 32.0F, 1.0F});
   add_toggle_row(
       tree,
       stack,
@@ -828,78 +908,78 @@ void append_render_settings_ui(
       "Local Player Body",
       render.show_local_player_body,
       "render.local_player_body");
-  add_stepper_row(
+  add_slider_row(
       tree,
       stack,
       "render.sky.star_intensity",
       "Star Intensity",
       fixed_decimal(render.star_intensity, 2),
       "render.star_intensity",
-      render.star_intensity > 0.0F,
-      render.star_intensity < 3.0F);
-  add_stepper_row(
+      render.star_intensity,
+      {0.0F, 3.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.sky.cloud_intensity",
       "Cloud Intensity",
       fixed_decimal(render.cloud_intensity, 2),
       "render.cloud_intensity",
-      render.cloud_intensity > 0.0F,
-      render.cloud_intensity < 3.0F);
-  add_stepper_row(
+      render.cloud_intensity,
+      {0.0F, 3.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.sky.cirrus",
       "Cirrus",
       fixed_decimal(render.cirrus_amount, 2),
       "render.cirrus",
-      render.cirrus_amount > 0.0F,
-      render.cirrus_amount < 1.0F);
-  add_stepper_row(
+      render.cirrus_amount,
+      {0.0F, 1.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.sky.cumulus",
       "Cumulus",
       fixed_decimal(render.cumulus_amount, 2),
       "render.cumulus",
-      render.cumulus_amount > 0.0F,
-      render.cumulus_amount < 1.0F);
-  add_stepper_row(
+      render.cumulus_amount,
+      {0.0F, 1.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.outline.red",
       "Outline Red",
       fixed_decimal(render.outline_red, 2),
       "render.outline_red",
-      render.outline_red > 0.0F,
-      render.outline_red < 1.0F);
-  add_stepper_row(
+      render.outline_red,
+      {0.0F, 1.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.outline.green",
       "Outline Green",
       fixed_decimal(render.outline_green, 2),
       "render.outline_green",
-      render.outline_green > 0.0F,
-      render.outline_green < 1.0F);
-  add_stepper_row(
+      render.outline_green,
+      {0.0F, 1.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.outline.blue",
       "Outline Blue",
       fixed_decimal(render.outline_blue, 2),
       "render.outline_blue",
-      render.outline_blue > 0.0F,
-      render.outline_blue < 1.0F);
-  add_stepper_row(
+      render.outline_blue,
+      {0.0F, 1.0F, 0.05F});
+  add_slider_row(
       tree,
       stack,
       "render.outline.thickness",
       "Outline Thickness",
       fixed_decimal(render.outline_thickness, 2),
       "render.outline_thickness",
-      render.outline_thickness > 0.1F,
-      render.outline_thickness < 2.0F);
+      render.outline_thickness,
+      {0.1F, 2.0F, 0.05F});
 }
 
 void append_controls_settings_ui(
@@ -909,15 +989,15 @@ void append_controls_settings_ui(
   add_settings_section_header(tree, panel_id, "player_menu.settings.controls", "Controls");
   const UiNodeID stack =
       add_settings_scroll_stack(tree, panel_id, "player_menu.settings.controls", 0.0F);
-  add_stepper_row(
+  add_slider_row(
       tree,
       stack,
       "controls.mouse_sensitivity",
       "Mouse Sensitivity",
       percent_text(settings.controls.mouse_sensitivity_percent),
       "controls.mouse_sensitivity",
-      settings.controls.mouse_sensitivity_percent > 10.0F,
-      settings.controls.mouse_sensitivity_percent < 300.0F);
+      settings.controls.mouse_sensitivity_percent,
+      {10.0F, 300.0F, 5.0F});
 }
 
 void append_interface_settings_ui(
@@ -928,51 +1008,51 @@ void append_interface_settings_ui(
   const UiNodeID stack =
       add_settings_scroll_stack(tree, panel_id, "player_menu.settings.interface", settings.scroll_y);
   const InterfaceSettingsView& interface = settings.interface;
-  add_stepper_row(
+  add_slider_row(
       tree,
       stack,
       "interface.chat_history",
       "Chat History",
       std::to_string(interface.chat_history_max),
       "interface.chat_history",
-      interface.chat_history_max > 100U,
-      interface.chat_history_max < 5000U);
-  add_stepper_row(
+      static_cast<f32>(interface.chat_history_max),
+      {100.0F, 5000.0F, 100.0F});
+  add_slider_row(
       tree,
       stack,
       "interface.open_lines",
       "Open Chat Lines",
       std::to_string(interface.chat_open_lines),
       "interface.open_lines",
-      interface.chat_open_lines > 1U,
-      interface.chat_open_lines < 16U);
-  add_stepper_row(
+      static_cast<f32>(interface.chat_open_lines),
+      {1.0F, 16.0F, 1.0F});
+  add_slider_row(
       tree,
       stack,
       "interface.passive_lines",
       "Passive Chat Lines",
       std::to_string(interface.chat_passive_lines),
       "interface.passive_lines",
-      interface.chat_passive_lines > 0U,
-      interface.chat_passive_lines < 16U);
-  add_stepper_row(
+      static_cast<f32>(interface.chat_passive_lines),
+      {0.0F, 16.0F, 1.0F});
+  add_slider_row(
       tree,
       stack,
       "interface.visible_seconds",
       "Passive Visible Seconds",
       fixed_decimal(interface.chat_passive_visible_seconds, 1),
       "interface.visible_seconds",
-      interface.chat_passive_visible_seconds > 0.0F,
-      interface.chat_passive_visible_seconds < 30.0F);
-  add_stepper_row(
+      interface.chat_passive_visible_seconds,
+      {0.0F, 30.0F, 0.5F});
+  add_slider_row(
       tree,
       stack,
       "interface.fade_seconds",
       "Passive Fade Seconds",
       fixed_decimal(interface.chat_passive_fade_seconds, 1),
       "interface.fade_seconds",
-      interface.chat_passive_fade_seconds > 0.0F,
-      interface.chat_passive_fade_seconds < 30.0F);
+      interface.chat_passive_fade_seconds,
+      {0.0F, 30.0F, 0.5F});
 }
 
 void append_key_bind_row(
@@ -1095,15 +1175,6 @@ void append_exit_game_ui(
     UiTree& tree,
     UiNodeID panel_id,
     bool show_quit) {
-  UiElement title = text_element(
-      "player_menu.exit.title",
-      "Exit Game",
-      tree.theme().colors.text,
-      UiTextRole::Heading);
-  title.layout.anchor = UiAnchor::TopCenter;
-  title.layout.offset = {0.0F, 94.0F};
-  tree.add_child(panel_id, std::move(title));
-
   UiElement stack;
   stack.stable_id = "player_menu.exit.actions";
   stack.type = UiElementType::VerticalStack;
@@ -1111,7 +1182,7 @@ void append_exit_game_ui(
   stack.layout.width_mode = UiSizeMode::Fixed;
   stack.layout.width = 300.0F;
   stack.layout.anchor = UiAnchor::TopCenter;
-  stack.layout.offset = {0.0F, 150.0F};
+  stack.layout.offset = {0.0F, 116.0F};
   stack.hit_test = false;
   const UiNodeID stack_id = tree.add_child(panel_id, std::move(stack));
 

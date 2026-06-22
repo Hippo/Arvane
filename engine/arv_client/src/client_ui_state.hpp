@@ -29,6 +29,7 @@ public:
   [[nodiscard]] PlayerMenuTab player_menu_tab() const noexcept;
   [[nodiscard]] PlayerMenuSettingsSection player_menu_settings_section() const noexcept;
   [[nodiscard]] f32 player_menu_settings_scroll_y() const noexcept;
+  [[nodiscard]] const std::string& player_menu_active_settings_slider() const noexcept;
   [[nodiscard]] const std::optional<PlayerMenuKeyBindCapture>&
   player_menu_key_bind_capture() const noexcept;
   [[nodiscard]] const std::string& player_menu_search() const noexcept;
@@ -44,6 +45,8 @@ public:
   void set_player_menu_tab(PlayerMenuTab tab) noexcept;
   void set_player_menu_settings_section(PlayerMenuSettingsSection section) noexcept;
   void scroll_player_menu_settings(f32 wheel_y, usize row_count, f32 row_height, f32 viewport_height) noexcept;
+  void set_player_menu_active_settings_slider(std::string action_id);
+  void clear_player_menu_active_settings_slider() noexcept;
   void set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture);
   void clear_player_menu_key_bind_capture() noexcept;
   void clear_player_menu_search() noexcept;
@@ -92,6 +95,7 @@ private:
   PlayerMenuTab player_menu_tab_{PlayerMenuTab::Inventory};
   PlayerMenuSettingsSection player_menu_settings_section_{PlayerMenuSettingsSection::Overview};
   f32 player_menu_settings_scroll_y_{};
+  std::string player_menu_active_settings_slider_{};
   std::optional<PlayerMenuKeyBindCapture> player_menu_key_bind_capture_{};
   arv::core::TextEditBuffer player_menu_search_{};
   std::string selected_crafting_category_id_{};

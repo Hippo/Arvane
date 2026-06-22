@@ -337,6 +337,10 @@ f32 ClientRuntime::player_menu_settings_scroll_y() const noexcept {
   return impl_->ui.player_menu_settings_scroll_y();
 }
 
+const std::string& ClientRuntime::player_menu_active_settings_slider() const noexcept {
+  return impl_->ui.player_menu_active_settings_slider();
+}
+
 const std::optional<PlayerMenuKeyBindCapture>&
 ClientRuntime::player_menu_key_bind_capture() const noexcept {
   return impl_->ui.player_menu_key_bind_capture();
@@ -381,6 +385,14 @@ void ClientRuntime::scroll_player_menu_settings(
     f32 row_height,
     f32 viewport_height) noexcept {
   impl_->ui.scroll_player_menu_settings(wheel_y, row_count, row_height, viewport_height);
+}
+
+void ClientRuntime::set_player_menu_active_settings_slider(std::string action_id) {
+  impl_->ui.set_player_menu_active_settings_slider(std::move(action_id));
+}
+
+void ClientRuntime::clear_player_menu_active_settings_slider() noexcept {
+  impl_->ui.clear_player_menu_active_settings_slider();
 }
 
 void ClientRuntime::set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture) {

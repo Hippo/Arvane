@@ -252,8 +252,9 @@ TEST(ClientUiRoutingTests, PlayerMenuSettingsAndExitActionsSubmitSharedCommands)
   input.cursor_x = 10.0F;
   input.cursor_y = 10.0F;
 
+  input.cursor_x = 159.0F;
   arv::ui::UiTree view_distance_tree =
-      make_action_button_tree("render.view_distance.inc", "render.view_distance.inc");
+      make_action_button_tree("render.view_distance.slider", "render.view_distance.slider");
   EXPECT_TRUE(arv::client::route_inventory_mouse_input(
       view_distance_tree,
       client,
@@ -265,10 +266,23 @@ TEST(ClientUiRoutingTests, PlayerMenuSettingsAndExitActionsSubmitSharedCommands)
   ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
   const auto& render =
       std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings;
-  EXPECT_EQ(render.view_distance, 3);
-  EXPECT_EQ(render.stream_distance, 3);
+  EXPECT_EQ(render.view_distance, 4);
+  EXPECT_EQ(render.stream_distance, 4);
 
   sink.commands.clear();
+  arv::platform::InputSnapshot release_input;
+  release_input.mouse_left_released = true;
+  release_input.cursor_x = 159.0F;
+  release_input.cursor_y = 10.0F;
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      view_distance_tree,
+      client,
+      release_input,
+      false,
+      &sink,
+      &data));
+  sink.commands.clear();
+  input.cursor_x = 10.0F;
   arv::ui::UiTree main_menu_tree =
       make_action_button_tree("player_menu.exit.main_menu", "player_menu.exit.main_menu");
   EXPECT_TRUE(arv::client::route_inventory_mouse_input(

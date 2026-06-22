@@ -62,6 +62,10 @@ f32 ClientUiState::player_menu_settings_scroll_y() const noexcept {
   return player_menu_settings_scroll_y_;
 }
 
+const std::string& ClientUiState::player_menu_active_settings_slider() const noexcept {
+  return player_menu_active_settings_slider_;
+}
+
 const std::optional<PlayerMenuKeyBindCapture>&
 ClientUiState::player_menu_key_bind_capture() const noexcept {
   return player_menu_key_bind_capture_;
@@ -101,6 +105,7 @@ void ClientUiState::toggle_inventory_if_allowed(
     return;
   }
   inventory_open_ = !inventory_open_;
+  player_menu_active_settings_slider_.clear();
   if (inventory_open_) {
     player_menu_tab_ = PlayerMenuTab::Inventory;
     chat_open_ = false;
@@ -111,6 +116,7 @@ void ClientUiState::toggle_inventory_if_allowed(
 void ClientUiState::open_inventory() noexcept {
   inventory_open_ = true;
   player_menu_tab_ = PlayerMenuTab::Inventory;
+  player_menu_active_settings_slider_.clear();
   chat_open_ = false;
   reset_chat_history_navigation();
 }
@@ -123,6 +129,7 @@ void ClientUiState::set_player_menu_tab(PlayerMenuTab tab) noexcept {
   if (tab != PlayerMenuTab::Settings) {
     player_menu_settings_section_ = PlayerMenuSettingsSection::Overview;
     player_menu_settings_scroll_y_ = 0.0F;
+    player_menu_active_settings_slider_.clear();
     player_menu_key_bind_capture_.reset();
   }
 }
@@ -134,6 +141,7 @@ void ClientUiState::set_player_menu_settings_section(
   }
   player_menu_settings_section_ = section;
   player_menu_settings_scroll_y_ = 0.0F;
+  player_menu_active_settings_slider_.clear();
   player_menu_key_bind_capture_.reset();
 }
 
@@ -152,6 +160,14 @@ void ClientUiState::scroll_player_menu_settings(
   const f32 max_scroll = std::max(0.0F, content_height - viewport_height);
   player_menu_settings_scroll_y_ =
       std::clamp(player_menu_settings_scroll_y_ - wheel_y * 38.0F, 0.0F, max_scroll);
+}
+
+void ClientUiState::set_player_menu_active_settings_slider(std::string action_id) {
+  player_menu_active_settings_slider_ = std::move(action_id);
+}
+
+void ClientUiState::clear_player_menu_active_settings_slider() noexcept {
+  player_menu_active_settings_slider_.clear();
 }
 
 void ClientUiState::set_player_menu_key_bind_capture(PlayerMenuKeyBindCapture capture) {
@@ -180,12 +196,14 @@ void ClientUiState::select_crafting_category(std::string category_id) {
 void ClientUiState::open_chat() {
   chat_open_ = true;
   inventory_open_ = false;
+  player_menu_active_settings_slider_.clear();
   reset_chat_history_navigation();
 }
 
 void ClientUiState::open_chat_with_draft(std::string draft) {
   chat_open_ = true;
   inventory_open_ = false;
+  player_menu_active_settings_slider_.clear();
   assign_chat_draft(std::move(draft));
   reset_chat_history_navigation();
 }
@@ -195,6 +213,7 @@ void ClientUiState::close_chat() noexcept {
   chat_draft_.value.clear();
   chat_draft_.cursor = 0U;
   chat_draft_.selection_anchor = 0U;
+  player_menu_active_settings_slider_.clear();
   reset_chat_history_navigation();
   pending_url_confirmation_.reset();
 }
@@ -205,6 +224,7 @@ void ClientUiState::close_ui() noexcept {
   chat_draft_.value.clear();
   chat_draft_.cursor = 0U;
   chat_draft_.selection_anchor = 0U;
+  player_menu_active_settings_slider_.clear();
   reset_chat_history_navigation();
   pending_url_confirmation_.reset();
 }
