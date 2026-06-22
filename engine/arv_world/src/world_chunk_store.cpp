@@ -227,10 +227,42 @@ voxel::ChunkSection& WorldChunkStore::ensure_chunk(
 }
 
 void WorldChunkStore::request_chunk_load(ChunkSectionCoord coord, WorldDirtyTracker& dirty) {
+  (void)dirty;
   if (find_chunk(coord) != nullptr) {
     return;
   }
-  (void)ensure_chunk(coord, voxel::ChunkLifecycleState::Requested, dirty);
+  Chunk& column = ensure_column(chunk_to_column(coord));
+  (void)column.ensure_section(coord, voxel::ChunkLifecycleState::Requested);
+  ++lifecycle_counts_[lifecycle_index(voxel::ChunkLifecycleState::Requested)];
+  note_simulation_topology_changed();
+}
+
+bool WorldChunkStore::mark_chunk_column_generating(
+    ChunkCoord coord,
+    WorldDirtyTracker& dirty) {
+  (void)dirty;
+  Chunk& column = ensure_column(coord);
+  bool marked_any = false;
+  bool created_any = false;
+  for (i32 y = height_.min_chunk_y; y <= height_.max_chunk_y; ++y) {
+    voxel::ChunkSection* section = column.find_section(y);
+    if (section == nullptr) {
+      (void)column.ensure_section(y, voxel::ChunkLifecycleState::Generating);
+      ++lifecycle_counts_[lifecycle_index(voxel::ChunkLifecycleState::Generating)];
+      marked_any = true;
+      created_any = true;
+      continue;
+    }
+    if (section->lifecycle_state() != voxel::ChunkLifecycleState::Requested) {
+      continue;
+    }
+    set_lifecycle_state_internal(*section, voxel::ChunkLifecycleState::Generating);
+    marked_any = true;
+  }
+  if (created_any) {
+    note_simulation_topology_changed();
+  }
+  return marked_any;
 }
 
 bool WorldChunkStore::unload_chunk(ChunkSectionCoord coord) noexcept {
@@ -537,6 +569,11 @@ bool WorldRuntime::set_chunk_lifecycle_state(
     FluidSolver::enqueue_chunk_activation_updates(*this, coord);
   }
   return changed;
+}
+
+bool WorldRuntime::mark_chunk_column_generating(ChunkCoord coord) {
+  assert_owner_thread();
+  return impl_->chunks.mark_chunk_column_generating(coord, impl_->dirty);
 }
 
 void WorldRuntime::update_simulation_radius(ChunkSectionCoord center, i32 radius) {

@@ -901,11 +901,15 @@ void ClientNetworkRouter::handle_message(
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionData: {
-      auto chunk_data = protocol::deserialize_clientbound_chunk_section_data(decoded.value().payload);
-      if (!chunk_data) {
+      protocol::ClientboundChunkSectionData chunk_data;
+      auto decoded_chunk =
+          protocol::deserialize_clientbound_chunk_section_data_into(
+              decoded.value().payload,
+              chunk_data);
+      if (!decoded_chunk) {
         return;
       }
-      runtime.chunks.push_chunk_section_data(std::move(chunk_data.value()));
+      runtime.chunks.push_chunk_section_data(std::move(chunk_data));
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionUnload: {

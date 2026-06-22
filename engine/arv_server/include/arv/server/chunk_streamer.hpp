@@ -16,8 +16,15 @@ struct ServerChunkStreamingConfig {
   i32 max_view_distance{4};
   i32 simulation_distance{1};
   i32 unload_margin{1};
+  i32 forward_prefetch_chunks{4};
   u32 max_chunks_sent_per_player_tick{4};
   u32 max_unloads_sent_per_player_tick{64};
+  bool integrated_frame_pump_enabled{};
+  u32 max_ready_chunks_sent_per_player_frame{};
+  u32 max_missing_columns_requested_per_player_tick{4};
+  u32 max_generation_results_per_frame{1};
+  u32 max_generation_sections_published_per_frame{};
+  u32 max_generation_schedules_per_frame{1};
 };
 
 struct ServerChunkGenerationSettings {
@@ -60,9 +67,22 @@ public:
   void tick_streaming_budget(
       world::WorldRuntime& world,
       std::vector<QueuedChunkStreamMessage>& out_messages);
+  void tick_ready_chunk_budget(
+      world::WorldRuntime& world,
+      std::vector<QueuedChunkStreamMessage>& out_messages,
+      u32 max_chunks_sent_per_player);
+  void tick_streaming_maintenance(
+      world::WorldRuntime& world,
+      std::vector<QueuedChunkStreamMessage>& out_messages,
+      u32 max_missing_columns_per_player);
+  void tick_missing_chunk_requests(
+      world::WorldRuntime& world,
+      u32 max_missing_columns_per_player);
   [[nodiscard]] std::vector<ChunkCoord> pending_generation_requests(
       const world::WorldRuntime& world,
-      usize max_requests = 0U) const;
+      usize max_requests = 0U,
+      bool queued_only = false);
+  void mark_generation_request_scheduled(WorldID world_id, ChunkCoord column) noexcept;
   [[nodiscard]] bool session_has_sent_chunk(
       SessionID session_id,
       WorldID world_id,
@@ -97,11 +117,18 @@ private:
     net::ConnectionID connection_id{};
     WorldID world_id{};
     ChunkSectionCoord center_chunk{};
+    i32 movement_x{};
+    i32 movement_z{};
     i32 view_distance{};
+    i32 scan_distance{};
+    std::vector<ChunkCoord> scan_columns{};
     HashSet<ChunkSectionCoord> desired_chunks{};
     HashMap<ChunkSectionCoord, SentChunkVersions> sent_chunk_versions{};
     HashSet<ChunkSectionCoord> pending_chunks{};
+    HashSet<ChunkCoord> requested_generation_columns{};
+    std::vector<ChunkCoord> requested_generation_order{};
     std::vector<ChunkSectionCoord> unload_queue{};
+    u32 ready_spread_frames{};
   };
 
   [[nodiscard]] i32 clamp_view_distance(i32 requested_distance) const noexcept;
@@ -120,10 +147,16 @@ private:
   void queue_chunk_unloads(
       PlayerChunkStreamState& state,
       std::vector<QueuedChunkStreamMessage>& out_messages);
+  void queue_missing_chunk_requests(
+      world::WorldRuntime& world,
+      PlayerChunkStreamState& state,
+      u32 max_missing_columns);
   void queue_chunk_sends(
       world::WorldRuntime& world,
       PlayerChunkStreamState& state,
-      std::vector<QueuedChunkStreamMessage>& out_messages);
+      std::vector<QueuedChunkStreamMessage>& out_messages,
+      u32 max_chunks_sent,
+      bool request_missing_chunks);
 
   ServerChunkStreamingConfig config_{};
   HashMap<SessionID, PlayerChunkStreamState> players_;

@@ -1,6 +1,7 @@
 #include "server_runtime_internal.hpp"
 
 #include "arv/core/log.hpp"
+#include "arv/core/profiling.hpp"
 
 #include <utility>
 
@@ -11,7 +12,49 @@ void ServerRuntimeImpl::tick_chunk_streaming() {
   chunk_streamer_.tick_streaming_budget(
       default_world_,
       queued_chunk_stream_messages_);
+  send_queued_chunk_stream_messages();
+}
 
+void ServerRuntimeImpl::tick_chunk_streaming_maintenance() {
+  queued_chunk_stream_messages_.clear();
+  chunk_streamer_.tick_streaming_maintenance(
+      default_world_,
+      queued_chunk_stream_messages_,
+      chunk_streaming_config_.max_missing_columns_requested_per_player_tick);
+  send_queued_chunk_stream_messages();
+}
+
+void ServerRuntimeImpl::pump_chunk_streaming_frame(bool send_ready_chunks) {
+  if (state_ != ServerRuntimeState::Running ||
+      !transport_ ||
+      mode_ != ServerMode::Integrated ||
+      !chunk_streaming_config_.integrated_frame_pump_enabled) {
+    return;
+  }
+
+  ARV_PROFILE_ZONE("Integrated chunk streaming frame pump");
+  world_jobs_.drain_generation_jobs(
+      default_world_,
+      chunk_streaming_config_.max_generation_results_per_frame,
+      chunk_streaming_config_.max_generation_sections_published_per_frame);
+  world_jobs_.schedule_generation_jobs(
+      default_world_,
+      chunk_streamer_,
+      chunk_generation_,
+      chunk_streaming_config_.max_generation_schedules_per_frame,
+      true);
+  if (!send_ready_chunks) {
+    return;
+  }
+  queued_chunk_stream_messages_.clear();
+  chunk_streamer_.tick_ready_chunk_budget(
+      default_world_,
+      queued_chunk_stream_messages_,
+      chunk_streaming_config_.max_ready_chunks_sent_per_player_frame);
+  send_queued_chunk_stream_messages();
+}
+
+void ServerRuntimeImpl::send_queued_chunk_stream_messages() {
   for (QueuedChunkStreamMessage& message : queued_chunk_stream_messages_) {
     const net::NetworkResult send_result = send_protocol_message(
         *transport_,

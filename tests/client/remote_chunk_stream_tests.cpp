@@ -23,8 +23,8 @@ namespace {
   section.has_lighting = true;
   section.lighting_valid = true;
   section.blocks.fill(arv::voxel::AirBlockVariantID);
-  section.lights.fill(arv::voxel::pack_light(1, 2, 3, 4));
-  section.fluids.fill(arv::voxel::empty_fluid_cell());
+  section.lights.emplace();
+  section.lights->fill(arv::voxel::pack_light(1, 2, 3, 4));
   section.blocks.front() = marker_block;
   return section;
 }
@@ -271,7 +271,8 @@ TEST(RemoteChunkStreamTests, BlockUpdatesMutateLoadedSectionsAndBumpVersions) {
   const arv::usize index = arv::voxel::local_index(local);
   EXPECT_EQ(updated->blocks[index], arv::voxel::BlockVariantID{8});
   EXPECT_TRUE(updated->has_fluids);
-  EXPECT_TRUE(updated->fluids[index].source());
+  ASSERT_TRUE(updated->fluids.has_value());
+  EXPECT_TRUE(updated->fluids.value()[index].source());
   EXPECT_EQ(updated->chunk_content_version, 200U);
   EXPECT_EQ(updated->chunk_version, 200U);
 }

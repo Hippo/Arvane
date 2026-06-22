@@ -238,7 +238,7 @@ jobs:
     critical_cpu_workers: 1
     background_cpu_workers: 0
     blocking_io_workers: 1
-    max_mesh_jobs_in_flight: 4
+    max_mesh_jobs_in_flight: 12
   server:
     critical_cpu_workers: 1
     background_cpu_workers: 0
@@ -250,7 +250,7 @@ jobs:
     max_pathfinding_jobs_in_flight: 1
 ```
 
-`worker_threads: 0` keeps the total worker count automatic after reserving owner/platform threads. `background_cpu_workers: 0` lets the app derive the background lane from the runtime budget. Domain budgets use the `JobSystemConfig` field names; zero keeps the raw `JobSystem` domain unbounded, though owner systems with their own pending queues may substitute their runtime default. `chunk_pipeline.max_lighting_sections_per_job` controls how many independent section solves a server lighting job may batch together.
+`worker_threads: 0` keeps the total worker count automatic after reserving owner/platform threads. `background_cpu_workers: 0` lets the app derive the background lane from the runtime budget. Domain budgets use the `JobSystemConfig` field names; zero keeps the raw `JobSystem` domain unbounded, though owner systems with their own pending queues may substitute their runtime default. `chunk_pipeline.max_lighting_sections_per_job` controls how many independent section solves a server lighting job may batch together; the chunk pipeline also owns frame budgets such as generated-section publication, ready chunk sends, client chunk applies, and mesh preparation.
 
 ### Current Owner Mapping
 
@@ -960,6 +960,16 @@ These invariants must hold:
 Histograms are fixed-size ring buffers and expose p50/p95/p99 snapshots without allocating during recording.
 
 The debug menu also shows aggregate atomic timing snapshots for those same metrics, plus queue-pressure snapshots from the client and server job systems. Workers only publish samples at task boundaries, and the UI never locks or reaches into another thread's local histogram while rendering the profiling tab. When `ARVANE_ENABLE_PROFILING=OFF`, job queue-latency clock reads and histogram writes are compiled out.
+
+Desktop Tracy builds emit `arv.chunk.*` plots from the integrated frame loop for live fresh-terrain streaming: generated columns/sec, generated sections/sec, meshed sections/sec, uploaded meshes/sec, visible renderable growth/sec, pending generation jobs, awaiting generation sections, pending client sections, mesh candidate/backlog counts, pending mesh uploads, and visible renderable sections.
+
+For a repeatable desktop smoke that uses the real integrated server/client loop, run:
+
+```bash
+./build/apps/arv_desktop/arv_desktop --validate-chunk-streaming --chunk-validation-seconds 6 --chunk-validation-report /tmp/arvane_chunk_validation.txt
+```
+
+The validation creates an isolated temporary singleplayer save, drives the local player through fresh terrain in noclip at boosted fly speed, records the same chunk counters available in Tracy, writes the optional report, and removes the validation save unless `--chunk-validation-keep-save` is supplied.
 
 ---
 

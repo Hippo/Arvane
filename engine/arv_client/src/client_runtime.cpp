@@ -83,6 +83,19 @@ struct ClientRuntime::Impl {
     }
   }
 
+  void poll_network() {
+    if (!connection.transport()) {
+      return;
+    }
+
+    const Seconds tick_seconds = tick_duration_seconds(player_controller.server_tick_rate());
+    detail::ClientRuntimeContext runtime = context(nullptr, tick_seconds);
+    network.process_events(runtime);
+    if (connection.tick_timeouts()) {
+      clear_multiplayer_runtime();
+    }
+  }
+
   void clear_multiplayer_runtime() {
     entities.clear();
     dropped_items.clear();
@@ -197,6 +210,10 @@ void ClientRuntime::submit_input(InputFrame input) {
 
 void ClientRuntime::set_chunk_view_distance(i32 view_distance) noexcept {
   impl_->chunk_interest.set_view_distance(view_distance);
+}
+
+void ClientRuntime::poll_network() {
+  impl_->poll_network();
 }
 
 void ClientRuntime::fixed_tick(TickIndex tick_index) {

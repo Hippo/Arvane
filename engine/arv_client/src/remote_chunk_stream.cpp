@@ -108,7 +108,11 @@ bool RemoteChunkSectionStore::apply_block_update_batch(
     found->blocks[index] = update.new_state;
     if (update.has_fluid) {
       found->has_fluids = true;
-      found->fluids[index] = update.new_fluid;
+      if (!found->fluids.has_value()) {
+        found->fluids.emplace();
+        found->fluids->fill(voxel::empty_fluid_cell());
+      }
+      found->fluids.value()[index] = update.new_fluid;
     }
     mark_remote_chunk_section_content_changed(*found, update.server_tick);
     changed = true;

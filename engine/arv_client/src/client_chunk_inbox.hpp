@@ -9,7 +9,7 @@ namespace arv::client {
 
 class ClientChunkInbox {
 public:
-  void push_chunk_section_data(protocol::ClientboundChunkSectionData data);
+  void push_chunk_section_data(protocol::ClientboundChunkSectionData&& data);
   void push_chunk_section_unload(protocol::ClientboundChunkSectionUnload unload);
   void push_block_updates(protocol::ClientboundBlockUpdateBatch updates);
 

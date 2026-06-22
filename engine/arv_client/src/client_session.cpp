@@ -828,13 +828,15 @@ void ClientSession::handle_message(std::span<const u8> payload) {
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionData: {
-      auto chunk = protocol::deserialize_clientbound_chunk_section_data(
-          decoded.value().payload);
-      if (!chunk) {
+      protocol::ClientboundChunkSectionData chunk;
+      auto decoded_chunk = protocol::deserialize_clientbound_chunk_section_data_into(
+          decoded.value().payload,
+          chunk);
+      if (!decoded_chunk) {
         disconnect("invalid chunk section data");
         return;
       }
-      handle_chunk_section_data(std::move(chunk.value()));
+      handle_chunk_section_data(std::move(chunk));
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionUnload: {

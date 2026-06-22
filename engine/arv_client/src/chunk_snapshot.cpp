@@ -11,9 +11,10 @@ namespace {
     const protocol::ClientboundChunkSectionData& section) {
   auto storage = std::make_shared<voxel::ChunkStorage>();
   storage->blocks = section.blocks;
-  storage->lights = section.has_lighting && section.lighting_valid
-                        ? section.lights
-                        : std::array<voxel::LightWord, voxel::ChunkVolume>{};
+  storage->lights =
+      section.has_lighting && section.lighting_valid && section.lights.has_value()
+          ? section.lights.value()
+          : std::array<voxel::LightWord, voxel::ChunkVolume>{};
   if (!section.has_lighting || !section.lighting_valid) {
     storage->lights.fill(voxel::pack_light(
         voxel::MaxLightLevel,
@@ -21,9 +22,10 @@ namespace {
         voxel::MaxLightLevel,
         voxel::MaxLightLevel));
   }
-  storage->fluids = section.has_fluids
-                        ? section.fluids
-                        : std::array<voxel::FluidCell, voxel::ChunkVolume>{};
+  storage->fluids =
+      section.has_fluids && section.fluids.has_value()
+          ? section.fluids.value()
+          : std::array<voxel::FluidCell, voxel::ChunkVolume>{};
   if (!section.has_fluids) {
     storage->fluids.fill(voxel::empty_fluid_cell());
   }

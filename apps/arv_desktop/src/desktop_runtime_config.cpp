@@ -124,6 +124,21 @@ server::ServerChunkStreamingConfig make_chunk_streaming_config(
   chunk_streaming.max_chunks_sent_per_player_tick =
       std::max<u32>(config.chunk_pipeline.max_client_chunk_applies_per_frame, 1U);
   chunk_streaming.max_unloads_sent_per_player_tick = 64;
+  chunk_streaming.integrated_frame_pump_enabled = true;
+  chunk_streaming.max_ready_chunks_sent_per_player_frame =
+      std::max<u32>(config.chunk_pipeline.max_ready_chunks_sent_per_frame, 1U);
+  chunk_streaming.max_missing_columns_requested_per_player_tick =
+      std::max<u32>(
+          4U,
+          chunk_streaming.max_ready_chunks_sent_per_player_frame / 2U);
+  chunk_streaming.max_generation_results_per_frame =
+      std::max<u32>(config.chunk_pipeline.max_generation_results_per_frame, 1U);
+  chunk_streaming.max_generation_sections_published_per_frame =
+      std::max<u32>(
+          config.chunk_pipeline.max_generation_sections_published_per_frame,
+          1U);
+  chunk_streaming.max_generation_schedules_per_frame =
+      std::max<u32>(config.chunk_pipeline.max_generation_schedules_per_frame, 1U);
   return chunk_streaming;
 }
 

@@ -4,7 +4,7 @@
 
 namespace arv::client {
 
-void ClientChunkInbox::push_chunk_section_data(protocol::ClientboundChunkSectionData data) {
+void ClientChunkInbox::push_chunk_section_data(protocol::ClientboundChunkSectionData&& data) {
   received_chunk_section_data_.emplace_back(std::move(data));
 }
 

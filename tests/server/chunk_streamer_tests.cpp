@@ -155,11 +155,8 @@ TEST(ServerChunkStreamerTests, SendsLightingWhenPreviouslyDeferredLightingBecome
   confirm_chunk_messages(streamer, messages);
   auto data = arv::protocol::deserialize_clientbound_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
-  EXPECT_TRUE(data.value().has_lighting);
+  EXPECT_FALSE(data.value().has_lighting);
   EXPECT_FALSE(data.value().lighting_valid);
-  EXPECT_EQ(
-      data.value().lights[arv::voxel::local_index({{4, 5, 6}})],
-      arv::voxel::pack_light(1, 2, 3, 4));
   messages.clear();
 
   arv::world::LightingResult result;
@@ -309,7 +306,8 @@ TEST(ServerChunkStreamerTests, FluidChunkPayloadsStayUnderReliableFrameBudget) {
       arv::protocol::deserialize_clientbound_chunk_section_data(messages.front().payload);
   ASSERT_TRUE(data);
   EXPECT_TRUE(data.value().has_fluids);
-  EXPECT_TRUE(data.value().fluids[arv::voxel::local_index({{8, 4, 8}})].source());
+  ASSERT_TRUE(data.value().fluids.has_value());
+  EXPECT_TRUE(data.value().fluids.value()[arv::voxel::local_index({{8, 4, 8}})].source());
 }
 
 TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchronousSend) {
@@ -358,6 +356,103 @@ TEST(ServerChunkStreamerTests, MissingChunkQueuesGenerationRequestWithoutSynchro
   streamer.tick_streaming_budget(world, messages);
   ASSERT_EQ(messages.size(), 1U);
   EXPECT_EQ(messages.front().message_type, arv::protocol::MessageType::ClientboundChunkSectionData);
+}
+
+TEST(ServerChunkStreamerTests, MissingChunkRequestBudgetCanRunWithoutSendingChunks) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 0,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 8,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  streamer.update_player_interest(session, {{0, 0, 0}}, interest);
+  streamer.tick_missing_chunk_requests(world, 1U);
+
+  const arv::voxel::ChunkSection* requested = world.find_chunk({{0, 0, 0}});
+  ASSERT_NE(requested, nullptr);
+  EXPECT_EQ(requested->lifecycle_state(), arv::voxel::ChunkLifecycleState::Requested);
+  const std::vector<arv::ChunkCoord> generation_requests =
+      streamer.pending_generation_requests(world);
+  ASSERT_EQ(generation_requests.size(), 1U);
+  EXPECT_EQ(generation_requests.front(), (arv::ChunkCoord{0, 0}));
+}
+
+TEST(ServerChunkStreamerTests, ReadyChunkBudgetDoesNotRequestMissingChunks) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 0});
+  (void)world.ensure_chunk({{0, 0, 0}});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 1,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 8,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 1;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{0, 0, 0}}, world.height_settings(), interest);
+  streamer.tick_ready_chunk_budget(world, messages, 8U);
+
+  ASSERT_EQ(messages.size(), 1U);
+  const auto data =
+      arv::protocol::deserialize_clientbound_chunk_section_data(messages.front().payload);
+  ASSERT_TRUE(data);
+  EXPECT_EQ(data.value().coord, (arv::ChunkSectionCoord{{0, 0, 0}}));
+  EXPECT_EQ(world.find_chunk({{1, 0, 0}}), nullptr);
+  EXPECT_TRUE(streamer.pending_generation_requests(world).empty());
+}
+
+TEST(ServerChunkStreamerTests, QueuedOnlyGenerationRequestsSkipUnqueuedRequestedSections) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 0});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 0,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 8,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.client_view_distance = 0;
+
+  streamer.update_player_interest(session, {{0, 0, 0}}, world.height_settings(), interest);
+  (void)world.ensure_chunk_section(
+      {{0, 0, 0}},
+      arv::voxel::ChunkLifecycleState::Requested);
+
+  EXPECT_TRUE(streamer.pending_generation_requests(world, 1U, true).empty());
+  const std::vector<arv::ChunkCoord> fallback_requests =
+      streamer.pending_generation_requests(world, 1U);
+  ASSERT_EQ(fallback_requests.size(), 1U);
+  EXPECT_EQ(fallback_requests.front(), (arv::ChunkCoord{0, 0}));
 }
 
 TEST(ServerChunkStreamerTests, MissingSectionQueuesOneGenerationColumnForConfiguredHeight) {
@@ -430,4 +525,77 @@ TEST(ServerChunkStreamerTests, MissingChunkRequestsAreBudgetedAndGenerationReque
   ASSERT_EQ(bounded_generation_requests.size(), 2U);
   EXPECT_EQ(bounded_generation_requests[0], (arv::ChunkCoord{0, 0}));
   EXPECT_EQ(bounded_generation_requests[1], (arv::ChunkCoord{-1, -1}));
+}
+
+TEST(ServerChunkStreamerTests, MovementDirectionPrioritizesAheadGenerationRequests) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 0});
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 1,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 32,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.center_chunk = {{1, 0, 0}};
+  interest.previous_center_chunk = arv::ChunkSectionCoord{{0, 0, 0}};
+  interest.client_view_distance = 1;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{1, 0, 0}}, world.height_settings(), interest);
+  streamer.tick_streaming_budget(world, messages);
+  EXPECT_TRUE(messages.empty());
+
+  const std::vector<arv::ChunkCoord> generation_requests =
+      streamer.pending_generation_requests(world, 3U);
+  ASSERT_GE(generation_requests.size(), 2U);
+  EXPECT_EQ(generation_requests[0], (arv::ChunkCoord{1, 0}));
+  EXPECT_EQ(generation_requests[1], (arv::ChunkCoord{2, 0}));
+}
+
+TEST(ServerChunkStreamerTests, MovementDirectionPrioritizesAheadChunksWithinSameDistance) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  for (arv::i32 z = -1; z <= 1; ++z) {
+    for (arv::i32 x = 0; x <= 2; ++x) {
+      (void)world.ensure_chunk({{x, 0, z}});
+    }
+  }
+
+  arv::server::ServerChunkStreamer streamer;
+  streamer.configure({.max_view_distance = 1,
+                      .unload_margin = 1,
+                      .max_chunks_sent_per_player_tick = 2,
+                      .max_unloads_sent_per_player_tick = 8});
+
+  arv::server::ServerSession session;
+  session.session_id = arv::SessionID{1};
+  session.player_id = arv::PlayerID{1};
+  session.connection_id = arv::net::ConnectionID{1};
+  session.world_id = world.id();
+
+  arv::protocol::ServerboundChunkInterestUpdate interest;
+  interest.world_id = world.id();
+  interest.center_chunk = {{1, 0, 0}};
+  interest.previous_center_chunk = arv::ChunkSectionCoord{{0, 0, 0}};
+  interest.client_view_distance = 1;
+
+  std::vector<arv::server::QueuedChunkStreamMessage> messages;
+  streamer.update_player_interest(session, {{1, 0, 0}}, interest);
+  streamer.tick_streaming_budget(world, messages);
+
+  ASSERT_EQ(messages.size(), 2U);
+  auto center = arv::protocol::deserialize_clientbound_chunk_section_data(messages[0].payload);
+  auto ahead = arv::protocol::deserialize_clientbound_chunk_section_data(messages[1].payload);
+  ASSERT_TRUE(center);
+  ASSERT_TRUE(ahead);
+  EXPECT_EQ(center.value().coord, (arv::ChunkSectionCoord{{1, 0, 0}}));
+  EXPECT_EQ(ahead.value().coord, (arv::ChunkSectionCoord{{2, 0, 0}}));
 }

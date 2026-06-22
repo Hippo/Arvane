@@ -31,8 +31,8 @@ struct ClientboundChunkSectionData {
   bool lighting_valid{};
   bool has_fluids{};
   std::array<voxel::BlockVariantID, voxel::ChunkVolume> blocks{};
-  std::array<voxel::LightWord, voxel::ChunkVolume> lights{};
-  std::array<voxel::FluidCell, voxel::ChunkVolume> fluids{};
+  std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights{};
+  std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids{};
 };
 
 struct ClientboundChunkSectionUnload {
@@ -45,7 +45,22 @@ Expected<ServerboundChunkInterestUpdate, ProtocolError> deserialize_serverbound_
     std::span<const u8> bytes);
 
 std::vector<u8> serialize_clientbound_chunk_section_data(const ClientboundChunkSectionData& data);
+std::vector<u8> serialize_clientbound_chunk_section_data_arrays(
+    WorldID world_id,
+    ChunkSectionCoord coord,
+    u64 chunk_version,
+    u64 chunk_content_version,
+    u64 chunk_light_version,
+    bool has_lighting,
+    bool lighting_valid,
+    bool has_fluids,
+    const std::array<voxel::BlockVariantID, voxel::ChunkVolume>& blocks,
+    const std::array<voxel::LightWord, voxel::ChunkVolume>* lights,
+    const std::array<voxel::FluidCell, voxel::ChunkVolume>* fluids);
 Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chunk_section_data(std::span<const u8> bytes);
+Expected<void, ProtocolError> deserialize_clientbound_chunk_section_data_into(
+    std::span<const u8> bytes,
+    ClientboundChunkSectionData& out);
 
 std::vector<u8> serialize_clientbound_chunk_section_unload(const ClientboundChunkSectionUnload& unload);
 Expected<ClientboundChunkSectionUnload, ProtocolError> deserialize_clientbound_chunk_section_unload(

@@ -96,6 +96,12 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
   update_sprint_ground_particles(active_session, delta.count());
   active_session.client->advance_particles(delta.count());
 
+  if (!singleplayer_paused && has_active_integrated_session) {
+    active_session.integrated_server->pump_chunk_streaming_frame(!fixed_tick_ran);
+    active_session.client->poll_network();
+    sessions_.collect_client_chunk_stream(active_session);
+  }
+
   sessions_.apply_pending_client_chunk_stream(
       active_session,
       config_.chunk_pipeline.max_client_chunk_applies_per_frame,

@@ -38,7 +38,6 @@ arv::protocol::ClientboundChunkSectionData make_section(
   section.coord = coord;
   section.chunk_content_version = 1;
   section.blocks.fill(arv::voxel::AirBlockVariantID);
-  section.fluids.fill(arv::voxel::empty_fluid_cell());
   return section;
 }
 
@@ -103,7 +102,9 @@ TEST(WebPlayerMovementTests, ChunkCollisionQueryReadsStreamedSections) {
   auto section = make_section({{1, -1, 0}});
   set_block(section, 2, 15, 3, stone_variant.value());
   section.has_fluids = true;
-  section.fluids[arv::voxel::local_index(arv::SectionLocalPos{{2, 15, 3}})] =
+  section.fluids.emplace();
+  section.fluids->fill(arv::voxel::empty_fluid_cell());
+  section.fluids.value()[arv::voxel::local_index(arv::SectionLocalPos{{2, 15, 3}})] =
       arv::voxel::FluidCell{
           arv::voxel::DefaultWaterFluidTypeID,
           8,

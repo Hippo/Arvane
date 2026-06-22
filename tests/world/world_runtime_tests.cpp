@@ -121,6 +121,28 @@ TEST(WorldRuntimeTests, ShrinkingHeightDropsOutOfRangeSectionsAndUpdatesCounts) 
   EXPECT_EQ(world.active_chunk_count(), 0U);
 }
 
+TEST(WorldRuntimeTests, MarkChunkColumnGeneratingTransitionsRequestedSectionsAndCreatesMissing) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({-1, 1});
+  world.request_chunk_load({{2, 0, -3}});
+  (void)world.ensure_chunk_section({{2, 1, -3}});
+
+  ASSERT_TRUE(world.mark_chunk_column_generating({2, -3}));
+
+  const arv::voxel::ChunkSection* low = world.find_chunk({{2, -1, -3}});
+  const arv::voxel::ChunkSection* middle = world.find_chunk({{2, 0, -3}});
+  const arv::voxel::ChunkSection* high = world.find_chunk({{2, 1, -3}});
+  ASSERT_NE(low, nullptr);
+  ASSERT_NE(middle, nullptr);
+  ASSERT_NE(high, nullptr);
+  EXPECT_EQ(low->lifecycle_state(), arv::voxel::ChunkLifecycleState::Generating);
+  EXPECT_EQ(middle->lifecycle_state(), arv::voxel::ChunkLifecycleState::Generating);
+  EXPECT_EQ(high->lifecycle_state(), arv::voxel::ChunkLifecycleState::Loaded);
+  EXPECT_EQ(world.loaded_chunk_count(), 3U);
+  EXPECT_EQ(world.chunk_workload_snapshot().chunks_awaiting_generation, 2U);
+  EXPECT_FALSE(world.mark_chunk_column_generating({2, -3}));
+}
+
 TEST(WorldRuntimeTests, BoundaryBlockChangeInvalidatesLoadedNeighborMeshVersion) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   arv::voxel::ChunkSection& target = world.ensure_chunk({{0, 0, 0}});

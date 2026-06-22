@@ -16,14 +16,16 @@ TEST(ClientChunkSnapshotTests, ConvertsSectionPacketToVoxelSnapshot) {
   section.lighting_valid = true;
   section.has_fluids = true;
   section.blocks.fill(arv::voxel::AirBlockVariantID);
-  section.lights.fill(arv::voxel::NoLight);
-  section.fluids.fill(arv::voxel::empty_fluid_cell());
+  section.lights.emplace();
+  section.lights->fill(arv::voxel::NoLight);
+  section.fluids.emplace();
+  section.fluids->fill(arv::voxel::empty_fluid_cell());
 
   const arv::SectionLocalPos local{{1, 2, 3}};
   const arv::usize index = arv::voxel::local_index(local);
   section.blocks[index] = arv::voxel::BlockVariantID{7};
-  section.lights[index] = arv::voxel::pack_light(1, 2, 3, 4);
-  section.fluids[index] = arv::voxel::make_fluid_source(
+  section.lights.value()[index] = arv::voxel::pack_light(1, 2, 3, 4);
+  section.fluids.value()[index] = arv::voxel::make_fluid_source(
       arv::voxel::make_water_fluid_definition());
 
   const arv::voxel::ChunkSnapshot snapshot =
@@ -69,14 +71,15 @@ TEST(ClientChunkSnapshotTests, MeshingSnapshotIncludesLoadedBoundaryNeighborLigh
   center.has_lighting = true;
   center.lighting_valid = true;
   center.blocks.fill(arv::voxel::AirBlockVariantID);
-  center.lights.fill(arv::voxel::NoLight);
+  center.lights.emplace();
+  center.lights->fill(arv::voxel::NoLight);
 
   arv::protocol::ClientboundChunkSectionData neighbor = center;
   neighbor.coord = {{4, 0, 4}};
   neighbor.chunk_content_version = 4;
   neighbor.chunk_light_version = 5;
-  neighbor.lights.fill(arv::voxel::NoLight);
-  neighbor.lights[arv::voxel::local_index({{0, 1, 1}})] =
+  neighbor.lights->fill(arv::voxel::NoLight);
+  neighbor.lights.value()[arv::voxel::local_index({{0, 1, 1}})] =
       arv::voxel::pack_light(6, 7, 8, 9);
 
   const std::array sections{center, neighbor};

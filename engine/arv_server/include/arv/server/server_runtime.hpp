@@ -252,6 +252,7 @@ public:
   net::NetworkResult start(const ServerStartInfo& start_info);
 
   void tick();
+  void pump_chunk_streaming_frame(bool send_ready_chunks = true);
 
   void shutdown();
   void configure_chunk_streaming(ServerChunkStreamingConfig config) noexcept;
@@ -280,6 +281,8 @@ public:
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
+  [[nodiscard]] u64 completed_generation_job_count() const noexcept;
+  [[nodiscard]] u64 published_generation_section_count() const noexcept;
   [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
   [[nodiscard]] std::optional<VehicleCrashDebugInfo> last_vehicle_crash_debug(
       EntityNetID vehicle_id) const;

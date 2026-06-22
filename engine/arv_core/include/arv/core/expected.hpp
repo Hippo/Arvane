@@ -12,8 +12,18 @@ public:
     return Expected(std::move(value));
   }
 
+  template<typename... Args>
+  static Expected success_in_place(Args&&... args) {
+    return Expected(std::in_place_type<T>, std::forward<Args>(args)...);
+  }
+
   static Expected failure(E error) {
     return Expected(std::move(error));
+  }
+
+  template<typename... Args>
+  static Expected failure_in_place(Args&&... args) {
+    return Expected(std::in_place_type<E>, std::forward<Args>(args)...);
   }
 
   [[nodiscard]] bool has_value() const noexcept {
@@ -43,6 +53,14 @@ public:
 private:
   explicit Expected(T value) : storage_(std::move(value)) {}
   explicit Expected(E error) : storage_(std::move(error)) {}
+
+  template<typename... Args>
+  explicit Expected(std::in_place_type_t<T>, Args&&... args)
+      : storage_(std::in_place_type<T>, std::forward<Args>(args)...) {}
+
+  template<typename... Args>
+  explicit Expected(std::in_place_type_t<E>, Args&&... args)
+      : storage_(std::in_place_type<E>, std::forward<Args>(args)...) {}
 
   std::variant<T, E> storage_;
 };

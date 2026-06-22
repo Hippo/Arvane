@@ -49,6 +49,9 @@ public:
       voxel::ChunkLifecycleState state,
       WorldDirtyTracker& dirty);
   void request_chunk_load(ChunkSectionCoord coord, WorldDirtyTracker& dirty);
+  [[nodiscard]] bool mark_chunk_column_generating(
+      ChunkCoord coord,
+      WorldDirtyTracker& dirty);
   bool unload_chunk(ChunkSectionCoord coord) noexcept;
 
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkSectionCoord coord) noexcept;

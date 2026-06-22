@@ -321,6 +321,12 @@ public:
       std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
       std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids = std::nullopt,
       bool lighting_authoritative = true) noexcept;
+  void apply_chunk_snapshot_owned(
+      ChunkSectionCoord coord,
+      std::array<voxel::BlockVariantID, voxel::ChunkVolume>&& blocks,
+      std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>>&& lights,
+      std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>>&& fluids = std::nullopt,
+      bool lighting_authoritative = true) noexcept;
   bool unload_chunk(ChunkSectionCoord coord) noexcept;
   [[nodiscard]] voxel::ChunkSection* find_chunk(ChunkSectionCoord coord) noexcept;
   [[nodiscard]] const voxel::ChunkSection* find_chunk(ChunkSectionCoord coord) const noexcept;
@@ -375,6 +381,7 @@ public:
   [[nodiscard]] bool is_chunk_active(ChunkSectionCoord coord) const noexcept;
   [[nodiscard]] usize active_chunk_count() const noexcept;
   bool set_chunk_lifecycle_state(ChunkSectionCoord coord, voxel::ChunkLifecycleState state) noexcept;
+  [[nodiscard]] bool mark_chunk_column_generating(ChunkCoord coord);
   void update_simulation_radius(ChunkSectionCoord center, i32 radius);
   void update_simulation_radii(std::span<const ChunkSectionCoord> centers, i32 radius);
   [[nodiscard]] voxel::BlockVariantID get_block(BlockPos pos) const noexcept;
@@ -412,6 +419,11 @@ public:
       u64 source_block_version,
       u64 source_light_version,
       u64 source_content_version = 0U) noexcept;
+  bool publish_generated_chunk_section(
+      WorldID world_id,
+      ChunkCoord column,
+      const GenerationSurfaceProfile& surface_y_by_column,
+      GeneratedChunkSection section) noexcept;
   bool publish_generated_chunk(GeneratedChunk generated) noexcept;
   void restore_saved_chunk(
       ChunkSectionCoord coord,

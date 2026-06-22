@@ -197,6 +197,29 @@ TEST(ChunkStorageTests, MutatingFluidWithActiveSnapshotDetachesAndPreservesSnaps
   EXPECT_EQ(chunk.version(), version + 1);
 }
 
+TEST(ChunkStorageTests, TracksWhetherSectionContainsFluids) {
+  arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
+  const arv::voxel::FluidDefinition water = arv::voxel::make_water_fluid_definition();
+
+  EXPECT_FALSE(chunk.has_fluids());
+  ASSERT_TRUE(chunk.set_fluid({{1, 2, 3}}, arv::voxel::make_fluid_source(water)));
+  EXPECT_TRUE(chunk.has_fluids());
+  ASSERT_TRUE(chunk.set_fluid({{1, 2, 3}}, arv::voxel::empty_fluid_cell()));
+  EXPECT_FALSE(chunk.has_fluids());
+
+  std::array<arv::voxel::BlockVariantID, arv::voxel::ChunkVolume> blocks{};
+  blocks.fill(arv::voxel::AirBlockVariantID);
+  std::array<arv::voxel::FluidCell, arv::voxel::ChunkVolume> fluids{};
+  fluids.fill(arv::voxel::empty_fluid_cell());
+  fluids[arv::voxel::local_index({{4, 5, 6}})] =
+      arv::voxel::make_fluid_source(water);
+  chunk.replace_generated_blocks(blocks, fluids);
+  EXPECT_TRUE(chunk.has_fluids());
+
+  chunk.replace_generated_blocks(std::move(blocks), std::nullopt);
+  EXPECT_FALSE(chunk.has_fluids());
+}
+
 TEST(ChunkStorageTests, SnapshotSamplesPreparedNeighborBoundaries) {
   arv::voxel::ChunkSection chunk{{{0, 0, 0}}};
   arv::voxel::ChunkSection neighbor{{{1, 0, 0}}};

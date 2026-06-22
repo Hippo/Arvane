@@ -130,6 +130,11 @@ struct PendingGenerationJob {
   sched::JobFuture<world::GeneratedChunkResult> job;
 };
 
+struct PendingGeneratedChunk {
+  world::GeneratedChunk chunk{};
+  usize next_section_index{};
+};
+
 struct PendingNaturalSpawnJob {
   TickIndex source_tick{};
   sched::JobFuture<world::NaturalSpawnJobResult> job;
@@ -182,10 +187,21 @@ public:
   void wait_for_all();
 
   void drain_generation_jobs(world::WorldRuntime& world, bool drain_all);
+  void drain_generation_jobs(world::WorldRuntime& world, u32 max_results);
+  void drain_generation_jobs(
+      world::WorldRuntime& world,
+      u32 max_results,
+      u32 max_publish_sections);
   void schedule_generation_jobs(
       world::WorldRuntime& world,
-      const ServerChunkStreamer& chunk_streamer,
+      ServerChunkStreamer& chunk_streamer,
       const std::optional<ServerChunkGenerationSettings>& chunk_generation);
+  void schedule_generation_jobs(
+      world::WorldRuntime& world,
+      ServerChunkStreamer& chunk_streamer,
+      const std::optional<ServerChunkGenerationSettings>& chunk_generation,
+      u32 max_schedules,
+      bool queued_only = false);
   void drain_lighting_jobs(world::WorldRuntime& world, bool drain_all);
   void schedule_lighting_jobs(
       world::WorldRuntime& world,
@@ -217,10 +233,17 @@ public:
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
   [[nodiscard]] usize pending_natural_spawn_job_count() const noexcept;
+  [[nodiscard]] u64 completed_generation_job_count() const noexcept {
+    return completed_generation_jobs_;
+  }
+  [[nodiscard]] u64 published_generation_section_count() const noexcept {
+    return published_generation_sections_;
+  }
 
 private:
   std::unique_ptr<sched::JobSystem> job_system_;
   std::vector<PendingGenerationJob> pending_generation_jobs_;
+  std::vector<PendingGeneratedChunk> pending_generated_chunks_;
   std::vector<PendingLightingJob> pending_lighting_jobs_;
   std::vector<PendingFluidJob> pending_fluid_jobs_;
   std::vector<PendingNaturalSpawnJob> pending_natural_spawn_jobs_;
@@ -235,6 +258,8 @@ private:
   u32 max_natural_spawn_results_per_tick_{1};
   u32 fluid_update_interval_{1};
   u32 fluid_update_budget_{2000};
+  u64 completed_generation_jobs_{};
+  u64 published_generation_sections_{};
 };
 
 class ServerPlayerSaveCache {
@@ -288,6 +313,7 @@ struct ServerRuntimeImpl {
 
   net::NetworkResult start(const ServerStartInfo& start_info);
   void tick();
+  void pump_chunk_streaming_frame(bool send_ready_chunks = true);
   void shutdown();
   void configure_chunk_streaming(ServerChunkStreamingConfig config) noexcept;
 
@@ -313,6 +339,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] usize pending_generation_job_count() const noexcept;
   [[nodiscard]] usize pending_lighting_job_count() const noexcept;
   [[nodiscard]] usize pending_fluid_job_count() const noexcept;
+  [[nodiscard]] u64 completed_generation_job_count() const noexcept;
+  [[nodiscard]] u64 published_generation_section_count() const noexcept;
   [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
   [[nodiscard]] std::optional<VehicleCrashDebugInfo> last_vehicle_crash_debug(
       EntityNetID vehicle_id) const;
@@ -499,6 +527,8 @@ struct ServerRuntimeImpl {
       bool broadcast_explosion);
 
   void tick_chunk_streaming();
+  void tick_chunk_streaming_maintenance();
+  void send_queued_chunk_stream_messages();
   void broadcast_explosion_event(const world::ExplosionResult& result);
   void spawn_explosion_drops(const world::ExplosionResult& result);
   void send_explosion_player_velocities(const world::ExplosionResult& result);
@@ -657,6 +687,7 @@ struct ServerRuntimeImpl {
   std::vector<StarterInventoryItem> starter_inventory_{};
   FluidContainerInteractionConfig fluid_containers_{};
   ServerPackSyncConfig pack_sync_{};
+  ServerChunkStreamingConfig chunk_streaming_config_{};
   ServerChunkStreamer chunk_streamer_{};
   std::optional<ServerChunkGenerationSettings> chunk_generation_{};
   std::vector<QueuedChunkStreamMessage> queued_chunk_stream_messages_;

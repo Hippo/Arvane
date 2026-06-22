@@ -1,8 +1,13 @@
 #include "arv/protocol/chunk_streaming.hpp"
 #include "arv/protocol/message_primitives.hpp"
 
+#include <algorithm>
 #include <array>
+#include <bit>
+#include <cstddef>
 #include <limits>
+#include <span>
+#include <type_traits>
 #include <utility>
 
 namespace arv::protocol {
@@ -28,6 +33,12 @@ Expected<ChunkSectionCoord, ProtocolError> read_chunk_coord(MessageReader& reade
 enum class ChunkArrayEncoding : u8 {
   Dense = 0,
   RunLength = 1,
+};
+
+struct ChunkArrayEncodingPlan {
+  ChunkArrayEncoding encoding{ChunkArrayEncoding::Dense};
+  usize runs{};
+  usize wire_size{};
 };
 
 [[nodiscard]] constexpr usize fluid_wire_size() noexcept {
@@ -65,6 +76,20 @@ template<typename T, usize Size>
                                          : ChunkArrayEncoding::Dense;
 }
 
+template<typename T, usize Size>
+[[nodiscard]] ChunkArrayEncodingPlan plan_encoded_array(
+    const std::array<T, Size>& values,
+    usize value_wire_size) noexcept {
+  const usize dense_size = Size * value_wire_size;
+  const usize runs = run_count(values);
+  const usize rle_size = rle_array_wire_size(runs, value_wire_size);
+  const ChunkArrayEncoding encoding = best_array_encoding(dense_size, rle_size);
+  return {
+      encoding,
+      runs,
+      sizeof(u8) + (encoding == ChunkArrayEncoding::Dense ? dense_size : rle_size)};
+}
+
 void write_array_value(MessageWriter& writer, voxel::BlockVariantID value) {
   writer.write<u32>(value.value);
 }
@@ -86,10 +111,43 @@ void write_dense_array(MessageWriter& writer, const std::array<T, Size>& values)
   }
 }
 
+template<usize Size>
+void write_dense_array(
+    MessageWriter& writer,
+    const std::array<voxel::BlockVariantID, Size>& values) {
+  static_assert(std::is_trivially_copyable_v<voxel::BlockVariantID>);
+  static_assert(sizeof(voxel::BlockVariantID) == sizeof(u32));
+  if constexpr (std::endian::native == std::endian::little) {
+    writer.write_bytes(std::as_bytes(std::span<const voxel::BlockVariantID, Size>{values}));
+  } else {
+    for (const voxel::BlockVariantID value : values) {
+      write_array_value(writer, value);
+    }
+  }
+}
+
+template<usize Size>
+void write_dense_array(
+    MessageWriter& writer,
+    const std::array<voxel::LightWord, Size>& values) {
+  static_assert(std::is_trivially_copyable_v<voxel::LightWord>);
+  static_assert(sizeof(voxel::LightWord) == sizeof(u16));
+  if constexpr (std::endian::native == std::endian::little) {
+    writer.write_bytes(std::as_bytes(std::span<const voxel::LightWord, Size>{values}));
+  } else {
+    for (const voxel::LightWord value : values) {
+      write_array_value(writer, value);
+    }
+  }
+}
+
 template<typename T, usize Size>
-void write_rle_array(MessageWriter& writer, const std::array<T, Size>& values) {
+void write_rle_array(
+    MessageWriter& writer,
+    const std::array<T, Size>& values,
+    usize runs) {
   static_assert(Size <= static_cast<usize>(std::numeric_limits<u16>::max()));
-  writer.write<u16>(static_cast<u16>(run_count(values)));
+  writer.write<u16>(static_cast<u16>(runs));
   usize index = 0U;
   while (index < Size) {
     const T& value = values[index];
@@ -107,17 +165,14 @@ template<typename T, usize Size>
 void write_encoded_array(
     MessageWriter& writer,
     const std::array<T, Size>& values,
-    usize value_wire_size) {
-  const usize dense_size = Size * value_wire_size;
-  const usize rle_size = rle_array_wire_size(run_count(values), value_wire_size);
-  const ChunkArrayEncoding encoding = best_array_encoding(dense_size, rle_size);
-  writer.write<ChunkArrayEncoding>(encoding);
-  switch (encoding) {
+    ChunkArrayEncodingPlan plan) {
+  writer.write<ChunkArrayEncoding>(plan.encoding);
+  switch (plan.encoding) {
     case ChunkArrayEncoding::Dense:
       write_dense_array(writer, values);
       return;
     case ChunkArrayEncoding::RunLength:
-      write_rle_array(writer, values);
+      write_rle_array(writer, values, plan.runs);
       return;
   }
 }
@@ -173,6 +228,54 @@ Expected<void, ProtocolError> read_dense_array(
   return Expected<void, ProtocolError>::success();
 }
 
+template<usize Size>
+Expected<void, ProtocolError> read_dense_array(
+    MessageReader& reader,
+    std::array<voxel::BlockVariantID, Size>& values,
+    ArrayValueReader<voxel::BlockVariantID> read_value,
+    const char* failure_message) {
+  static_assert(std::is_trivially_copyable_v<voxel::BlockVariantID>);
+  static_assert(sizeof(voxel::BlockVariantID) == sizeof(u32));
+  if constexpr (std::endian::native == std::endian::little) {
+    auto decoded = reader.read_bytes(
+        std::as_writable_bytes(std::span<voxel::BlockVariantID, Size>{values}));
+    if (!decoded) {
+      return Expected<void, ProtocolError>::failure(ProtocolError{failure_message});
+    }
+    return Expected<void, ProtocolError>::success();
+  } else {
+    return read_dense_array<voxel::BlockVariantID, Size>(
+        reader,
+        values,
+        read_value,
+        failure_message);
+  }
+}
+
+template<usize Size>
+Expected<void, ProtocolError> read_dense_array(
+    MessageReader& reader,
+    std::array<voxel::LightWord, Size>& values,
+    ArrayValueReader<voxel::LightWord> read_value,
+    const char* failure_message) {
+  static_assert(std::is_trivially_copyable_v<voxel::LightWord>);
+  static_assert(sizeof(voxel::LightWord) == sizeof(u16));
+  if constexpr (std::endian::native == std::endian::little) {
+    auto decoded = reader.read_bytes(
+        std::as_writable_bytes(std::span<voxel::LightWord, Size>{values}));
+    if (!decoded) {
+      return Expected<void, ProtocolError>::failure(ProtocolError{failure_message});
+    }
+    return Expected<void, ProtocolError>::success();
+  } else {
+    return read_dense_array<voxel::LightWord, Size>(
+        reader,
+        values,
+        read_value,
+        failure_message);
+  }
+}
+
 template<typename T, usize Size>
 Expected<void, ProtocolError> read_rle_array(
     MessageReader& reader,
@@ -201,9 +304,9 @@ Expected<void, ProtocolError> read_rle_array(
       return Expected<void, ProtocolError>::failure(
           ProtocolError{"chunk section array run length is invalid"});
     }
-    for (usize count = 0U; count < length.value(); ++count) {
-      values[index++] = decoded.value();
-    }
+    auto out = values.begin() + static_cast<std::ptrdiff_t>(index);
+    std::fill_n(out, length.value(), decoded.value());
+    index += length.value();
   }
 
   if (index != Size) {
@@ -290,27 +393,72 @@ Expected<ServerboundChunkInterestUpdate, ProtocolError> deserialize_serverbound_
   return Expected<ServerboundChunkInterestUpdate, ProtocolError>::success(update);
 }
 
-std::vector<u8> serialize_clientbound_chunk_section_data(const ClientboundChunkSectionData& data) {
-  MessageWriter writer(chunk_data_header_wire_size());
-  writer.write<u32>(data.world_id.value);
-  write_chunk_coord(writer, data.coord);
-  writer.write<u64>(data.chunk_version);
-  writer.write<u64>(data.chunk_content_version);
-  writer.write<u64>(data.chunk_light_version);
-  writer.write_bool(data.has_lighting);
-  writer.write_bool(data.lighting_valid);
-  writer.write_bool(data.has_fluids);
-  write_encoded_array(writer, data.blocks, sizeof(u32));
-  if (data.has_lighting) {
-    write_encoded_array(writer, data.lights, sizeof(voxel::LightWord));
+std::vector<u8> serialize_clientbound_chunk_section_data_arrays(
+    WorldID world_id,
+    ChunkSectionCoord coord,
+    u64 chunk_version,
+    u64 chunk_content_version,
+    u64 chunk_light_version,
+    bool has_lighting,
+    bool lighting_valid,
+    bool has_fluids,
+    const std::array<voxel::BlockVariantID, voxel::ChunkVolume>& blocks,
+    const std::array<voxel::LightWord, voxel::ChunkVolume>* lights,
+    const std::array<voxel::FluidCell, voxel::ChunkVolume>* fluids) {
+  const ChunkArrayEncodingPlan block_plan =
+      plan_encoded_array(blocks, sizeof(u32));
+  const ChunkArrayEncodingPlan light_plan =
+      has_lighting && lights != nullptr
+          ? plan_encoded_array(*lights, sizeof(voxel::LightWord))
+          : ChunkArrayEncodingPlan{};
+  const ChunkArrayEncodingPlan fluid_plan =
+      has_fluids && fluids != nullptr
+          ? plan_encoded_array(*fluids, fluid_wire_size())
+          : ChunkArrayEncodingPlan{};
+  const usize reserve_bytes =
+      chunk_data_header_wire_size() +
+      block_plan.wire_size +
+      (has_lighting && lights != nullptr ? light_plan.wire_size : 0U) +
+      (has_fluids && fluids != nullptr ? fluid_plan.wire_size : 0U);
+  MessageWriter writer(reserve_bytes);
+  writer.write<u32>(world_id.value);
+  write_chunk_coord(writer, coord);
+  writer.write<u64>(chunk_version);
+  writer.write<u64>(chunk_content_version);
+  writer.write<u64>(chunk_light_version);
+  writer.write_bool(has_lighting && lights != nullptr);
+  writer.write_bool(lighting_valid);
+  writer.write_bool(has_fluids && fluids != nullptr);
+  write_encoded_array(writer, blocks, block_plan);
+  if (has_lighting && lights != nullptr) {
+    write_encoded_array(writer, *lights, light_plan);
   }
-  if (data.has_fluids) {
-    write_encoded_array(writer, data.fluids, fluid_wire_size());
+  if (has_fluids && fluids != nullptr) {
+    write_encoded_array(writer, *fluids, fluid_plan);
   }
   return std::move(writer).take_bytes();
 }
 
-Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chunk_section_data(std::span<const u8> bytes) {
+std::vector<u8> serialize_clientbound_chunk_section_data(const ClientboundChunkSectionData& data) {
+  return serialize_clientbound_chunk_section_data_arrays(
+      data.world_id,
+      data.coord,
+      data.chunk_version,
+      data.chunk_content_version,
+      data.chunk_light_version,
+      data.has_lighting,
+      data.lighting_valid,
+      data.has_fluids,
+      data.blocks,
+      data.has_lighting && data.lights.has_value() ? &data.lights.value() : nullptr,
+      data.has_fluids && data.fluids.has_value() ? &data.fluids.value() : nullptr);
+}
+
+Expected<void, ProtocolError> deserialize_clientbound_chunk_section_data_into(
+    std::span<const u8> bytes,
+    ClientboundChunkSectionData& data) {
+  data.lights.reset();
+  data.fluids.reset();
   MessageReader reader(bytes);
   auto world_id = reader.read<u32>();
   auto coord = read_chunk_coord(reader);
@@ -322,11 +470,10 @@ Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chu
   auto has_fluids = reader.read_bool();
   if (!world_id || !coord || !chunk_version || !chunk_content_version ||
       !chunk_light_version || !has_lighting || !lighting_valid || !has_fluids) {
-    return Expected<ClientboundChunkSectionData, ProtocolError>::failure(
+    return Expected<void, ProtocolError>::failure(
         ProtocolError{"failed to decode chunk section data header"});
   }
 
-  ClientboundChunkSectionData data;
   data.world_id = WorldID{world_id.value()};
   data.coord = coord.value();
   data.chunk_version = chunk_version.value();
@@ -335,9 +482,6 @@ Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chu
   data.has_lighting = has_lighting.value();
   data.lighting_valid = lighting_valid.value();
   data.has_fluids = has_fluids.value();
-  data.blocks.fill(voxel::AirBlockVariantID);
-  data.lights.fill(voxel::NoLight);
-  data.fluids.fill(voxel::empty_fluid_cell());
 
   auto blocks = read_encoded_array(
       reader,
@@ -345,35 +489,46 @@ Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chu
       read_block_variant,
       "failed to decode chunk section block data");
   if (!blocks) {
-    return Expected<ClientboundChunkSectionData, ProtocolError>::failure(blocks.error());
+    return Expected<void, ProtocolError>::failure(blocks.error());
   }
 
   if (data.has_lighting) {
+    data.lights.emplace();
     auto lights = read_encoded_array(
         reader,
-        data.lights,
+        data.lights.value(),
         read_light_word,
         "failed to decode chunk section lighting data");
     if (!lights) {
-      return Expected<ClientboundChunkSectionData, ProtocolError>::failure(lights.error());
+      return Expected<void, ProtocolError>::failure(lights.error());
     }
   }
   if (data.has_fluids) {
+    data.fluids.emplace();
     auto fluids = read_encoded_array(
         reader,
-        data.fluids,
+        data.fluids.value(),
         read_fluid_cell,
         "failed to decode chunk section fluid data");
     if (!fluids) {
-      return Expected<ClientboundChunkSectionData, ProtocolError>::failure(fluids.error());
+      return Expected<void, ProtocolError>::failure(fluids.error());
     }
   }
 
   auto trailing = require_no_trailing_bytes(reader, "chunk message");
   if (!trailing) {
-    return Expected<ClientboundChunkSectionData, ProtocolError>::failure(trailing.error());
+    return Expected<void, ProtocolError>::failure(trailing.error());
   }
-  return Expected<ClientboundChunkSectionData, ProtocolError>::success(std::move(data));
+  return Expected<void, ProtocolError>::success();
+}
+
+Expected<ClientboundChunkSectionData, ProtocolError> deserialize_clientbound_chunk_section_data(std::span<const u8> bytes) {
+  ClientboundChunkSectionData data;
+  auto decoded = deserialize_clientbound_chunk_section_data_into(bytes, data);
+  if (!decoded) {
+    return Expected<ClientboundChunkSectionData, ProtocolError>::failure(decoded.error());
+  }
+  return Expected<ClientboundChunkSectionData, ProtocolError>::success_in_place(std::move(data));
 }
 
 std::vector<u8> serialize_clientbound_chunk_section_unload(const ClientboundChunkSectionUnload& unload) {

@@ -87,6 +87,7 @@ public:
   [[nodiscard]] std::optional<std::string> disconnect_reason() const;
   void submit_input(InputFrame input);
   void set_chunk_view_distance(i32 view_distance) noexcept;
+  void poll_network();
   void fixed_tick(TickIndex tick_index);
   void fixed_tick(TickIndex tick_index, const physics::ICollisionQuery* collision_query);
   void advance_entity_interpolation(Seconds delta_seconds) noexcept;

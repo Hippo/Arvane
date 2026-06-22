@@ -464,8 +464,12 @@ std::optional<ConfigError> validate_config(const EngineConfig& config) {
   }
   if (config.chunk_pipeline.max_generation_jobs_per_frame == 0U ||
       config.chunk_pipeline.max_generation_results_per_tick == 0U ||
+      config.chunk_pipeline.max_generation_results_per_frame == 0U ||
+      config.chunk_pipeline.max_generation_sections_published_per_frame == 0U ||
+      config.chunk_pipeline.max_generation_schedules_per_frame == 0U ||
       config.chunk_pipeline.max_lighting_results_per_tick == 0U ||
       config.chunk_pipeline.max_lighting_sections_per_job == 0U ||
+      config.chunk_pipeline.max_ready_chunks_sent_per_frame == 0U ||
       config.chunk_pipeline.max_client_chunk_applies_per_frame == 0U ||
       config.chunk_pipeline.max_client_chunk_unloads_per_frame == 0U ||
       config.chunk_pipeline.max_mesh_jobs_per_frame == 0U ||

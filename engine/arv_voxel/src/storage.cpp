@@ -9,15 +9,21 @@ namespace arv::voxel {
 namespace {
 
 [[nodiscard]] ChunkStorageHandle make_chunk_storage() {
-  ChunkStorageHandle storage = std::make_shared<ChunkStorage>();
-  storage->blocks.fill(AirBlockVariantID);
-  storage->lights.fill(NoLight);
-  storage->fluids.fill(empty_fluid_cell());
-  return storage;
+  return std::make_shared<ChunkStorage>();
 }
 
 [[nodiscard]] ChunkStorageHandle clone_chunk_storage(const ChunkStorage& storage) {
   return std::make_shared<ChunkStorage>(storage);
+}
+
+[[nodiscard]] bool contains_fluid(
+    const std::array<FluidCell, ChunkVolume>& fluids) noexcept {
+  for (const FluidCell fluid : fluids) {
+    if (!fluid.empty()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 [[nodiscard]] constexpr i32 wrapped_snapshot_local(i32 value) noexcept {
@@ -138,12 +144,18 @@ bool ChunkSection::set_fluid(SectionLocalPos local, FluidCell fluid, bool affect
   }
 
   const usize index = local_index(local);
+  const bool had_fluid = !storage_->fluids[index].empty();
   if (storage_->fluids[index] == fluid) {
     return false;
   }
 
   ensure_detached_storage();
   storage_->fluids[index] = fluid;
+  if (!fluid.empty()) {
+    has_fluids_ = true;
+  } else if (had_fluid) {
+    has_fluids_ = contains_fluid(storage_->fluids);
+  }
   ++block_version_;
   ++content_version_;
   ChunkDirtyFlags flags = ChunkDirtyFlags::NeedsSave | ChunkDirtyFlags::Geometry |
@@ -163,15 +175,20 @@ void ChunkSection::replace_generated_blocks(
     storage_->blocks = std::move(blocks);
     storage_->lights.fill(NoLight);
     if (fluids.has_value()) {
+      has_fluids_ = contains_fluid(fluids.value());
       storage_->fluids = std::move(fluids.value());
     } else {
       storage_->fluids.fill(empty_fluid_cell());
+      has_fluids_ = false;
     }
   } else {
     ChunkStorageHandle storage = make_chunk_storage();
     storage->blocks = std::move(blocks);
     if (fluids.has_value()) {
+      has_fluids_ = contains_fluid(fluids.value());
       storage->fluids = std::move(fluids.value());
+    } else {
+      has_fluids_ = false;
     }
     storage_ = std::move(storage);
   }
@@ -193,6 +210,7 @@ void ChunkSection::replace_saved_contents(
   const std::array<FluidCell, ChunkVolume>* next_fluids = fluids ? &fluids.value() : nullptr;
   const bool fluids_changed = next_fluids != nullptr && storage_->fluids != *next_fluids;
   const bool first_mesh = mesh_built_from_block_version_ == 0U;
+  const bool next_has_fluids = fluids_changed ? contains_fluid(*next_fluids) : has_fluids_;
 
   if (blocks_changed || lights_changed || fluids_changed) {
     ensure_detached_storage();
@@ -203,10 +221,12 @@ void ChunkSection::replace_saved_contents(
     }
     if (fluids_changed) {
       storage_->fluids = std::move(fluids.value());
+      has_fluids_ = next_has_fluids;
       ++block_version_;
       ++content_version_;
     } else if (blocks_changed && next_fluids == nullptr) {
       storage_->fluids.fill(empty_fluid_cell());
+      has_fluids_ = false;
     }
     if (lights_changed) {
       storage_->lights = std::move(lights);
@@ -242,6 +262,40 @@ void ChunkSection::replace_saved_contents(
     mesh_built_from_block_version_ = 0;
     mesh_built_from_light_version_ = 0;
   }
+}
+
+void ChunkSection::replace_initial_saved_contents(
+    std::array<BlockVariantID, ChunkVolume> blocks,
+    std::optional<std::array<LightWord, ChunkVolume>> lights,
+    std::optional<std::array<FluidCell, ChunkVolume>> fluids,
+    bool lights_match_content) noexcept {
+  ensure_detached_storage();
+  storage_->blocks = std::move(blocks);
+  if (lights.has_value()) {
+    storage_->lights = std::move(lights.value());
+  }
+  if (fluids.has_value()) {
+    has_fluids_ = contains_fluid(fluids.value());
+    storage_->fluids = std::move(fluids.value());
+  } else {
+    has_fluids_ = false;
+  }
+
+  ++block_version_;
+  ++content_version_;
+  ++light_version_;
+  ++light_data_version_;
+  if (lights_match_content && lights.has_value()) {
+    light_content_version_ = content_version_;
+    light_dependencies_stale_ = false;
+  } else {
+    light_dependencies_stale_ = true;
+  }
+
+  dirty_flags_ = ChunkDirtyFlags::Geometry;
+  mesh_state_ = ChunkMeshState::Dirty;
+  mesh_built_from_block_version_ = 0;
+  mesh_built_from_light_version_ = 0;
 }
 
 bool ChunkSection::replace_lights(std::array<LightWord, ChunkVolume> lights) noexcept {

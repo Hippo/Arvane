@@ -21,8 +21,10 @@ namespace {
   data.chunk_light_version = 9;
   data.has_lighting = has_lighting;
   data.blocks = arv::bench_support::noisy_terrain_blocks(stone, dirt);
-  data.lights = arv::bench_support::filled_lights(
-      arv::voxel::pack_light(3, 5, 7, 12));
+  if (has_lighting) {
+    data.lights = arv::bench_support::filled_lights(
+        arv::voxel::pack_light(3, 5, 7, 12));
+  }
   return data;
 }
 

@@ -37,9 +37,14 @@ inline void set_profile_thread_name([[maybe_unused]] const char* name) noexcept 
   ZoneName((name), (size))
 #define ARV_PROFILE_TEXT(text, size) ZoneText((text), (size))
 #define ARV_PROFILE_FRAME_MARK(name) FrameMarkNamed(name)
+#define ARV_PROFILE_PLOT(name, value) TracyPlot((name), (value))
+#define ARV_PROFILE_PLOT_CONFIG_NUMBER(name, step, fill, color) \
+  TracyPlotConfig((name), tracy::PlotFormatType::Number, (step), (fill), (color))
 #else
 #define ARV_PROFILE_ZONE(name) ((void)0)
 #define ARV_PROFILE_ZONE_DYNAMIC(name, size) ((void)0)
 #define ARV_PROFILE_TEXT(text, size) ((void)0)
 #define ARV_PROFILE_FRAME_MARK(name) ((void)0)
+#define ARV_PROFILE_PLOT(name, value) ((void)0)
+#define ARV_PROFILE_PLOT_CONFIG_NUMBER(name, step, fill, color) ((void)0)
 #endif

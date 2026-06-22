@@ -31,7 +31,8 @@ namespace arv::desktop {
 int DesktopApplication::run(int argc, char** argv) {
   core::info("desktop", "starting Arvane desktop client");
 
-  const io::ConfigLoadOptions config_options = parse_config_options(argc, argv);
+  const DesktopLaunchOptions launch_options = parse_desktop_launch_options(argc, argv);
+  const io::ConfigLoadOptions& config_options = launch_options.config;
   auto config_result = io::load_config(config_options);
   if (!config_result) {
     core::error("config", config_result.error().message);
@@ -286,7 +287,8 @@ int DesktopApplication::run(int argc, char** argv) {
       screen_manager,
       block_behaviors,
       item_behaviors,
-      entity_goals};
+      entity_goals,
+      launch_options.chunk_streaming_validation};
   const int loop_result = frame_loop.run();
 
   const auto config_save_result =

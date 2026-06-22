@@ -79,6 +79,20 @@ void WorldRuntime::apply_chunk_snapshot(
     std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights,
     std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids,
     bool lighting_authoritative) noexcept {
+  apply_chunk_snapshot_owned(
+      coord,
+      std::move(blocks),
+      std::move(lights),
+      std::move(fluids),
+      lighting_authoritative);
+}
+
+void WorldRuntime::apply_chunk_snapshot_owned(
+    ChunkSectionCoord coord,
+    std::array<voxel::BlockVariantID, voxel::ChunkVolume>&& blocks,
+    std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>>&& lights,
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>>&& fluids,
+    bool lighting_authoritative) noexcept {
   assert_owner_thread();
   const voxel::ChunkSection* existing_chunk = find_chunk(coord);
   const bool first_mesh =
@@ -91,22 +105,20 @@ void WorldRuntime::apply_chunk_snapshot(
   DependencyMask block_dependency_offsets{};
   DependencyMask light_dependency_offsets{};
   bool blocks_changed = existing_chunk == nullptr;
-  bool lights_changed = existing_chunk == nullptr;
-  bool fluids_changed = fluids.has_value() && existing_chunk == nullptr;
   const bool has_lighting_payload = lights.has_value();
+  bool lights_changed = existing_chunk == nullptr && has_lighting_payload;
+  bool fluids_changed = fluids.has_value() && existing_chunk == nullptr;
 
-  std::array<voxel::LightWord, voxel::ChunkVolume> resolved_lights;
+  std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> resolved_lights;
   if (has_lighting_payload) {
-    resolved_lights = std::move(lights.value());
+    resolved_lights.emplace(std::move(lights.value()));
   } else if (existing_chunk != nullptr) {
-    resolved_lights = existing_chunk->lights();
-  } else {
-    resolved_lights.fill(voxel::NoLight);
+    resolved_lights.emplace(existing_chunk->lights());
   }
 
   if (existing_chunk != nullptr) {
     blocks_changed = existing_chunk->blocks() != blocks;
-    lights_changed = existing_chunk->lights() != resolved_lights;
+    lights_changed = existing_chunk->lights() != resolved_lights.value();
     fluids_changed = fluids.has_value() && existing_chunk->fluids() != fluids.value();
 
     if (blocks_changed || fluids_changed) {
@@ -121,7 +133,7 @@ void WorldRuntime::apply_chunk_snapshot(
     }
     if (lights_changed) {
       for (usize index = 0; index < voxel::ChunkVolume; ++index) {
-        if (existing_chunk->lights()[index] != resolved_lights[index]) {
+        if (existing_chunk->lights()[index] != resolved_lights.value()[index]) {
           detail::add_boundary_dependency_offsets(
               light_dependency_offsets,
               voxel::local_pos(index));
@@ -130,17 +142,27 @@ void WorldRuntime::apply_chunk_snapshot(
     }
   } else {
     detail::add_all_neighbor_dependency_offsets(block_dependency_offsets);
-    detail::add_all_neighbor_dependency_offsets(light_dependency_offsets);
+    if (has_lighting_payload) {
+      detail::add_all_neighbor_dependency_offsets(light_dependency_offsets);
+    }
   }
 
   voxel::ChunkSection& chunk =
       impl_->chunks.ensure_chunk(coord, voxel::ChunkLifecycleState::Loaded, impl_->dirty);
   impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
-  chunk.replace_saved_contents(
-      std::move(blocks),
-      std::move(resolved_lights),
-      std::move(fluids),
-      has_lighting_payload && lighting_authoritative);
+  if (existing_chunk == nullptr) {
+    chunk.replace_initial_saved_contents(
+        std::move(blocks),
+        std::move(resolved_lights),
+        std::move(fluids),
+        has_lighting_payload && lighting_authoritative);
+  } else {
+    chunk.replace_saved_contents(
+        std::move(blocks),
+        std::move(resolved_lights.value()),
+        std::move(fluids),
+        has_lighting_payload && lighting_authoritative);
+  }
   if (has_lighting_payload && lighting_authoritative) {
     chunk.clear_dirty(voxel::ChunkDirtyFlags::Lighting);
     impl_->dirty.forget_lighting_chunk(coord);
@@ -304,6 +326,44 @@ bool WorldRuntime::publish_mesh_result(
   return true;
 }
 
+bool WorldRuntime::publish_generated_chunk_section(
+    WorldID world_id,
+    ChunkCoord column_coord,
+    const GenerationSurfaceProfile& surface_y_by_column,
+    GeneratedChunkSection generated_section) noexcept {
+  assert_owner_thread();
+  if (world_id != impl_->id) {
+    return false;
+  }
+
+  voxel::ChunkSection* existing = impl_->chunks.find_chunk(generated_section.coord);
+  if (existing != nullptr &&
+      existing->lifecycle_state() != voxel::ChunkLifecycleState::Requested &&
+      existing->lifecycle_state() != voxel::ChunkLifecycleState::Generating) {
+    return false;
+  }
+
+  voxel::ChunkSection& chunk = impl_->chunks.ensure_chunk(
+      generated_section.coord,
+      voxel::ChunkLifecycleState::Loaded,
+      impl_->dirty);
+  impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
+  std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> generated_fluids{
+      std::move(generated_section.fluids)};
+  chunk.replace_generated_blocks(
+      std::move(generated_section.blocks),
+      std::move(generated_fluids));
+  if (Chunk* column = impl_->chunks.find_column(column_coord); column != nullptr) {
+    column->set_generation_surface_profile(surface_y_by_column);
+  }
+  impl_->dirty.mark_mesh_content_dirty();
+  impl_->dirty.enqueue_dirty_mesh_chunk(generated_section.coord);
+  impl_->dirty.mark_chunk_lighting_dirty(*this, generated_section.coord);
+  impl_->dirty.mark_lighting_content_dirty();
+  impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, generated_section.coord);
+  return true;
+}
+
 bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
   assert_owner_thread();
   if (generated.world_id != impl_->id) {
@@ -312,32 +372,13 @@ bool WorldRuntime::publish_generated_chunk(GeneratedChunk generated) noexcept {
 
   bool published_any = false;
   for (GeneratedChunkSection& generated_section : generated.sections) {
-    voxel::ChunkSection* existing = impl_->chunks.find_chunk(generated_section.coord);
-    if (existing != nullptr &&
-        existing->lifecycle_state() != voxel::ChunkLifecycleState::Requested &&
-        existing->lifecycle_state() != voxel::ChunkLifecycleState::Generating) {
-      continue;
-    }
-
-    voxel::ChunkSection& chunk = impl_->chunks.ensure_chunk(
-        generated_section.coord,
-        voxel::ChunkLifecycleState::Loaded,
-        impl_->dirty);
-    impl_->chunks.set_lifecycle_state_internal(chunk, voxel::ChunkLifecycleState::Loaded);
-    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> generated_fluids{
-        std::move(generated_section.fluids)};
-    chunk.replace_generated_blocks(
-        std::move(generated_section.blocks),
-        std::move(generated_fluids));
-    if (Chunk* column = impl_->chunks.find_column(generated.coord); column != nullptr) {
-      column->set_generation_surface_profile(generated.surface_y_by_column);
-    }
-    impl_->dirty.mark_mesh_content_dirty();
-    impl_->dirty.enqueue_dirty_mesh_chunk(generated_section.coord);
-    impl_->dirty.mark_chunk_lighting_dirty(*this, generated_section.coord);
-    impl_->dirty.mark_lighting_content_dirty();
-    impl_->dirty.mark_loaded_chunk_neighbors_dirty(*this, generated_section.coord);
-    published_any = true;
+    published_any =
+        publish_generated_chunk_section(
+            generated.world_id,
+            generated.coord,
+            generated.surface_y_by_column,
+            std::move(generated_section)) ||
+        published_any;
   }
   return published_any;
 }

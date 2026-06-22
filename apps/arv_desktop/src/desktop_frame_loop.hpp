@@ -2,6 +2,7 @@
 
 #include "debug_imgui.hpp"
 #include "debug_menu.hpp"
+#include "app_config.hpp"
 #include "desktop_assets.hpp"
 #include "desktop_menu_state.hpp"
 #include "desktop_render_thread.hpp"
@@ -92,7 +93,8 @@ public:
       ui::UIScreenManager& screen_manager,
       const voxel::BlockBehaviorRegistry& block_behaviors,
       const player::ItemBehaviorRegistry& item_behaviors,
-      const world::EntityGoalRegistry& entity_goals);
+      const world::EntityGoalRegistry& entity_goals,
+      DesktopChunkStreamingValidationOptions validation_options = {});
 
   [[nodiscard]] int run();
 
@@ -110,6 +112,48 @@ private:
   struct PendingRemoteStart {
     ui::JoinServerCommand command{};
     client::LocalPlayerIdentity local_identity{};
+  };
+
+  struct ChunkStreamingPlotState {
+    u64 completed_generation_jobs{};
+    u64 published_generation_sections{};
+    usize visible_chunks{};
+    bool initialized{};
+  };
+
+  enum class ChunkStreamingValidationPhase : u8 {
+    Disabled,
+    Loading,
+    Flying,
+    ShuttingDown,
+    Failed,
+  };
+
+  struct ChunkStreamingValidationState {
+    ChunkStreamingValidationPhase phase{ChunkStreamingValidationPhase::Disabled};
+    std::string save_name{};
+    std::chrono::steady_clock::time_point flight_started_at{};
+    u64 start_generation_jobs{};
+    u64 start_generation_sections{};
+    usize start_visible_sections{};
+    usize last_visible_sections{};
+    usize max_visible_sections{};
+    u64 visible_section_growth{};
+    u64 meshed_sections{};
+    u64 uploaded_meshes{};
+    u64 frames{};
+    u64 max_pending_generation_jobs{};
+    u64 max_awaiting_generation_sections{};
+    usize max_pending_client_sections{};
+    usize max_mesh_candidates{};
+    usize max_mesh_batches_in_flight{};
+    usize max_mesh_sections_in_flight{};
+    usize max_pending_mesh_uploads{};
+    double max_frame_work_ms{};
+    bool movement_commands_sent{};
+    bool fly_toggle_submitted{};
+    bool summary_succeeded{};
+    std::vector<double> frame_work_samples_ms{};
   };
 
   [[nodiscard]] ui::UIScreenManager& active_screen_manager() noexcept;
@@ -286,6 +330,24 @@ private:
       const FrameTiming& timing,
       bool has_active_session,
       DesktopGameSession* active_session);
+  void record_chunk_streaming_tracy_plots(
+      const FrameTiming& timing,
+      bool has_active_session,
+      DesktopGameSession* active_session);
+  void begin_chunk_streaming_validation();
+  [[nodiscard]] bool drive_chunk_streaming_validation(
+      DesktopGameSession* active_session,
+      bool has_active_session,
+      client::InputFrame& client_input,
+      const FrameTiming& timing);
+  void record_chunk_streaming_validation_sample(
+      bool has_active_session,
+      DesktopGameSession* active_session,
+      std::optional<double> frame_work_ms);
+  void finish_chunk_streaming_validation_run(
+      DesktopGameSession& active_session,
+      std::chrono::steady_clock::time_point now);
+  [[nodiscard]] int complete_chunk_streaming_validation_shutdown();
   io::EngineConfig& config_;
   asset::ResourceManager& resources_;
   platform::OpenGLWindow& window_;
@@ -321,6 +383,9 @@ private:
   double last_frame_work_ms_{};
   std::chrono::steady_clock::time_point last_frame_spike_log_{};
   u64 profile_frame_index_{};
+  ChunkStreamingPlotState chunk_streaming_plot_state_{};
+  DesktopChunkStreamingValidationOptions validation_options_{};
+  ChunkStreamingValidationState validation_state_{};
   client::PlayerSkinReceiptMap player_skin_regions_{};
   UiBuildCacheKey ui_tree_cache_key_{};
   bool ui_tree_cache_valid_{};

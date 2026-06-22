@@ -262,6 +262,10 @@ public:
     return storage_->fluids;
   }
 
+  [[nodiscard]] bool has_fluids() const noexcept {
+    return has_fluids_;
+  }
+
   [[nodiscard]] ChunkStorageView storage_view() const noexcept {
     return storage_;
   }
@@ -283,6 +287,12 @@ public:
   void replace_saved_contents(
       std::array<BlockVariantID, ChunkVolume> blocks,
       std::array<LightWord, ChunkVolume> lights,
+      std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt,
+      bool lights_match_content = true) noexcept;
+
+  void replace_initial_saved_contents(
+      std::array<BlockVariantID, ChunkVolume> blocks,
+      std::optional<std::array<LightWord, ChunkVolume>> lights,
       std::optional<std::array<FluidCell, ChunkVolume>> fluids = std::nullopt,
       bool lights_match_content = true) noexcept;
 
@@ -336,6 +346,7 @@ private:
   u64 light_content_version_{1};
   u64 content_version_{1};
   bool light_dependencies_stale_{};
+  bool has_fluids_{};
   u64 mesh_built_from_block_version_{};
   u64 mesh_built_from_light_version_{};
   ChunkDirtyFlags dirty_flags_{ChunkDirtyFlags::Geometry};

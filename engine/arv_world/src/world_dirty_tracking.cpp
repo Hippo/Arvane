@@ -221,6 +221,11 @@ void WorldDirtyTracker::mark_neighbor_mesh_only_dependency_dirty(
     ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
+    if (neighbor->mesh_state() == voxel::ChunkMeshState::Dirty &&
+        neighbor->is_dirty(voxel::ChunkDirtyFlags::Geometry)) {
+      enqueue_dirty_mesh_chunk(coord);
+      return;
+    }
     neighbor->mark_mesh_dependency_dirty();
     enqueue_dirty_mesh_chunk(coord);
     mark_mesh_content_dirty();
@@ -232,6 +237,12 @@ void WorldDirtyTracker::mark_neighbor_light_dependency_dirty(
     ChunkSectionCoord coord) noexcept {
   voxel::ChunkSection* neighbor = world.find_chunk(coord);
   if (neighbor != nullptr) {
+    if (neighbor->mesh_state() == voxel::ChunkMeshState::Dirty &&
+        neighbor->is_dirty(
+            voxel::ChunkDirtyFlags::Geometry | voxel::ChunkDirtyFlags::LightMesh)) {
+      enqueue_dirty_mesh_chunk(coord);
+      return;
+    }
     neighbor->mark_light_dependency_dirty();
     enqueue_dirty_mesh_chunk(coord);
     mark_mesh_content_dirty();

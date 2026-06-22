@@ -3,6 +3,7 @@
 #include "arv/core/expected.hpp"
 #include "arv/core/primitives.hpp"
 
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <span>
@@ -49,8 +50,12 @@ public:
     const Raw raw = static_cast<Raw>(value);
     const usize offset = bytes_.size();
     bytes_.resize(offset + sizeof(Raw));
-    for (usize i = 0; i < sizeof(Raw); ++i) {
-      bytes_[offset + i] = static_cast<u8>((raw >> (i * 8U)) & 0xFFU);
+    if constexpr (std::endian::native == std::endian::little) {
+      std::memcpy(bytes_.data() + offset, &raw, sizeof(Raw));
+    } else {
+      for (usize i = 0; i < sizeof(Raw); ++i) {
+        bytes_[offset + i] = static_cast<u8>((raw >> (i * 8U)) & 0xFFU);
+      }
     }
   }
 
@@ -59,12 +64,16 @@ public:
   }
 
   void write_bytes(std::span<const u8> bytes) {
-    bytes_.insert(bytes_.end(), bytes.begin(), bytes.end());
+    const usize offset = bytes_.size();
+    bytes_.resize(offset + bytes.size());
+    std::memcpy(bytes_.data() + offset, bytes.data(), bytes.size());
   }
 
   void write_bytes(std::span<const std::byte> bytes) {
     const auto* first = reinterpret_cast<const u8*>(bytes.data());
-    bytes_.insert(bytes_.end(), first, first + bytes.size());
+    const usize offset = bytes_.size();
+    bytes_.resize(offset + bytes.size());
+    std::memcpy(bytes_.data() + offset, first, bytes.size());
   }
 
   void write_string(std::string_view value) {
@@ -100,8 +109,12 @@ public:
     }
 
     Raw raw{};
-    for (usize i = 0; i < sizeof(Raw); ++i) {
-      raw |= static_cast<Raw>(bytes_[offset_ + i]) << (i * 8U);
+    if constexpr (std::endian::native == std::endian::little) {
+      std::memcpy(&raw, bytes_.data() + offset_, sizeof(Raw));
+    } else {
+      for (usize i = 0; i < sizeof(Raw); ++i) {
+        raw |= static_cast<Raw>(bytes_[offset_ + i]) << (i * 8U);
+      }
     }
     offset_ += sizeof(Raw);
     return Expected<T, ProtocolError>::success(static_cast<T>(raw));

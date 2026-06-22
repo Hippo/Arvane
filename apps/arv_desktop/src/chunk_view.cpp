@@ -21,6 +21,7 @@ struct MeshJobInput {
 };
 
 constexpr auto SpikeLogCooldown = std::chrono::milliseconds{500};
+constexpr double MeshPreparationFrameBudgetMs = 2.5;
 
 [[nodiscard]] bool target_matches(
     const ChunkViewState& view,
@@ -273,15 +274,29 @@ void retarget_chunk_view(
   enqueue_dirty_mesh_chunks_in_view(world, view);
 }
 
+[[nodiscard]] u32 max_mesh_results_drained_per_frame(
+    const io::ChunkPipelineConfig& pipeline) noexcept {
+  return std::max<u32>(pipeline.max_mesh_sections_prepared_per_frame, 1U);
+}
+
 void drain_mesh_jobs(
     world::WorldRuntime& world,
     render::RenderCommandQueue& renderer,
-    ChunkViewState& view) {
+    ChunkViewState& view,
+    const io::ChunkPipelineConfig& pipeline) {
   ARV_PROFILE_ZONE("Chunk meshing drain");
+  const u32 max_results = max_mesh_results_drained_per_frame(pipeline);
+  u32 drained_results = 0;
   world::WorldSearch search{world};
   for (usize index = 0; index < view.pending_meshes.size();) {
     auto& pending = view.pending_meshes[index];
     if (!pending.job.is_complete()) {
+      ++index;
+      continue;
+    }
+    const u32 pending_result_count =
+        static_cast<u32>(std::max<usize>(pending.entries.size(), 1U));
+    if (drained_results > 0U && drained_results + pending_result_count > max_results) {
       ++index;
       continue;
     }
@@ -292,6 +307,7 @@ void drain_mesh_jobs(
     }
 
     for (auto& timed : batch.meshes) {
+      ++drained_results;
       view.mesh_completed_last_frame++;
       view.mesh_ms_last_frame += timed.duration_ms;
       const bool mesh_matches_current_version =
@@ -330,6 +346,9 @@ void drain_mesh_jobs(
 
     view.pending_meshes.erase(
         view.pending_meshes.begin() + static_cast<isize>(index));
+    if (drained_results >= max_results) {
+      break;
+    }
   }
 }
 
@@ -403,10 +422,20 @@ void schedule_mesh_jobs(
           16U);
   const bool upload_backlog_high = renderer.pending_mesh_upload_count() >= soft_upload_backlog;
   world::WorldSearch search{world};
+  const auto preparation_start = std::chrono::steady_clock::now();
+  auto preparation_budget_exhausted = [&]() {
+    if (mesh_sections_prepared == 0U) {
+      return false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::milli>(now - preparation_start).count() >=
+           MeshPreparationFrameBudgetMs;
+  };
   while (!view.mesh_candidates.empty() &&
          mesh_sections_prepared < max_sections_prepared_per_frame &&
          mesh_batches_scheduled < pipeline.max_mesh_jobs_per_frame &&
-         view.pending_meshes.size() < pipeline.max_mesh_jobs_per_frame) {
+         view.pending_meshes.size() < pipeline.max_mesh_jobs_per_frame &&
+         !preparation_budget_exhausted()) {
     std::vector<MeshJobInput> inputs;
     std::vector<ChunkViewState::PendingMeshEntry> entries;
     inputs.reserve(max_sections_per_job);
@@ -416,6 +445,10 @@ void schedule_mesh_jobs(
     while (!view.mesh_candidates.empty() &&
            mesh_sections_prepared < max_sections_prepared_per_frame &&
            inputs.size() < static_cast<usize>(max_sections_per_job)) {
+      if (preparation_budget_exhausted()) {
+        stop_after_batch = true;
+        break;
+      }
       const ChunkSectionCoord coord = view.mesh_candidates.front();
       view.mesh_candidates.pop_front();
       view.mesh_candidate_set.erase(coord);
@@ -683,7 +716,7 @@ bool update_chunk_view(
       view.observed_mesh_revision != entry_mesh_revision;
 
   drain_mesh_upload_receipts(world, renderer, view);
-  drain_mesh_jobs(world, renderer, view);
+  drain_mesh_jobs(world, renderer, view, pipeline);
 
   if (!target_matches(view, distances, center, min_chunk_y, max_chunk_y)) {
     retarget_chunk_view(world, view, distances, center, min_chunk_y, max_chunk_y);

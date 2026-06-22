@@ -514,6 +514,10 @@ void ServerRuntime::tick() {
   impl_->tick();
 }
 
+void ServerRuntime::pump_chunk_streaming_frame(bool send_ready_chunks) {
+  impl_->pump_chunk_streaming_frame(send_ready_chunks);
+}
+
 void ServerRuntime::shutdown() {
   impl_->shutdown();
 }
@@ -608,6 +612,14 @@ usize ServerRuntime::pending_lighting_job_count() const noexcept {
 
 usize ServerRuntime::pending_fluid_job_count() const noexcept {
   return impl_->pending_fluid_job_count();
+}
+
+u64 ServerRuntime::completed_generation_job_count() const noexcept {
+  return impl_->completed_generation_job_count();
+}
+
+u64 ServerRuntime::published_generation_section_count() const noexcept {
+  return impl_->published_generation_section_count();
 }
 
 const world::NaturalSpawnCounters& ServerRuntime::natural_spawn_counters() const noexcept {
@@ -899,6 +911,31 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
 
 void ServerRuntimeImpl::configure_chunk_streaming(
     ServerChunkStreamingConfig config) noexcept {
+  if (config.max_chunks_sent_per_player_tick == 0U) {
+    config.max_chunks_sent_per_player_tick = 1U;
+  }
+  if (config.max_unloads_sent_per_player_tick == 0U) {
+    config.max_unloads_sent_per_player_tick = 1U;
+  }
+  if (config.max_ready_chunks_sent_per_player_frame == 0U) {
+    config.max_ready_chunks_sent_per_player_frame =
+        config.max_chunks_sent_per_player_tick;
+  }
+  if (config.max_missing_columns_requested_per_player_tick == 0U) {
+    config.max_missing_columns_requested_per_player_tick =
+        config.max_chunks_sent_per_player_tick;
+  }
+  if (config.max_generation_results_per_frame == 0U) {
+    config.max_generation_results_per_frame = 1U;
+  }
+  if (config.max_generation_sections_published_per_frame == 0U) {
+    config.max_generation_sections_published_per_frame =
+        std::max<u32>(32U, config.max_generation_results_per_frame * 8U);
+  }
+  if (config.max_generation_schedules_per_frame == 0U) {
+    config.max_generation_schedules_per_frame = 1U;
+  }
+  chunk_streaming_config_ = config;
   chunk_streamer_.configure(config);
   max_view_distance_ = std::max<i32>(config.max_view_distance, 0);
   simulation_radius_ =
@@ -910,7 +947,12 @@ void ServerRuntimeImpl::tick() {
     return;
   }
 
-  world_jobs_.drain_generation_jobs(default_world_, false);
+  const bool integrated_frame_pump =
+      mode_ == ServerMode::Integrated &&
+      chunk_streaming_config_.integrated_frame_pump_enabled;
+  if (!integrated_frame_pump) {
+    world_jobs_.drain_generation_jobs(default_world_, false);
+  }
   world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, false);
   world_jobs_.drain_lighting_jobs(default_world_, false);
   inbound_events_ = network_thread_enabled_
@@ -1003,9 +1045,15 @@ void ServerRuntimeImpl::tick() {
   broadcast_pending_ride_ended_events();
   world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
   world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
-  tick_chunk_streaming();
+  if (integrated_frame_pump) {
+    tick_chunk_streaming_maintenance();
+  } else {
+    tick_chunk_streaming();
+  }
   tick_container_sessions();
-  world_jobs_.schedule_generation_jobs(default_world_, chunk_streamer_, chunk_generation_);
+  if (!integrated_frame_pump) {
+    world_jobs_.schedule_generation_jobs(default_world_, chunk_streamer_, chunk_generation_);
+  }
   send_player_block_break_progress();
   send_block_updates();
   send_entity_replication();
@@ -1199,6 +1247,14 @@ usize ServerRuntimeImpl::pending_lighting_job_count() const noexcept {
 
 usize ServerRuntimeImpl::pending_fluid_job_count() const noexcept {
   return world_jobs_.pending_fluid_job_count();
+}
+
+u64 ServerRuntimeImpl::completed_generation_job_count() const noexcept {
+  return world_jobs_.completed_generation_job_count();
+}
+
+u64 ServerRuntimeImpl::published_generation_section_count() const noexcept {
+  return world_jobs_.published_generation_section_count();
 }
 
 const world::NaturalSpawnCounters& ServerRuntimeImpl::natural_spawn_counters() const noexcept {

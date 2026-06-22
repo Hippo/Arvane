@@ -543,8 +543,8 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   chunk_data.has_lighting = true;
   chunk_data.lighting_valid = true;
   chunk_data.blocks.fill(arv::voxel::AirBlockVariantID);
-  chunk_data.lights.fill(arv::voxel::pack_light(1, 2, 3, 4));
-  chunk_data.fluids.fill(arv::voxel::empty_fluid_cell());
+  chunk_data.lights.emplace();
+  chunk_data.lights->fill(arv::voxel::pack_light(1, 2, 3, 4));
   chunk_data.blocks.front() = arv::voxel::BlockVariantID{7};
   send_to_client(
       *server_transport,
@@ -556,7 +556,10 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   ASSERT_EQ(session.chunk_sections().size(), 1U);
   EXPECT_EQ(session.chunk_sections().front().coord, chunk_data.coord);
   EXPECT_EQ(session.chunk_sections().front().blocks.front(), arv::voxel::BlockVariantID{7});
-  EXPECT_EQ(session.chunk_sections().front().lights.front(), arv::voxel::pack_light(1, 2, 3, 4));
+  ASSERT_TRUE(session.chunk_sections().front().lights.has_value());
+  EXPECT_EQ(
+      session.chunk_sections().front().lights.value().front(),
+      arv::voxel::pack_light(1, 2, 3, 4));
 
   arv::protocol::ClientboundBlockUpdateBatch block_updates;
   block_updates.world_id = arv::WorldID{1};
@@ -579,7 +582,8 @@ TEST(ClientSessionTests, CompletesAuthPackDownloadRegistrySyncAndWorldJoin) {
   ASSERT_EQ(session.chunk_sections().size(), 1U);
   EXPECT_EQ(session.chunk_sections().front().blocks.front(), arv::voxel::BlockVariantID{8});
   EXPECT_TRUE(session.chunk_sections().front().has_fluids);
-  EXPECT_TRUE(session.chunk_sections().front().fluids.front().source());
+  ASSERT_TRUE(session.chunk_sections().front().fluids.has_value());
+  EXPECT_TRUE(session.chunk_sections().front().fluids.value().front().source());
   EXPECT_GT(session.chunk_sections().front().chunk_content_version, chunk_data.chunk_content_version);
 
   send_to_client(

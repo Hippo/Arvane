@@ -1493,6 +1493,66 @@ TEST(IntegratedHandshakeTests, ClientReceivesGeneratedChunkAfterAsyncGeneration)
   EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
 }
 
+TEST(IntegratedHandshakeTests, IntegratedFramePumpStreamsGeneratedChunkWithoutExtraFixedTick) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerChunkStreamingConfig streaming_config;
+  streaming_config.max_view_distance = 0;
+  streaming_config.max_chunks_sent_per_player_tick = 1;
+  streaming_config.integrated_frame_pump_enabled = true;
+  streaming_config.max_ready_chunks_sent_per_player_frame = 1;
+  streaming_config.max_missing_columns_requested_per_player_tick = 1;
+  streaming_config.max_generation_results_per_frame = 1;
+  streaming_config.max_generation_schedules_per_frame = 1;
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.player_tuning = arv::player::default_player_tuning();
+  start_info.fluid_definition = arv::voxel::make_water_fluid_definition();
+  start_info.chunk_streaming = streaming_config;
+  start_info.chunk_generation = make_generation_settings(block_registry);
+  start_info.max_pending_generation_jobs = 1;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_chunk_view_distance(0);
+  ASSERT_TRUE(client.connect_integrated());
+
+  for (int tick = 0; tick < 3; ++tick) {
+    server.tick();
+    client.fixed_tick(server.tick_index());
+    EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
+  }
+
+  server.pump_chunk_streaming_frame(false);
+  client.poll_network();
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
+
+  server.pump_chunk_streaming_frame();
+  client.poll_network();
+  EXPECT_TRUE(client.drain_received_chunk_section_data().empty());
+
+  std::vector<arv::protocol::ClientboundChunkSectionData> chunks;
+  for (int attempt = 0; attempt < 300 && chunks.empty(); ++attempt) {
+    server.pump_chunk_streaming_frame();
+    client.poll_network();
+    chunks = client.drain_received_chunk_section_data();
+    if (chunks.empty()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  ASSERT_EQ(chunks.size(), 1U);
+  EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+}
+
 TEST(IntegratedHandshakeTests, RemoteConnectPathReceivesGeneratedChunks) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =

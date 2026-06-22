@@ -233,8 +233,12 @@ ui:
 chunk_pipeline:
   max_generation_jobs_per_frame: 2
   max_generation_results_per_tick: 3
+  max_generation_results_per_frame: 11
+  max_generation_sections_published_per_frame: 12
+  max_generation_schedules_per_frame: 13
   max_lighting_results_per_tick: 4
   max_lighting_sections_per_job: 9
+  max_ready_chunks_sent_per_frame: 10
   max_client_chunk_applies_per_frame: 6
   max_client_chunk_unloads_per_frame: 7
   max_mesh_jobs_per_frame: 5
@@ -411,8 +415,12 @@ chunk_pipeline:
   EXPECT_EQ(result.value().ui.chat.open_max_lines, 12U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_jobs_per_frame, 2U);
   EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_tick, 3U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_generation_results_per_frame, 11U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_generation_sections_published_per_frame, 12U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_generation_schedules_per_frame, 13U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_results_per_tick, 4U);
   EXPECT_EQ(result.value().chunk_pipeline.max_lighting_sections_per_job, 9U);
+  EXPECT_EQ(result.value().chunk_pipeline.max_ready_chunks_sent_per_frame, 10U);
   EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_applies_per_frame, 6U);
   EXPECT_EQ(result.value().chunk_pipeline.max_client_chunk_unloads_per_frame, 7U);
   EXPECT_EQ(result.value().chunk_pipeline.max_mesh_jobs_per_frame, 5U);

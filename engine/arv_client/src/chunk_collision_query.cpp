@@ -27,10 +27,10 @@ voxel::BlockVariantID ChunkSectionCollisionQuery::block_variant(BlockPos pos) co
 
 voxel::FluidCell ChunkSectionCollisionQuery::fluid_cell(BlockPos pos) const noexcept {
   const auto* section = section_for(pos);
-  if (section == nullptr || !section->has_fluids) {
+  if (section == nullptr || !section->has_fluids || !section->fluids.has_value()) {
     return voxel::empty_fluid_cell();
   }
-  return section->fluids[voxel::local_index(block_to_local(pos))];
+  return section->fluids.value()[voxel::local_index(block_to_local(pos))];
 }
 
 const voxel::BlockBody* ChunkSectionCollisionQuery::block_body(BlockPos pos) const noexcept {

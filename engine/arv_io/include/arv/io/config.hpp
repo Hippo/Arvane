@@ -280,7 +280,7 @@ struct JobSystemConfig {
   u32 reserved_threads{2};
   u32 min_worker_threads{1};
   u32 max_worker_threads{64};
-  RuntimeConfig client{1, 0, 1, 0, 4, 0, 0, 0, 0};
+  RuntimeConfig client{1, 0, 1, 0, 12, 0, 0, 0, 0};
   RuntimeConfig server{1, 0, 1, 4, 0, 2, 1, 1, 1};
 };
 
@@ -436,14 +436,18 @@ struct UiConfig {
 
 struct ChunkPipelineConfig {
   u32 max_generation_jobs_per_frame{4};
-  u32 max_generation_results_per_tick{2};
+  u32 max_generation_results_per_tick{8};
+  u32 max_generation_results_per_frame{1};
+  u32 max_generation_sections_published_per_frame{32};
+  u32 max_generation_schedules_per_frame{1};
   u32 max_lighting_results_per_tick{1};
   u32 max_lighting_sections_per_job{32};
-  u32 max_client_chunk_applies_per_frame{2};
+  u32 max_ready_chunks_sent_per_frame{9};
+  u32 max_client_chunk_applies_per_frame{6};
   u32 max_client_chunk_unloads_per_frame{32};
-  u32 max_mesh_jobs_per_frame{4};
+  u32 max_mesh_jobs_per_frame{13};
   u32 max_mesh_sections_per_job{4};
-  u32 max_mesh_sections_prepared_per_frame{4};
+  u32 max_mesh_sections_prepared_per_frame{8};
   u32 frame_spike_log_ms{10};
   // 0 keeps recurring profiling logs off the render path; spike warnings remain enabled.
   u32 profile_log_interval_ms{};

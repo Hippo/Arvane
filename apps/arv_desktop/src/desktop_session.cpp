@@ -804,23 +804,28 @@ void DesktopSessionManager::apply_pending_client_chunk_stream(
 
   u32 chunks_applied = 0;
   while (chunks_applied < chunk_budget && !session.pending_client_chunk_data.empty()) {
-    protocol::ClientboundChunkSectionData data = std::move(session.pending_client_chunk_data.front());
-    session.pending_client_chunk_data.pop_front();
+    protocol::ClientboundChunkSectionData& data = session.pending_client_chunk_data.front();
     ++chunks_applied;
     if (data.world_id != session.client_world.id()) {
+      session.pending_client_chunk_data.pop_front();
       continue;
     }
 
     std::optional<std::array<voxel::LightWord, voxel::ChunkVolume>> lights;
-    if (data.has_lighting) {
-      lights = std::move(data.lights);
+    if (data.has_lighting && data.lights.has_value()) {
+      lights = std::move(data.lights.value());
     }
-    session.client_world.apply_chunk_snapshot(
+    std::optional<std::array<voxel::FluidCell, voxel::ChunkVolume>> fluids;
+    if (data.has_fluids && data.fluids.has_value()) {
+      fluids = std::move(data.fluids.value());
+    }
+    session.client_world.apply_chunk_snapshot_owned(
         data.coord,
         std::move(data.blocks),
         std::move(lights),
-        std::move(data.fluids),
+        std::move(fluids),
         data.has_lighting && data.lighting_valid);
+    session.pending_client_chunk_data.pop_front();
     changed = true;
   }
 

@@ -899,11 +899,14 @@ TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
   data.lighting_valid = true;
   data.has_fluids = true;
   data.blocks.fill(arv::voxel::AirBlockVariantID);
-  data.lights.fill(arv::voxel::NoLight);
-  data.fluids.fill(arv::voxel::empty_fluid_cell());
+  data.lights.emplace();
+  data.lights->fill(arv::voxel::NoLight);
+  data.fluids.emplace();
+  data.fluids->fill(arv::voxel::empty_fluid_cell());
   data.blocks[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::BlockVariantID{8};
-  data.lights[arv::voxel::local_index({{1, 2, 3}})] = arv::voxel::pack_light(1, 2, 3, 4);
-  data.fluids[arv::voxel::local_index({{1, 2, 3}})] =
+  data.lights.value()[arv::voxel::local_index({{1, 2, 3}})] =
+      arv::voxel::pack_light(1, 2, 3, 4);
+  data.fluids.value()[arv::voxel::local_index({{1, 2, 3}})] =
       arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_chunk_section_data(data);
@@ -922,9 +925,9 @@ TEST(ProtocolTests, ChunkSectionDataRoundTripsThroughSerialization) {
       decoded.value().blocks[arv::voxel::local_index({{1, 2, 3}})],
       (arv::voxel::BlockVariantID{8}));
   EXPECT_EQ(
-      decoded.value().lights[arv::voxel::local_index({{1, 2, 3}})],
+      decoded.value().lights.value()[arv::voxel::local_index({{1, 2, 3}})],
       arv::voxel::pack_light(1, 2, 3, 4));
-  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{1, 2, 3}})].source());
+  EXPECT_TRUE(decoded.value().fluids.value()[arv::voxel::local_index({{1, 2, 3}})].source());
 }
 
 TEST(ProtocolTests, ChunkSectionDataUsesCompactRunsForSparseFluidSections) {
@@ -938,9 +941,11 @@ TEST(ProtocolTests, ChunkSectionDataUsesCompactRunsForSparseFluidSections) {
   data.lighting_valid = true;
   data.has_fluids = true;
   data.blocks.fill(arv::voxel::AirBlockVariantID);
-  data.lights.fill(arv::voxel::NoLight);
-  data.fluids.fill(arv::voxel::empty_fluid_cell());
-  data.fluids[arv::voxel::local_index({{8, 4, 8}})] =
+  data.lights.emplace();
+  data.lights->fill(arv::voxel::NoLight);
+  data.fluids.emplace();
+  data.fluids->fill(arv::voxel::empty_fluid_cell());
+  data.fluids.value()[arv::voxel::local_index({{8, 4, 8}})] =
       arv::voxel::make_fluid_source(arv::voxel::make_water_fluid_definition());
 
   const std::vector<arv::u8> bytes =
@@ -950,8 +955,8 @@ TEST(ProtocolTests, ChunkSectionDataUsesCompactRunsForSparseFluidSections) {
   const auto decoded = arv::protocol::deserialize_clientbound_chunk_section_data(bytes);
   ASSERT_TRUE(decoded);
   EXPECT_TRUE(decoded.value().has_fluids);
-  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{8, 4, 8}})].source());
-  EXPECT_TRUE(decoded.value().fluids[arv::voxel::local_index({{8, 4, 9}})].empty());
+  EXPECT_TRUE(decoded.value().fluids.value()[arv::voxel::local_index({{8, 4, 8}})].source());
+  EXPECT_TRUE(decoded.value().fluids.value()[arv::voxel::local_index({{8, 4, 9}})].empty());
 }
 
 TEST(ProtocolTests, ChunkSectionUnloadRoundTripsThroughSerialization) {

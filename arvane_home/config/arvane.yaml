@@ -1,10 +1,14 @@
 chunk_pipeline:
   max_generation_jobs_per_frame: 4
-  max_generation_results_per_tick: 2
+  max_generation_results_per_frame: 1
+  max_generation_results_per_tick: 8
+  max_generation_schedules_per_frame: 1
+  max_generation_sections_published_per_frame: 32
   max_lighting_results_per_tick: 1
   max_lighting_sections_per_job: 32
+  max_ready_chunks_sent_per_frame: 9
 chunks:
-  load_distance: 12
+  load_distance: 10
   simulation_distance: 2
   unload_margin: 1
 commands:
@@ -43,7 +47,7 @@ jobs:
     max_chunk_gen_in_flight: 0
     max_lighting_jobs_in_flight: 0
     max_liquid_jobs_in_flight: 0
-    max_mesh_jobs_in_flight: 4
+    max_mesh_jobs_in_flight: 12
     max_pathfinding_jobs_in_flight: 0
   max_worker_threads: 64
   min_worker_threads: 1

@@ -530,6 +530,90 @@ TEST(ChunkViewTests, CompletedMeshWaitsForUploadReceiptBeforeRemeshing) {
   EXPECT_EQ(target.uploaded_chunk_meshes.size(), 1U);
 }
 
+TEST(ChunkViewTests, CompletedMeshDrainIsFrameBudgeted) {
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  world.configure_height({0, 0});
+  world.bind_owner_thread();
+  for (arv::i32 x = 0; x < 3; ++x) {
+    (void)world.ensure_chunk_section({{x, 0, 0}});
+  }
+  const arv::voxel::BlockRegistry registry =
+      arv::voxel::BlockRegistry::build(
+          {arv::voxel::make_air_definition(),
+           arv::voxel::make_full_cube_definition("arvane:stone")})
+          .value();
+  const arv::voxel::BlockVariantID stone =
+      registry.find_variant("arvane:stone").value();
+  for (arv::i32 x = 0; x < 3; ++x) {
+    ASSERT_TRUE(world.set_block({{x * 16 + 1, 1, 1}}, stone));
+  }
+
+  NullRenderTarget target;
+  arv::render::RenderCommandQueue renderer{target};
+  arv::sched::JobSystem jobs;
+  arv::sched::JobSystemTaskExecutor tasks{jobs};
+  jobs.start();
+  arv::desktop::ChunkViewState chunk_view;
+  arv::io::ChunkDistanceConfig distances;
+  distances.render_distance = 3;
+  arv::io::ChunkPipelineConfig pipeline;
+  pipeline.max_mesh_jobs_per_frame = 3;
+  pipeline.max_mesh_sections_per_job = 1;
+  pipeline.max_mesh_sections_prepared_per_frame = 3;
+  const arv::voxel::BlockRenderData render_data =
+      arv::voxel::BlockRenderData::make_empty(registry.variant_count());
+
+  ASSERT_TRUE(arv::desktop::update_chunk_view(
+      world,
+      renderer,
+      tasks,
+      chunk_view,
+      distances,
+      pipeline,
+      arv::ChunkSectionCoord{{0, 0, 0}},
+      0,
+      0,
+      registry,
+      render_data));
+  ASSERT_EQ(chunk_view.pending_meshes.size(), 3U);
+  jobs.join();
+  pipeline.max_mesh_sections_prepared_per_frame = 2;
+
+  ASSERT_TRUE(arv::desktop::update_chunk_view(
+      world,
+      renderer,
+      tasks,
+      chunk_view,
+      distances,
+      pipeline,
+      arv::ChunkSectionCoord{{0, 0, 0}},
+      0,
+      0,
+      registry,
+      render_data));
+  EXPECT_EQ(chunk_view.mesh_completed_last_frame, 2U);
+  EXPECT_EQ(chunk_view.pending_meshes.size(), 1U);
+  EXPECT_EQ(chunk_view.mesh_in_flight.size(), 1U);
+  EXPECT_EQ(target.uploaded_chunk_meshes.size(), 2U);
+
+  ASSERT_TRUE(arv::desktop::update_chunk_view(
+      world,
+      renderer,
+      tasks,
+      chunk_view,
+      distances,
+      pipeline,
+      arv::ChunkSectionCoord{{0, 0, 0}},
+      0,
+      0,
+      registry,
+      render_data));
+  EXPECT_EQ(chunk_view.mesh_completed_last_frame, 1U);
+  EXPECT_TRUE(chunk_view.pending_meshes.empty());
+  EXPECT_TRUE(chunk_view.mesh_in_flight.empty());
+  EXPECT_EQ(target.uploaded_chunk_meshes.size(), 3U);
+}
+
 TEST(ChunkViewTests, EmptySectionsPublishWithoutSchedulingMeshJob) {
   arv::world::WorldRuntime world{arv::WorldID{1}};
   world.configure_height({0, 0});
