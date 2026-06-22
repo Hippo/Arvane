@@ -11,6 +11,10 @@ constexpr f32 FirstPersonEyeToBodyOriginY = 1.80F;
 constexpr f32 FirstPersonBaseBackOffset = 0.42F;
 constexpr f32 FirstPersonSneakBackOffset = 0.30F;
 constexpr f32 ModelUnitsToWorld = 1.0F / 16.0F;
+constexpr f32 FirstPersonHeldItemForwardOffset = 0.38F;
+constexpr f32 FirstPersonHeldItemRightOffset = 0.03F;
+constexpr f32 FirstPersonHeldItemUpOffset = 0.18F;
+constexpr f32 FirstPersonArmPitchFollow = 0.45F;
 constexpr Vec3f FirstPersonRightArmPivot{-6.0F, 24.0F, 1.0F};
 constexpr Vec3f FirstPersonRightHandGripOffset{0.0F, -12.0F, 0.0F};
 constexpr Vec3f FirstPersonRightArmHoldRotation{72.0F, 10.0F, -10.0F};
@@ -93,11 +97,19 @@ constexpr Vec3f FirstPersonRightArmHoldRotation{72.0F, 10.0F, -10.0F};
   return std::atan2(forward.x, forward.z);
 }
 
+[[nodiscard]] f32 camera_pitch_degrees(
+    const render::CameraSnapshot& camera) noexcept {
+  return radians_to_degrees(
+      std::asin(std::clamp(camera.forward.y, -1.0F, 1.0F)));
+}
+
 [[nodiscard]] Vec3f first_person_right_arm_rotation(
+    const render::CameraSnapshot& camera,
     HeldItemAnimationPose animation_pose) noexcept {
   return {
       FirstPersonRightArmHoldRotation.x -
-          animation_pose.rotation_degrees.x * 0.55F,
+          animation_pose.rotation_degrees.x * 0.55F +
+          camera_pitch_degrees(camera) * FirstPersonArmPitchFollow,
       FirstPersonRightArmHoldRotation.y +
           animation_pose.rotation_degrees.y * 0.35F,
       FirstPersonRightArmHoldRotation.z +
@@ -227,7 +239,7 @@ FirstPersonHeldItemPose first_person_held_item_pose(
   pose.body_rotation = first_person_player_body_rotation(camera);
   pose.hand_rotation_override = {
       "right_arm",
-      first_person_right_arm_rotation(animation_pose),
+      first_person_right_arm_rotation(camera, animation_pose),
       true};
 
   const Vec3f hand_model_position =
@@ -243,9 +255,9 @@ FirstPersonHeldItemPose first_person_held_item_pose(
 
   pose.item_position =
       hand_world_position +
-      camera.forward * (0.26F + animation_pose.position.z) +
-      camera.right * (0.02F + animation_pose.position.x) +
-      camera.up * (0.20F + animation_pose.position.y);
+      camera.forward * (FirstPersonHeldItemForwardOffset + animation_pose.position.z) +
+      camera.right * (FirstPersonHeldItemRightOffset + animation_pose.position.x) +
+      camera.up * (FirstPersonHeldItemUpOffset + animation_pose.position.y);
   const Quatf base_rotation = multiply_quat(
       camera_basis_rotation(camera.right, camera.up, camera.forward),
       yaw_rotation(-HalfPi));
@@ -261,9 +273,10 @@ FirstPersonHeldItemPose first_person_held_item_pose(
 
 void apply_first_person_held_item_arm_pose(
     render::EntityDrawItem& player_draw,
+    const render::CameraSnapshot& camera,
     HeldItemAnimationPose animation_pose) {
   player_draw.bone_rotation_overrides.push_back(
-      {"right_arm", first_person_right_arm_rotation(animation_pose), true});
+      {"right_arm", first_person_right_arm_rotation(camera, animation_pose), true});
 }
 
 PlayerEntityModelSelection select_player_entity_model(
@@ -343,7 +356,10 @@ render::EntityDrawItem make_replicated_entity_draw_item(
     item.bone_rotation_overrides.push_back({"head", input.head_rotation_degrees});
   }
   if (input.first_person && input.apply_held_item_arm_pose) {
-    apply_first_person_held_item_arm_pose(item, input.held_item_pose);
+    apply_first_person_held_item_arm_pose(
+        item,
+        input.first_person_camera,
+        input.held_item_pose);
   }
   return item;
 }

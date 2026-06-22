@@ -136,6 +136,7 @@ void append_dropped_item_draws(
 
 void apply_first_person_held_item_arm_pose(
     render::EntityDrawItem& player_draw,
+    const render::CameraSnapshot& camera,
     HeldItemAnimationPose animation_pose = {});
 
 [[nodiscard]] PlayerEntityModelSelection select_player_entity_model(

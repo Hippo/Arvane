@@ -19,6 +19,15 @@ namespace {
   return camera;
 }
 
+[[nodiscard]] arv::render::CameraSnapshot make_upward_camera() {
+  arv::render::CameraSnapshot camera;
+  camera.position = {1.0F, 2.0F, 3.0F};
+  camera.forward = {0.0F, 0.70710677F, 0.70710677F};
+  camera.right = {1.0F, 0.0F, 0.0F};
+  camera.up = {0.0F, 0.70710677F, -0.70710677F};
+  return camera;
+}
+
 void expect_vec3_near(arv::Vec3f actual, arv::Vec3f expected) {
   EXPECT_NEAR(actual.x, expected.x, 0.0001F);
   EXPECT_NEAR(actual.y, expected.y, 0.0001F);
@@ -47,12 +56,38 @@ TEST(ItemRenderingTests, FirstPersonHeldItemPoseUsesRightHandAnchor) {
   arv::render::EntityDrawItem player_draw;
   arv::client::HeldItemAnimationPose animation_pose;
   animation_pose.rotation_degrees = {-20.0F, 4.0F, -40.0F};
-  arv::client::apply_first_person_held_item_arm_pose(player_draw, animation_pose);
+  arv::client::apply_first_person_held_item_arm_pose(
+      player_draw,
+      camera,
+      animation_pose);
   ASSERT_EQ(player_draw.bone_rotation_overrides.size(), 1U);
   EXPECT_EQ(player_draw.bone_rotation_overrides.front().bone_name, "right_arm");
   EXPECT_TRUE(player_draw.bone_rotation_overrides.front().replace);
   EXPECT_GT(player_draw.bone_rotation_overrides.front().rotation_degrees.x, 72.0F);
   EXPECT_LT(player_draw.bone_rotation_overrides.front().rotation_degrees.z, -10.0F);
+}
+
+TEST(ItemRenderingTests, FirstPersonHeldItemPoseLetsHandFollowCameraPitch) {
+  const arv::render::CameraSnapshot forward_camera = make_forward_camera();
+  const arv::render::CameraSnapshot upward_camera = make_upward_camera();
+  const arv::client::FirstPersonHeldItemPose forward_pose =
+      arv::client::first_person_held_item_pose(forward_camera);
+  const arv::client::FirstPersonHeldItemPose upward_pose =
+      arv::client::first_person_held_item_pose(upward_camera);
+
+  EXPECT_GT(
+      upward_pose.hand_rotation_override.rotation_degrees.x,
+      forward_pose.hand_rotation_override.rotation_degrees.x);
+  EXPECT_GT(upward_pose.item_position.y, forward_pose.item_position.y);
+
+  arv::render::EntityDrawItem player_draw;
+  arv::client::apply_first_person_held_item_arm_pose(
+      player_draw,
+      upward_camera);
+  ASSERT_EQ(player_draw.bone_rotation_overrides.size(), 1U);
+  EXPECT_EQ(
+      player_draw.bone_rotation_overrides.front().rotation_degrees,
+      upward_pose.hand_rotation_override.rotation_degrees);
 }
 
 TEST(ItemRenderingTests, AppendHeldItemDrawUsesFirstPersonHandPose) {

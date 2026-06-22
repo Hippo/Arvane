@@ -12,9 +12,11 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -77,6 +79,20 @@ namespace {
     }
   }
   return nullptr;
+}
+
+[[nodiscard]] std::optional<std::pair<arv::f32, arv::f32>> model_y_bounds(
+    const arv::render::EntityModelAsset& model) noexcept {
+  if (model.vertices.empty()) {
+    return std::nullopt;
+  }
+  arv::f32 min_y = std::numeric_limits<arv::f32>::max();
+  arv::f32 max_y = std::numeric_limits<arv::f32>::lowest();
+  for (const arv::render::EntityModelMeshVertex& vertex : model.vertices) {
+    min_y = std::min(min_y, vertex.position.y);
+    max_y = std::max(max_y, vertex.position.y);
+  }
+  return std::pair{min_y, max_y};
 }
 
 } // namespace
@@ -186,6 +202,11 @@ TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
   ASSERT_EQ(built_model->bones.size(), 2U);
   EXPECT_EQ(built_model->bones[0].name, "base");
   EXPECT_EQ(built_model->bones[1].name, "lid");
+  const std::optional<std::pair<arv::f32, arv::f32>> attached_bounds =
+      model_y_bounds(*built_model);
+  ASSERT_TRUE(attached_bounds.has_value());
+  EXPECT_GT(attached_bounds->first, -0.01F);
+  EXPECT_GT(attached_bounds->second, 14.9F);
   const arv::render::EntityAnimationAsset* built_animation =
       find_animation(assets.value(), animation_id);
   ASSERT_NE(built_animation, nullptr);
@@ -230,4 +251,20 @@ TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
     EXPECT_EQ(actual.atlas_page, wanted.atlas_page);
     EXPECT_EQ(actual.texture_domain, wanted.texture_domain);
   }
+
+  const std::optional<arv::player::ItemID> chest_item =
+      item_registry.value().find_item("arvane:chest");
+  ASSERT_TRUE(chest_item.has_value());
+  const auto item_model_id =
+      assets.value().model_by_item.find(chest_item.value());
+  ASSERT_NE(item_model_id, assets.value().model_by_item.end());
+  const arv::render::EntityModelAsset* item_model =
+      find_model(assets.value(), item_model_id->second);
+  ASSERT_NE(item_model, nullptr);
+  const std::optional<std::pair<arv::f32, arv::f32>> item_bounds =
+      model_y_bounds(*item_model);
+  ASSERT_TRUE(item_bounds.has_value());
+  EXPECT_NEAR(item_bounds->first, -8.0F, 0.01F);
+  EXPECT_LE(item_bounds->second, 8.0F);
+  EXPECT_GT(item_bounds->second, 6.9F);
 }

@@ -145,6 +145,18 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return std::string{texture};
 }
 
+void translate_entity_model_asset(
+    render::EntityModelAsset& asset,
+    Vec3f offset) noexcept {
+  asset.center_origin = asset.center_origin + offset;
+  for (render::EntityModelBone& bone : asset.bones) {
+    bone.pivot = bone.pivot + offset;
+  }
+  for (render::EntityModelMeshVertex& vertex : asset.vertices) {
+    vertex.position = vertex.position + offset;
+  }
+}
+
 [[nodiscard]] render::EntityModelDefinition make_first_person_player_definition(
     render::EntityModelDefinition definition) {
   definition.name += "#first_person";
@@ -284,6 +296,7 @@ EntityRenderAssetsResult build_entity_render_assets(
     bool player_skin_atlas{};
     bool slim_player{};
     bool primary_type_model{};
+    bool center_as_block_item{};
   };
   struct PendingAnimation {
     EntityTypeID type_id{};
@@ -644,7 +657,8 @@ EntityRenderAssetsResult build_entity_render_assets(
                                     false,
                                     false,
                                     false,
-                                    false});
+                                    false,
+                                    true});
           break;
         }
         if (model_definition != nullptr) {
@@ -810,6 +824,9 @@ EntityRenderAssetsResult build_entity_render_assets(
                                                 model_asset.error().message});
     }
     render::EntityModelAsset built_model = std::move(model_asset.value());
+    if (pending.center_as_block_item) {
+      translate_entity_model_asset(built_model, {0.0F, -8.0F, 0.0F});
+    }
     if (pending.primary_type_model) {
       const auto pending_animation =
           pending_animation_by_type.find(pending.type_id);
