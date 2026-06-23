@@ -498,6 +498,16 @@ void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic) {
                                                    : *impl.runtime.permission_groups;
 }
 
+[[nodiscard]] bool arv_perms_initialized(const PluginManagerImpl& impl) {
+  return std::any_of(
+      impl.plugins.begin(),
+      impl.plugins.end(),
+      [](const PluginRecord& plugin) {
+        return plugin.info.pack_id == "arv_perms" &&
+               plugin.info.state == PluginState::Initialized;
+      });
+}
+
 void refresh_plugin_player_permissions(
     PluginManagerImpl& impl,
     player::PlayerState& player_state) {
@@ -513,7 +523,14 @@ void refresh_plugin_player_permissions(
       region_layer =
           impl.runtime.default_world->regions().permission_layer_for_regions(
               state->active_regions);
-    }
+      }
+  }
+
+  player::PermissionLayer fallback_layer;
+  std::span<const player::PermissionLayer> temporary_modifiers{};
+  if (!arv_perms_initialized(impl)) {
+    fallback_layer = player::baseline_permissions_without_arv_perms();
+    temporary_modifiers = {&fallback_layer, 1U};
   }
 
   player_state.resolved_permissions = player::resolve_permissions(
@@ -522,7 +539,7 @@ void refresh_plugin_player_permissions(
       {
           player_state.game_mode_id,
           &player_state.permission_overrides,
-          {},
+          temporary_modifiers,
           &region_layer,
           {},
       });

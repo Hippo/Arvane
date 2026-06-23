@@ -832,7 +832,7 @@ TEST(CommandTests, SetspawnStoresCurrentPlayerLocation) {
   EXPECT_EQ(spawn.world.value(), harness.server.voxel_world().id());
 }
 
-TEST(CommandTests, SpawnCommandIsDeniedWithoutPermission) {
+TEST(CommandTests, SpawnCommandUsesBaselinePermissionWithoutArvPerms) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
   player.position = {1.0F, 2.0F, 3.0F};
@@ -845,8 +845,8 @@ TEST(CommandTests, SpawnCommandIsDeniedWithoutPermission) {
   const arv::command::CommandResult result =
       harness.server.execute_command(sender.value(), "/spawn");
 
-  ASSERT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
-  EXPECT_EQ(player.position, (arv::Vec3f{1.0F, 2.0F, 3.0F}));
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_EQ(player.position, (arv::Vec3f{4.5F, 9.0F, -12.5F}));
 }
 
 TEST(CommandTests, PlayerGamemodeCommandUsesPerModePermission) {
@@ -884,15 +884,15 @@ TEST(CommandTests, PlayerGamemodeAliasUsesSamePermission) {
   EXPECT_TRUE(player.resolved_permissions.core.can_fly);
 }
 
-TEST(CommandTests, ServerboundChatMessageRequiresSendPermission) {
+TEST(CommandTests, ServerboundChatMessageUsesBaselineSendPermissionWithoutArvPerms) {
   RunningServerHarness harness;
 
   submit_chat_text(harness.client, "hello there");
   harness.server.tick();
   harness.client.fixed_tick(harness.server.tick_index());
 
-  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
-  EXPECT_FALSE(client_chat_contains(harness.client, "local_player: hello there"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_TRUE(client_chat_contains(harness.client, "local_player: hello there"));
 }
 
 TEST(CommandTests, ServerboundChatColorMarkupRequiresPermission) {
@@ -1007,15 +1007,16 @@ TEST(CommandTests, ServerboundChatCommandDenialUsesAuthoredTemplateColor) {
   EXPECT_EQ(runs.back().style.color, (arv::text::RgbColor{0xFFU, 0x55U, 0x55U}));
 }
 
-TEST(CommandTests, ServerboundMsgCommandIsDeniedWithoutPermission) {
+TEST(CommandTests, ServerboundMsgCommandUsesBaselinePermissionWithoutArvPerms) {
   RunningServerHarness harness;
 
   submit_chat_text(harness.client, "/msg @s hello there");
   harness.server.tick();
   harness.client.fixed_tick(harness.server.tick_index());
 
-  EXPECT_TRUE(client_chat_contains(harness.client, "No permission"));
-  EXPECT_FALSE(client_chat_contains(harness.client, "[local_player -> you] hello there"));
+  EXPECT_FALSE(client_chat_contains(harness.client, "No permission"));
+  EXPECT_TRUE(client_chat_contains(harness.client, "[local_player -> you] hello there"));
+  EXPECT_TRUE(client_chat_contains(harness.client, "Message sent to local_player."));
 }
 
 TEST(CommandTests, ServerboundChatCommandOmitsBlankPermissionDeniedMessage) {

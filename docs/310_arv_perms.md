@@ -33,7 +33,22 @@ arvane_server/packs/arv_perms/
         permissions.json
 ```
 
-Desktop and integrated singleplayer may still use the shared SDK config root:
+Integrated singleplayer saves mutable config and per-player data inside the
+active server save:
+
+```text
+arvane_home/saves/<server-save-name>/packs/arv_perms/
+  config/
+    config.yaml
+    groups.yaml
+  data/
+    players/
+      <PlayerProfileID>/
+        permissions.json
+```
+
+Desktop plugin initialization without an attached server may still use the
+shared SDK config root:
 
 ```text
 arvane_home/config/plugins/arv_perms/

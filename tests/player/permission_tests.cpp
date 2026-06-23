@@ -152,3 +152,29 @@ TEST(PermissionTests, GameModeCustomPermissionsSeedResolvedCustomMap) {
       resolved.custom_value("plugin.build"),
       arv::player::TriState::Allow);
 }
+
+TEST(PermissionTests, BaselineWithoutArvPermsAllowsPlayerChatAndBasicCommands) {
+  const arv::player::PermissionLayer baseline =
+      arv::player::baseline_permissions_without_arv_perms();
+
+  EXPECT_EQ(baseline.core.can_interact, arv::player::TriState::Allow);
+  EXPECT_EQ(baseline.core.can_open_inventory, arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.chat.send"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.command.help"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.command.spawn"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.command.time.query"),
+      arv::player::TriState::Allow);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.command.give"),
+      arv::player::TriState::Unset);
+  EXPECT_EQ(
+      arv::player::custom_permission_value(baseline.custom, "arvane.command.gamemode.creative"),
+      arv::player::TriState::Unset);
+}

@@ -145,6 +145,7 @@ struct PlayerPermissionCache {
   u64 permission_registry_revision{};
   u64 region_registry_revision{};
   bool initialized{};
+  bool fallback_permissions_active{};
   bool has_last_region_query{};
   WorldID last_region_world{};
   Vec3f last_region_position{};

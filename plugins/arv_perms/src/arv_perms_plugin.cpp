@@ -68,9 +68,6 @@ ArvPermsPlugin::ArvPermsPlugin(arv::Plugin plugin) : plugin_(plugin) {
 }
 
 bool ArvPermsPlugin::initialize() {
-  if (!load_store()) {
-    return false;
-  }
   if (arv::Result permissions = register_permissions(); !permissions) {
     plugin_.logger().error(
         std::string{"arv_perms permission registration failed: "} +
@@ -85,16 +82,13 @@ bool ArvPermsPlugin::initialize() {
   }
   (void)plugin_.events().subscribe(
       "arvane:event/server_start",
-      [this](arv::Event) {
-        upsert_runtime_groups();
-        apply_all_online_players();
-        schedule_reapply();
-      });
+      [this](arv::Event) { handle_server_start(); });
   plugin_.logger().info("arv_perms initialized.");
   return true;
 }
 
 bool ArvPermsPlugin::load_store() {
+  store_loaded_ = false;
   auto config_document = plugin_.config().load_file(ConfigFile);
   auto groups_document = plugin_.config().load_file(GroupsFile);
   const bool needs_default_config = !config_document;
@@ -116,10 +110,15 @@ bool ArvPermsPlugin::load_store() {
         needs_default_config || needs_default_groups ? "default config" : "config";
     plugin_.logger().warn("arv_perms could not write " + action + ": " + error);
   }
+  store_loaded_ = true;
   return true;
 }
 
 bool ArvPermsPlugin::save_store(std::string& out_error) {
+  if (!store_loaded_) {
+    out_error = "permission store is not loaded";
+    return false;
+  }
   if (!save_config_files(out_error)) {
     return false;
   }
@@ -214,6 +213,9 @@ bool ArvPermsPlugin::load_player_if_present(std::string_view profile_id) {
 PlayerPermissionRecord& ArvPermsPlugin::ensure_player_record(
     std::string profile_id,
     std::optional<std::string> last_known_name) {
+  if (!store_loaded_) {
+    (void)load_store();
+  }
   (void)load_player_if_present(profile_id);
   return store_.ensure_player(std::move(profile_id), std::move(last_known_name));
 }
@@ -783,6 +785,16 @@ void ArvPermsPlugin::apply_player_record(
       player,
       record.core_overrides,
       entries);
+}
+
+void ArvPermsPlugin::handle_server_start() {
+  if (!load_store()) {
+    plugin_.logger().error("arv_perms could not load permission store for this server.");
+    return;
+  }
+  upsert_runtime_groups();
+  apply_all_online_players();
+  schedule_reapply();
 }
 
 void ArvPermsPlugin::schedule_reapply() {

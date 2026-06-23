@@ -549,11 +549,20 @@ ArvResult api_data_get_bytes(
 }
 
 [[nodiscard]] io::ConfigStorageService config_storage_service(PluginCallContext* ctx) {
+  const bool has_runtime_storage_root =
+      ctx != nullptr && !ctx->impl->runtime.config_storage_root.empty();
+  const std::filesystem::path root =
+      has_runtime_storage_root
+          ? ctx->impl->runtime.config_storage_root
+          : (ctx == nullptr ? std::filesystem::path{} : ctx->impl->options.config_root);
+  const bool pack_root =
+      has_runtime_storage_root
+          ? ctx->impl->runtime.config_storage_root_is_pack_root
+          : (ctx != nullptr && ctx->impl->options.config_root_is_pack_root);
   return io::ConfigStorageService{
-      ctx == nullptr ? std::filesystem::path{} : ctx->impl->options.config_root,
-      ctx != nullptr && ctx->impl->options.config_root_is_pack_root
-          ? io::PluginStorageLayout::PackRoot
-          : io::PluginStorageLayout::ConfigRoot};
+      root,
+      pack_root ? io::PluginStorageLayout::PackRoot
+                : io::PluginStorageLayout::ConfigRoot};
 }
 
 [[nodiscard]] std::optional<std::string> validate_profile_id(

@@ -272,6 +272,31 @@ bool ResolvedPermissions::has(std::string_view node) const {
   return custom_value(node) == TriState::Allow;
 }
 
+PermissionLayer baseline_permissions_without_arv_perms() {
+  PermissionLayer layer;
+  layer.core.can_interact = TriState::Allow;
+  layer.core.can_open_inventory = TriState::Allow;
+
+  constexpr std::string_view BaselineNodes[] = {
+      "arvane.chat.send",
+      "arvane.command.help",
+      "arvane.command.list",
+      "arvane.command.me",
+      "arvane.command.msg",
+      "arvane.command.spawn",
+      "arvane.command.time",
+      "arvane.command.time.query",
+      "arvane.command.weather",
+      "arvane.command.weather.query",
+      "arvane.command.effect",
+      "arvane.command.effect.list",
+  };
+  for (const std::string_view node : BaselineNodes) {
+    layer.custom[std::string{node}] = TriState::Allow;
+  }
+  return layer;
+}
+
 GameModeRegistry::Result GameModeRegistry::add_builtin_mode(
     std::string id,
     ResolvedCorePermissions permissions) {

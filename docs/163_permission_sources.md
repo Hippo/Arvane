@@ -110,11 +110,18 @@ Examples:
 * status effects
 * power-ups
 * scripted events
+* the built-in fallback player layer used when `arv_perms` is not initialized
 
 These are:
 
 * time-based
 * dynamically applied/removed
+
+When `arv_perms` is absent, the fallback layer grants normal player basics:
+chat send, help, list, emote, private message, spawn, and read-only query
+subcommands for time, weather, and status effects. It does not grant operator
+commands such as give, kill, summon, teleport, gamemode, save, kick, or
+world-changing subcommands.
 
 ---
 
@@ -429,4 +436,3 @@ Permissions define **reality**.
 Everything in the engine must respect the **resolved permission state**, not assumptions.
 
 ---
-

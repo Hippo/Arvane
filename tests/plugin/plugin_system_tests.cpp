@@ -145,6 +145,85 @@ struct PluginHarness {
   }
 };
 
+void write_arv_perms_test_pack(
+    PluginHarness& harness,
+    const std::filesystem::path& plugin_path) {
+  const std::filesystem::path relative = copy_plugin_library(
+      harness.packs,
+      "arv_perms",
+      plugin_path);
+  write_text(
+      harness.packs / "arv_perms" / "pack.yaml",
+      "schema_version: 1\n"
+      "id: \"arv_perms\"\n"
+      "display_name: \"arv_perms\"\n"
+      "version: \"1.0.0\"\n"
+      "namespaces:\n"
+      "  - \"arv_perms\"\n"
+      "  - \"arvane\"\n"
+      "side: \"server\"\n"
+      "dependencies: []\n"
+      "load_after: []\n"
+      "load_before: []\n"
+      "capabilities:\n"
+      "  assets: false\n"
+      "  data: true\n"
+      "  config: true\n"
+      "  native_plugin: true\n"
+      "commands:\n"
+      "  - alias: perms\n"
+      "    command: perm\n"
+      "    visible_in_help: true\n"
+      "permissions:\n"
+      "  - id: arvane.command.perms\n"
+      "    description: Use /perm and /perms.\n"
+      "    default: unset\n"
+      "native:\n"
+      "  api_version: 1\n"
+      "  entrypoint: \"arvane_plugin_main\"\n"
+      "  libraries:\n"
+      "    " + arv::asset::native_plugin_platform_key() + ": \"" +
+          relative.generic_string() + "\"\n");
+  write_text(
+      harness.packs / "arv_perms" / "config" / "config.yaml",
+      "schema_version: 1\n"
+      "data:\n"
+      "  default_groups:\n"
+      "    - player\n"
+      "  operator_group: admin\n"
+      "  auto_save: true\n"
+      "  save_interval_seconds: 60\n"
+      "  track_last_known_names: true\n");
+  write_text(
+      harness.packs / "arv_perms" / "config" / "groups.yaml",
+      "schema_version: 1\n"
+      "data:\n"
+      "  groups:\n"
+      "    - id: player\n"
+      "      priority: 0\n"
+      "      inherits: []\n"
+      "      core:\n"
+      "        - name: can_interact\n"
+      "          value: ALLOW\n"
+      "        - name: can_open_inventory\n"
+      "          value: ALLOW\n"
+      "      permissions:\n"
+      "        - node: arvane.chat.send\n"
+      "          value: ALLOW\n"
+      "        - node: arvane.command.help\n"
+      "          value: ALLOW\n"
+      "        - node: arvane.command.msg\n"
+      "          value: ALLOW\n"
+      "    - id: admin\n"
+      "      priority: 1000\n"
+      "      inherits:\n"
+      "        - player\n"
+      "      core: []\n"
+      "      permissions:\n"
+      "        - node: \"*\"\n"
+      "          value: ALLOW\n");
+}
+
 } // namespace
 
 TEST(PluginSdkTests, FixturePluginsLinkOnlySdkAndDoNotDependOnEngineSharedLibraries) {
@@ -482,6 +561,15 @@ TEST(PluginLoadTests, ArvPermsPluginLoadsAndRegistersCommandAlias) {
   auto loaded = manager.load_plugins(harness.load_options({true, {"arv_perms"}}, true));
   ASSERT_TRUE(loaded) << loaded.error().describe();
   EXPECT_TRUE(manager.has_command_executor("arv_perms:perm"));
+  arv::world::WorldRuntime world{arv::WorldID{91}};
+  arv::player::PermissionGroupRegistry permission_groups;
+  manager.attach_runtime({
+      .default_world = &world,
+      .game_modes = &harness.game_modes,
+      .permission_groups = &permission_groups,
+      .server_save_root = harness.temp.path / "save",
+      .world_name = "default",
+  });
   const std::filesystem::path config_root =
       harness.packs / "arv_perms";
   const std::filesystem::path saved_config =
@@ -537,6 +625,67 @@ TEST(PluginLoadTests, ArvPermsPluginLoadsAndRegistersCommandAlias) {
   ASSERT_TRUE(groups_text) << groups_text.error().message;
   EXPECT_NE(groups_text.value().find("admin"), std::string::npos);
   EXPECT_NE(groups_text.value().find("*"), std::string::npos);
+  manager.stop_runtime();
+}
+
+TEST(PluginLoadTests, ArvPermsSingleplayerRuntimeSavesUnderServerSavePacks) {
+  if (std::string_view{ARV_TEST_PERMS_PLUGIN_PATH}.empty()) {
+    GTEST_SKIP() << "arv_perms plugin path is unavailable.";
+  }
+
+  PluginHarness harness("arvane_perms_singleplayer_");
+  write_arv_perms_test_pack(harness, ARV_TEST_PERMS_PLUGIN_PATH);
+  harness.load_packs();
+
+  arv::plugin::PluginManager manager;
+  auto loaded = manager.load_plugins(harness.load_options({true, {"arv_perms"}}));
+  ASSERT_TRUE(loaded) << loaded.error().describe();
+
+  const std::filesystem::path save_root =
+      harness.temp.path / "saves" / "server-save";
+  const std::filesystem::path save_packs_root = save_root / "packs";
+  arv::world::WorldRuntime world{arv::WorldID{92}};
+  arv::player::PermissionGroupRegistry permission_groups;
+  manager.attach_runtime({
+      .default_world = &world,
+      .game_modes = &harness.game_modes,
+      .permission_groups = &permission_groups,
+      .server_save_root = save_root,
+      .config_storage_root = save_packs_root,
+      .config_storage_root_is_pack_root = true,
+      .world_name = "default",
+  });
+
+  const std::filesystem::path config_root = save_packs_root / "arv_perms";
+  const std::filesystem::path saved_config =
+      config_root / "config" / "config.yaml";
+  const std::filesystem::path saved_groups =
+      config_root / "config" / "groups.yaml";
+  EXPECT_TRUE(std::filesystem::exists(saved_config));
+  EXPECT_TRUE(std::filesystem::exists(saved_groups));
+  EXPECT_FALSE(std::filesystem::exists(
+      harness.temp.path / "config" / "plugins" / "arv_perms"));
+
+  arv::command::CommandRegistry registry;
+  manager.register_commands(registry);
+  arv::command::CommandSender sender;
+  sender.kind = arv::command::CommandSourceKind::ServerConsole;
+  arv::command::CommandServices services;
+  const arv::command::CommandResult edit_result = arv::command::dispatch_command(
+      registry,
+      arv::command::CommandDomain::ServerBound,
+      sender,
+      services,
+      "/perms user " + std::string{PermsProfileA} + " group add admin");
+  ASSERT_EQ(edit_result.status, arv::command::CommandStatus::Success);
+
+  const std::filesystem::path saved_player =
+      config_root / "data" / "players" / std::string{PermsProfileA} / "permissions.json";
+  ASSERT_TRUE(std::filesystem::exists(saved_player));
+  auto player_text = arv::io::read_text_file_contents(saved_player);
+  ASSERT_TRUE(player_text) << player_text.error().message;
+  EXPECT_NE(player_text.value().find("\"admin\""), std::string::npos);
+  manager.stop_runtime();
 }
 
 TEST(PluginLoadTests, ReportsMissingLibraryMissingSymbolAndFalseEntrypoint) {

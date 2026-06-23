@@ -68,6 +68,8 @@ struct PluginRuntimeContext {
   TickIndex tick_index{};
   u64 world_seed{};
   std::filesystem::path server_save_root{};
+  std::filesystem::path config_storage_root{};
+  bool config_storage_root_is_pack_root{};
   std::string world_name{};
   PluginPlayerStableIDFn player_stable_id{};
   PluginPlayerDisplayNameFn player_display_name{};

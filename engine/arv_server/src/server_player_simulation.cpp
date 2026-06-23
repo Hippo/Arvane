@@ -178,6 +178,19 @@ void apply_knockback_control_suppression(
   return hash;
 }
 
+[[nodiscard]] bool arv_perms_initialized(const plugin::PluginManager* plugins) {
+  if (plugins == nullptr) {
+    return false;
+  }
+  for (const plugin::PluginInfo& info : plugins->plugins()) {
+    if (info.pack_id == "arv_perms" &&
+        info.state == plugin::PluginState::Initialized) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 Vec3f player_look_direction(const player::PlayerState& player_state) noexcept {
@@ -301,6 +314,7 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
   PlayerPermissionCache& cache = permission_caches_[player_state.player_id];
   const u64 source_fingerprint = permission_source_fingerprint(player_state);
   const u64 region_revision = default_world_.regions().revision();
+  const bool fallback_permissions_active = !arv_perms_initialized(plugins_);
   bool region_layer_changed = false;
 
   if (default_world_.regions().empty()) {
@@ -350,8 +364,16 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
       cache.source_fingerprint == source_fingerprint &&
       cache.permission_registry_revision == permission_registry_revision_ &&
       cache.region_registry_revision == region_revision &&
+      cache.fallback_permissions_active == fallback_permissions_active &&
       !region_layer_changed) {
     return;
+  }
+
+  player::PermissionLayer fallback_layer;
+  std::span<const player::PermissionLayer> temporary_modifiers{};
+  if (fallback_permissions_active) {
+    fallback_layer = player::baseline_permissions_without_arv_perms();
+    temporary_modifiers = {&fallback_layer, 1U};
   }
 
   player_state.resolved_permissions = player::resolve_permissions(
@@ -360,13 +382,14 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
       {
           player_state.game_mode_id,
           &player_state.permission_overrides,
-          {},
+          temporary_modifiers,
           &cache.region_layer,
           {},
       });
   cache.source_fingerprint = source_fingerprint;
   cache.permission_registry_revision = permission_registry_revision_;
   cache.region_registry_revision = region_revision;
+  cache.fallback_permissions_active = fallback_permissions_active;
   cache.initialized = true;
 }
 

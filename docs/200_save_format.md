@@ -63,6 +63,15 @@ arvane_home/
       save.json
       players/
         <player_uuid>.dat
+      packs/
+        arv_perms/
+          config/
+            config.yaml
+            groups.yaml
+          data/
+            players/
+              <PlayerProfileID>/
+                permissions.json
       worlds/
         world-a/
           world.json
@@ -107,6 +116,8 @@ Notes:
 
 * `arvane_home/saves/<server-save-name>/` is the top-level save boundary
   for singleplayer server saves
+* Integrated singleplayer plugin config/data is saved per server save under
+  `arvane_home/saves/<server-save-name>/packs/<pack_id>/`
 * `arvane_server/` is the top-level save boundary for `arv_dedicated`
 * Each world is fully independent
 * A “dimension” is simply another world

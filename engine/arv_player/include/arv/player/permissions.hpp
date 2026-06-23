@@ -156,6 +156,8 @@ struct PermissionResolveRequest {
   return {};
 }
 
+[[nodiscard]] PermissionLayer baseline_permissions_without_arv_perms();
+
 [[nodiscard]] ResolvedPermissions resolve_permissions(
     const GameModeRegistry& game_modes,
     const PermissionGroupRegistry& groups,

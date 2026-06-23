@@ -868,6 +868,9 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         tick_index_,
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
         server_save_root_,
+        mode_ == ServerMode::Integrated ? server_save_root_ / "packs"
+                                        : std::filesystem::path{},
+        mode_ == ServerMode::Integrated,
         world_name_,
         [this](PlayerID player_id) -> std::optional<std::string> {
           std::optional<std::string> stable_id;
@@ -978,6 +981,9 @@ void ServerRuntimeImpl::tick() {
         tick_index_,
         chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
         server_save_root_,
+        mode_ == ServerMode::Integrated ? server_save_root_ / "packs"
+                                        : std::filesystem::path{},
+        mode_ == ServerMode::Integrated,
         world_name_,
         [this](PlayerID player_id) -> std::optional<std::string> {
           std::optional<std::string> stable_id;

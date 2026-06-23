@@ -1186,10 +1186,13 @@ plugin.config().save_player_data_file(profile_id, "permissions.json", player_sta
 ```
 
 The C++ file helpers resolve the file name inside the calling plugin's config
-directory. Desktop and integrated singleplayer use the shared home config root,
-so `config.yaml` maps to
-`arvane_home/config/plugins/<pack_id>/config/config.yaml`. Dedicated server
-mode uses pack-local storage under the server root, so the same helper maps to
+directory. Desktop plugin initialization without an attached server uses the
+shared home config root, so `config.yaml` maps to
+`arvane_home/config/plugins/<pack_id>/config/config.yaml`. Integrated
+singleplayer runtime saves use the active server-save pack root, so the same
+helper maps to
+`arvane_home/saves/<server-save-name>/packs/<pack_id>/config/config.yaml`.
+Dedicated server mode uses pack-local storage under the server root:
 `arvane_server/packs/<pack_id>/config/config.yaml`. Data helpers store JSON
 under the selected plugin `data/` directory, and player-data helpers store one
 JSON document per profile under `data/players/<PlayerProfileID>/`. Lower-level
@@ -1225,6 +1228,9 @@ Recommended storage roots are implementation details, not plugin contracts:
 arvane_home/config/plugins/<pack_id>/config/<safe_key_path>.yaml
 arvane_home/config/plugins/<pack_id>/data/<safe_key_path>.json
 arvane_home/config/plugins/<pack_id>/data/players/<PlayerProfileID>/<safe_key_path>.json
+arvane_home/saves/<server-save-name>/packs/<pack_id>/config/<safe_key_path>.yaml
+arvane_home/saves/<server-save-name>/packs/<pack_id>/data/<safe_key_path>.json
+arvane_home/saves/<server-save-name>/packs/<pack_id>/data/players/<PlayerProfileID>/<safe_key_path>.json
 arvane_server/packs/<pack_id>/config/<safe_key_path>.yaml
 arvane_server/packs/<pack_id>/data/<safe_key_path>.json
 arvane_server/packs/<pack_id>/data/players/<PlayerProfileID>/<safe_key_path>.json

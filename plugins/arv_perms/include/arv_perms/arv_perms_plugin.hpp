@@ -50,6 +50,7 @@ private:
   void apply_all_online_players();
   void apply_player_if_online(std::string_view profile_id);
   void apply_player_record(ArvPlayerID player, PlayerPermissionRecord& record);
+  void handle_server_start();
   void schedule_reapply();
 
   [[nodiscard]] std::vector<ArvCustomPermissionEntry> custom_entries(
@@ -59,6 +60,7 @@ private:
   arv::Plugin plugin_;
   PermissionStore store_{};
   arv::Job reapply_job_{};
+  bool store_loaded_{};
 };
 
 } // namespace arv_perms
