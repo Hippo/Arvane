@@ -160,6 +160,18 @@ void RenderCommandQueue::set_particle_shader_sources(
       });
 }
 
+void RenderCommandQueue::set_contact_shadow_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  dispatch(
+      [vertex_source = std::move(vertex_source),
+       fragment_source = std::move(fragment_source)](IRenderCommandTarget& target) mutable {
+        target.set_contact_shadow_shader_sources(
+            std::move(vertex_source),
+            std::move(fragment_source));
+      });
+}
+
 void RenderCommandQueue::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   dispatch([upload = std::move(upload)](IRenderCommandTarget& target) mutable {
     target.set_chunk_texture_atlas(std::move(upload));

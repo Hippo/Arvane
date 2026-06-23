@@ -663,6 +663,8 @@ usize DesktopFrameLoop::build_world_frame(
       *active_session,
       active_session->chunk_view,
       assets_.entity_render_assets,
+      assets_.block_registry,
+      assets_.entity_registry,
       player_skin_regions_,
       config_.chunks,
       config_.render,

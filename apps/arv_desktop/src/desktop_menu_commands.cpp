@@ -323,6 +323,7 @@ void DesktopFrameLoop::apply_render_settings(const ui::SetRenderSettingsCommand&
   config_.chunks.stream_distance = settings.stream_distance;
   config_.render.max_chunk_mesh_uploads_per_frame = settings.mesh_upload_budget;
   config_.render.show_local_player_body = settings.show_local_player_body;
+  config_.render.shadows.enabled = settings.shadows_enabled;
   config_.render.sky = sky_settings;
   config_.render.block_outline = outline_settings;
 

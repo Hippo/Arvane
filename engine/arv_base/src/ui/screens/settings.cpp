@@ -819,7 +819,7 @@ public:
         screen_id(),
         tr(ctx, "ui.menu.settings.render"),
         scroll_y_,
-        16U);
+        17U);
     add_frame_sync_row(ctx, stack, settings.frame_sync);
     add_slider_row(
         ctx,
@@ -886,6 +886,14 @@ public:
         settings.show_local_player_body,
         "render.local_player_body",
         animated_switch_progress(settings.show_local_player_body, local_player_switch_, ctx));
+    add_toggle_row(
+        ctx,
+        stack,
+        "render.shadows",
+        tr(ctx, "ui.menu.settings.render_shadows"),
+        settings.shadows_enabled,
+        "render.shadows",
+        animated_switch_progress(settings.shadows_enabled, shadows_switch_, ctx));
     add_slider_row(
         ctx,
         stack,
@@ -979,6 +987,8 @@ public:
       settings.frame_sync = SettingsFrameSyncMode::FpsCap;
     } else if (action.action_id == "render.local_player_body") {
       settings.show_local_player_body = !settings.show_local_player_body;
+    } else if (action.action_id == "render.shadows") {
+      settings.shadows_enabled = !settings.shadows_enabled;
     } else {
       changed = false;
     }
@@ -993,7 +1003,7 @@ public:
     (void)cursor;
     (void)ctx;
     scroll_y_ =
-        std::clamp(scroll_y_ - wheel_y * 38.0F, 0.0F, settings_max_scroll(16U, SettingsRowHeight));
+        std::clamp(scroll_y_ - wheel_y * 38.0F, 0.0F, settings_max_scroll(17U, SettingsRowHeight));
     return true;
   }
 
@@ -1033,6 +1043,7 @@ private:
   f32 scroll_y_{};
   std::optional<std::string> active_slider_{};
   SwitchAnimation local_player_switch_{};
+  SwitchAnimation shadows_switch_{};
 };
 
 class ControlsSettingsScreen final : public UIScreen {

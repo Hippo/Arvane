@@ -332,6 +332,11 @@ void WebGLRenderCommandTarget::set_particle_shader_sources(
   }
 }
 
+void WebGLRenderCommandTarget::set_contact_shadow_shader_sources(
+    std::string /*vertex_source*/,
+    std::string /*fragment_source*/) {
+}
+
 void WebGLRenderCommandTarget::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   (void)replace_texture(
       chunk_atlas_,

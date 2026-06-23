@@ -40,6 +40,22 @@ bool configure_renderer(
       std::move(sky_vertex_shader.value()),
       std::move(sky_fragment_shader.value()));
 
+  auto contact_shadow_vertex_shader =
+      resources.load_text({"arvane:shader/world/contact_shadow.vert"}, asset::AssetKind::ShaderSource);
+  if (!contact_shadow_vertex_shader) {
+    arv::core::error("assets", contact_shadow_vertex_shader.error().message);
+    return false;
+  }
+  auto contact_shadow_fragment_shader =
+      resources.load_text({"arvane:shader/world/contact_shadow.frag"}, asset::AssetKind::ShaderSource);
+  if (!contact_shadow_fragment_shader) {
+    arv::core::error("assets", contact_shadow_fragment_shader.error().message);
+    return false;
+  }
+  renderer.set_contact_shadow_shader_sources(
+      std::move(contact_shadow_vertex_shader.value()),
+      std::move(contact_shadow_fragment_shader.value()));
+
   auto entity_vertex_shader =
       resources.load_text({"arvane:shader/entity/entity.vert"}, asset::AssetKind::ShaderSource);
   if (!entity_vertex_shader) {

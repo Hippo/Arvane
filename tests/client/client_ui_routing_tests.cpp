@@ -270,6 +270,22 @@ TEST(ClientUiRoutingTests, PlayerMenuSettingsAndExitActionsSubmitSharedCommands)
   EXPECT_EQ(render.stream_distance, 4);
 
   sink.commands.clear();
+  arv::ui::UiTree shadows_tree =
+      make_action_button_tree("render.shadows", "render.shadows");
+  EXPECT_TRUE(arv::client::route_inventory_mouse_input(
+      shadows_tree,
+      client,
+      input,
+      false,
+      &sink,
+      &data));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  EXPECT_FALSE(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0])
+          .settings.shadows_enabled);
+
+  sink.commands.clear();
   arv::platform::InputSnapshot release_input;
   release_input.mouse_left_released = true;
   release_input.cursor_x = 159.0F;

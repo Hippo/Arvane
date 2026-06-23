@@ -79,6 +79,12 @@ public:
     record("set_particle_shader_sources");
   }
 
+  void set_contact_shadow_shader_sources(
+      std::string /*vertex_source*/,
+      std::string /*fragment_source*/) override {
+    record("set_contact_shadow_shader_sources");
+  }
+
   void set_chunk_texture_atlas(arv::render::TextureArrayUploadData /*upload*/) override {
     record("set_chunk_texture_atlas");
   }
@@ -196,17 +202,19 @@ TEST(RenderCommandQueueTests, QueuesCommandsThroughRenderThreadInOrder) {
   std::thread producer([&commands] {
     commands.resize(640U, 480U);
     commands.set_chunk_mesh_upload_budget(3U);
+    commands.set_contact_shadow_shader_sources("shadow-v", "shadow-f");
     commands.remove_chunk_mesh({arv::WorldID{1U}, arv::ChunkSectionCoord{{2, 3, 4}}});
   });
   producer.join();
 
   commands.flush();
 
-  ASSERT_EQ(target.operations.size(), 3U);
+  ASSERT_EQ(target.operations.size(), 4U);
   EXPECT_EQ(target.operations[0], "resize:640x480");
   EXPECT_EQ(target.operations[1], "set_chunk_mesh_upload_budget:3");
-  EXPECT_EQ(target.operations[2], "remove_chunk_mesh");
-  ASSERT_EQ(target.operation_thread_hashes.size(), 3U);
+  EXPECT_EQ(target.operations[2], "set_contact_shadow_shader_sources");
+  EXPECT_EQ(target.operations[3], "remove_chunk_mesh");
+  ASSERT_EQ(target.operation_thread_hashes.size(), 4U);
   EXPECT_NE(target.operation_thread_hashes[0], main_hash);
   EXPECT_EQ(target.operation_thread_hashes[0], render_thread.thread.owner_thread_hash());
   EXPECT_EQ(commands.pending_command_count(), 0U);

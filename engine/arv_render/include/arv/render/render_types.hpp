@@ -540,6 +540,13 @@ struct EntityDrawItem {
   TextureRegionHandle player_skin_region{};
 };
 
+struct ContactShadowDrawItem {
+  WorldID world_id{};
+  Vec3f center{};
+  Vec2f half_extents{0.35F, 0.35F};
+  f32 alpha{0.32F};
+};
+
 enum class ParticleRenderBlendMode : u8 {
   Alpha,
   Additive,
@@ -579,6 +586,7 @@ struct FramePacket {
   std::vector<ChunkDrawItem> opaque_chunks{};
   std::vector<ChunkDrawItem> transparent_chunks{};
   std::vector<EntityDrawItem> entities{};
+  std::vector<ContactShadowDrawItem> contact_shadows{};
   std::vector<ParticleDrawItem> particles{};
   std::vector<EntityPreviewDrawItem> entity_previews{};
   std::vector<UIRectDrawItem> ui_rects{};

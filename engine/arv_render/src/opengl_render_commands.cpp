@@ -51,6 +51,14 @@ void OpenGLRenderCommandTarget::set_particle_shader_sources(
   renderer_.set_particle_shader_sources(std::move(vertex_source), std::move(fragment_source));
 }
 
+void OpenGLRenderCommandTarget::set_contact_shadow_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  renderer_.set_contact_shadow_shader_sources(
+      std::move(vertex_source),
+      std::move(fragment_source));
+}
+
 void OpenGLRenderCommandTarget::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   renderer_.set_chunk_texture_atlas(std::move(upload));
 }

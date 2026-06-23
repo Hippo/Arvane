@@ -74,6 +74,9 @@ public:
   virtual void set_particle_shader_sources(
       std::string vertex_source,
       std::string fragment_source) = 0;
+  virtual void set_contact_shadow_shader_sources(
+      std::string vertex_source,
+      std::string fragment_source) = 0;
 
   virtual void set_chunk_texture_atlas(TextureArrayUploadData upload) = 0;
   virtual void set_entity_texture_atlas(TextureArrayUploadData upload) = 0;
@@ -154,6 +157,9 @@ public:
       std::string vertex_source,
       std::string fragment_source);
   void set_particle_shader_sources(
+      std::string vertex_source,
+      std::string fragment_source);
+  void set_contact_shadow_shader_sources(
       std::string vertex_source,
       std::string fragment_source);
 

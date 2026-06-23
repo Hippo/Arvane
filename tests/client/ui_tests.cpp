@@ -1166,6 +1166,8 @@ TEST(GameplayUiTests, PlayerMenuSettingsAndExitTabsRenderActionsInPanel) {
   EXPECT_EQ(tree.find_by_stable_id("render.view_distance.inc.label"), nullptr);
   EXPECT_NE(tree.find_by_stable_id("render.local_player_body.label"), nullptr);
   EXPECT_NE(tree.find_by_stable_id("render.local_player_body.toggle.knob"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.shadows.label"), nullptr);
+  EXPECT_NE(tree.find_by_stable_id("render.shadows.toggle.knob"), nullptr);
   const auto* render_tabs = tree.find_by_stable_id("player_menu.tabs");
   ASSERT_NE(render_tabs, nullptr);
   EXPECT_NEAR(render_tabs->rect.x, tab_rect.x, 0.001F);
@@ -2145,6 +2147,14 @@ TEST(MenuScreenTests, RenderSettingsEmitClampedCommandsAndFitNarrowViewport) {
   EXPECT_EQ(
       std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0]).settings.fps_cap,
       240U);
+
+  sink.commands.clear();
+  EXPECT_TRUE(screens.route_action({"render.shadows", "render.shadows", "click"}, ctx));
+  ASSERT_EQ(sink.commands.size(), 1U);
+  ASSERT_TRUE(std::holds_alternative<arv::ui::SetRenderSettingsCommand>(sink.commands[0]));
+  EXPECT_FALSE(
+      std::get<arv::ui::SetRenderSettingsCommand>(sink.commands[0])
+          .settings.shadows_enabled);
 }
 
 TEST(MenuScreenTests, ControlsAndInterfaceSettingsEmitClampedCommands) {

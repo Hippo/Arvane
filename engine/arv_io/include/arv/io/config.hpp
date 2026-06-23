@@ -380,6 +380,10 @@ struct RenderConfig {
     f32 cumulus_amount{0.80F};
   };
 
+  struct ShadowsConfig {
+    bool enabled{true};
+  };
+
   struct AtlasCleanupConfig {
     u32 interval_seconds{60};
     u32 evict_after_unused_seconds{300};
@@ -419,6 +423,7 @@ struct RenderConfig {
   bool show_local_player_body{true};
   BlockOutlineConfig block_outline{};
   SkyConfig sky{};
+  ShadowsConfig shadows{};
   AtlasesConfig atlases{};
 };
 

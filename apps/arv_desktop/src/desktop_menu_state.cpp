@@ -198,6 +198,7 @@ ui::RenderSettingsView DesktopMenuState::render_settings() const {
   view.stream_distance = config_->chunks.stream_distance;
   view.mesh_upload_budget = config_->render.max_chunk_mesh_uploads_per_frame;
   view.show_local_player_body = config_->render.show_local_player_body;
+  view.shadows_enabled = config_->render.shadows.enabled;
   view.star_intensity = config_->render.sky.star_intensity;
   view.cloud_intensity = config_->render.sky.cloud_intensity;
   view.cirrus_amount = config_->render.sky.cirrus_amount;

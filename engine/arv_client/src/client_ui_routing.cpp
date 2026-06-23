@@ -528,7 +528,8 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
   if (action.action_id == "render.frame_sync.off" ||
       action.action_id == "render.frame_sync.vsync" ||
       action.action_id == "render.frame_sync.fps_cap" ||
-      action.action_id == "render.local_player_body") {
+      action.action_id == "render.local_player_body" ||
+      action.action_id == "render.shadows") {
     ui::RenderSettingsView settings = data_source->render_settings();
     bool changed = true;
     if (action.action_id == "render.frame_sync.off") {
@@ -539,6 +540,8 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
       settings.frame_sync = ui::SettingsFrameSyncMode::FpsCap;
     } else if (action.action_id == "render.local_player_body") {
       settings.show_local_player_body = !settings.show_local_player_body;
+    } else if (action.action_id == "render.shadows") {
+      settings.shadows_enabled = !settings.shadows_enabled;
     } else {
       changed = false;
     }

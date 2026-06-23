@@ -908,6 +908,13 @@ void append_render_settings_ui(
       "Local Player Body",
       render.show_local_player_body,
       "render.local_player_body");
+  add_toggle_row(
+      tree,
+      stack,
+      "render.shadows",
+      "Shadows",
+      render.shadows_enabled,
+      "render.shadows");
   add_slider_row(
       tree,
       stack,

@@ -4,8 +4,10 @@
 
 #include "arv/client/entity_render_assets.hpp"
 #include "arv/core/types.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
 #include "arv/render/render_types.hpp"
+#include "arv/voxel/block.hpp"
 
 #include <chrono>
 
@@ -21,6 +23,8 @@ void populate_world_frame_draw_items(
     DesktopGameSession& session,
     ChunkViewState& chunk_view,
     const client::EntityRenderAssets& entity_render_assets,
+    const voxel::BlockRegistry& block_registry,
+    const entity::EntityRegistry& entity_registry,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     const io::ChunkDistanceConfig& chunk_distances,
     const io::RenderConfig& render_config,

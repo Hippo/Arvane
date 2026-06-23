@@ -16,6 +16,10 @@
 #include <optional>
 #include <span>
 
+namespace arv::physics {
+class ICollisionQuery;
+}
+
 namespace arv::client {
 
 enum class ChunkDrawAppendResult {
@@ -68,6 +72,14 @@ struct ClientEntityFrameCallbacks {
   ReplicatedEntityFrameCallbacks replicated_entities{};
 };
 
+struct ContactShadowOptions {
+  bool enabled{};
+  const physics::ICollisionQuery* collision_query{};
+  f32 max_probe_distance{8.0F};
+  usize max_shadows_per_frame{256U};
+  FunctionRef<Aabb3f(const ReplicatedEntityMirror&)> replicated_entity_bounds{};
+};
+
 struct ClientEntityFrameInput {
   std::span<const ReplicatedEntityMirror> replicated_entities{};
   std::span<const DroppedItemMirror> dropped_items{};
@@ -87,6 +99,7 @@ struct ClientEntityFrameInput {
   bool require_local_entity_for_world_draws{};
   BlockAttachedModelSectionRange block_attached_sections{};
   ChunkDrawAppendOptions block_attached_section_options{};
+  ContactShadowOptions contact_shadows{};
   ClientEntityFrameCallbacks callbacks{};
 };
 
@@ -94,6 +107,7 @@ struct ClientEntityFrameResult {
   usize replicated_entities_appended{};
   usize dropped_items_appended{};
   usize block_attached_models_appended{};
+  usize contact_shadows_appended{};
   usize outline_draws_appended{};
   usize break_overlay_draws_appended{};
   bool held_item_appended{};

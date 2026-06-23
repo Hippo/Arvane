@@ -1,4 +1,5 @@
 #include "arv/client/client_frame_composer.hpp"
+#include "arv/physics/collision_query.hpp"
 
 #include <gtest/gtest.h>
 
@@ -27,6 +28,37 @@ namespace {
   item.has_transparent_mesh = transparent;
   return item;
 }
+
+class FlatGroundQuery final : public arv::physics::ICollisionQuery {
+public:
+  explicit FlatGroundQuery(bool has_ground = true) : has_ground_(has_ground) {
+    ground_body_.boxes.push_back({{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}});
+  }
+
+  [[nodiscard]] bool is_block_loaded(arv::BlockPos) const noexcept override {
+    return true;
+  }
+
+  [[nodiscard]] arv::voxel::BlockVariantID block_variant(
+      arv::BlockPos pos) const noexcept override {
+    return has_ground_ && pos.value.y == 0
+               ? arv::voxel::BlockVariantID{1U}
+               : arv::voxel::AirBlockVariantID;
+  }
+
+  [[nodiscard]] const arv::voxel::BlockBody* block_body(
+      arv::BlockPos pos) const noexcept override {
+    return has_ground_ && pos.value.y == 0 ? &ground_body_ : nullptr;
+  }
+
+  [[nodiscard]] bool missing_blocks_are_solid() const noexcept override {
+    return false;
+  }
+
+private:
+  bool has_ground_{true};
+  arv::voxel::BlockBody ground_body_{};
+};
 
 } // namespace
 
@@ -140,6 +172,196 @@ TEST(ClientFrameComposerTests, AppendsSharedEntityFrameLayersInOrder) {
   EXPECT_EQ(frame.entities[3].model_id, (arv::render::EntityModelID{30U}));
   EXPECT_EQ(frame.entities[4].model_id, (arv::render::EntityModelID{40U}));
   EXPECT_EQ(frame.entities[5].model_id, (arv::render::EntityModelID{20U}));
+}
+
+TEST(ClientFrameComposerTests, AppendsContactShadowsForVisibleGameplayCasters) {
+  arv::client::EntityRenderAssets assets;
+  assets.model_by_type.emplace(
+      arv::EntityTypeID{4U},
+      arv::render::EntityModelID{10U});
+  assets.model_by_item.emplace(
+      arv::player::ItemID{2U},
+      arv::render::EntityModelID{20U});
+  assets.block_attached_model_by_variant.resize(3U);
+  assets.block_attached_model_by_variant[2U] =
+      arv::render::EntityModelID{30U};
+
+  std::vector<arv::client::ReplicatedEntityMirror> replicated(1U);
+  replicated.front().entity_id = arv::EntityNetID{7U};
+  replicated.front().entity_type = arv::EntityTypeID{4U};
+  replicated.front().world_id = arv::WorldID{5U};
+  replicated.front().render_position = {1.5F, 1.0F, 1.5F};
+
+  const std::vector<arv::client::DroppedItemMirror> dropped{
+      {.world_id = arv::WorldID{5U},
+       .render_position = {3.0F, 1.0F, 3.0F},
+       .stack = {arv::player::ItemID{2U}, 1U}}};
+
+  const std::vector<arv::client::BlockAttachedModelSectionEntry>
+      block_attached_entries{
+          {arv::SectionLocalPos{{4, 5, 6}}, arv::voxel::BlockVariantID{2U}}};
+  const auto block_attached_section_at =
+      [](arv::usize) -> arv::client::BlockAttachedModelSectionRef {
+    return {
+        .world_id = arv::WorldID{5U},
+        .coord = arv::ChunkSectionCoord{{0, 0, 0}}};
+  };
+  const auto block_attached_entries_at =
+      [&](arv::usize)
+          -> std::span<const arv::client::BlockAttachedModelSectionEntry> {
+    return block_attached_entries;
+  };
+  FlatGroundQuery query;
+  const auto replicated_bounds =
+      [](const arv::client::ReplicatedEntityMirror& mirror) -> arv::Aabb3f {
+    return {
+        {mirror.render_position.x - 0.4F,
+         mirror.render_position.y,
+         mirror.render_position.z - 0.5F},
+        {mirror.render_position.x + 0.4F,
+         mirror.render_position.y + 1.6F,
+         mirror.render_position.z + 0.5F}};
+  };
+
+  arv::render::FramePacket frame;
+  frame.world_view.world_id = arv::WorldID{5U};
+  frame.camera = make_forward_camera();
+
+  const arv::client::ClientEntityFrameResult result =
+      arv::client::append_client_entity_frame_draws(
+          frame,
+          assets,
+          {.replicated_entities =
+               std::span<const arv::client::ReplicatedEntityMirror>{replicated},
+           .dropped_items =
+               std::span<const arv::client::DroppedItemMirror>{dropped},
+           .world_id = arv::WorldID{5U},
+           .first_person_camera = frame.camera,
+           .block_attached_sections =
+               {.count = 1U,
+                .section_at =
+                    arv::FunctionRef<arv::client::BlockAttachedModelSectionRef(
+                        arv::usize)>{block_attached_section_at},
+                .entries_at =
+                    arv::FunctionRef<std::span<
+                        const arv::client::BlockAttachedModelSectionEntry>(
+                        arv::usize)>{block_attached_entries_at}},
+           .block_attached_section_options = {.frustum_cull = false},
+           .contact_shadows =
+               {.enabled = true,
+                .collision_query = &query,
+                .replicated_entity_bounds =
+                    arv::FunctionRef<arv::Aabb3f(
+                        const arv::client::ReplicatedEntityMirror&)>{
+                        replicated_bounds}},
+           .callbacks =
+               {}});
+
+  EXPECT_EQ(result.replicated_entities_appended, 1U);
+  EXPECT_EQ(result.dropped_items_appended, 1U);
+  EXPECT_EQ(result.block_attached_models_appended, 1U);
+  EXPECT_EQ(result.contact_shadows_appended, 3U);
+  ASSERT_EQ(frame.contact_shadows.size(), 3U);
+  EXPECT_EQ(frame.contact_shadows[0].world_id, (arv::WorldID{5U}));
+  EXPECT_NEAR(frame.contact_shadows[0].center.y, 1.015F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[0].half_extents.x, 0.4F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[0].half_extents.y, 0.5F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[0].alpha, 0.32F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[1].center.y, 1.015F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[1].alpha, 0.22F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[2].center.y, 5.015F, 0.0001F);
+  EXPECT_NEAR(frame.contact_shadows[2].alpha, 0.18F, 0.0001F);
+}
+
+TEST(ClientFrameComposerTests, ContactShadowsSkipDisabledNoQueryAndNoGroundCases) {
+  arv::client::EntityRenderAssets assets;
+  assets.model_by_type.emplace(
+      arv::EntityTypeID{4U},
+      arv::render::EntityModelID{10U});
+  assets.model_by_item.emplace(
+      arv::player::ItemID{2U},
+      arv::render::EntityModelID{20U});
+
+  std::vector<arv::client::ReplicatedEntityMirror> replicated(1U);
+  replicated.front().entity_type = arv::EntityTypeID{4U};
+  replicated.front().world_id = arv::WorldID{5U};
+  replicated.front().render_position = {1.5F, 1.0F, 1.5F};
+  const std::vector<arv::client::DroppedItemMirror> dropped{
+      {.world_id = arv::WorldID{5U},
+       .render_position = {3.0F, 1.0F, 3.0F},
+       .stack = {arv::player::ItemID{2U}, 1U}}};
+
+  const auto append_with_options =
+      [&](arv::client::ContactShadowOptions options) {
+    arv::render::FramePacket frame;
+    frame.world_view.world_id = arv::WorldID{5U};
+    frame.camera = make_forward_camera();
+    const arv::client::ClientEntityFrameResult result =
+        arv::client::append_client_entity_frame_draws(
+            frame,
+            assets,
+            {.replicated_entities =
+                 std::span<const arv::client::ReplicatedEntityMirror>{replicated},
+             .dropped_items =
+                 std::span<const arv::client::DroppedItemMirror>{dropped},
+             .world_id = arv::WorldID{5U},
+             .first_person_camera = frame.camera,
+             .contact_shadows = options,
+             .callbacks =
+                 {}});
+    EXPECT_EQ(result.contact_shadows_appended, 0U);
+    EXPECT_TRUE(frame.contact_shadows.empty());
+  };
+
+  FlatGroundQuery query;
+  append_with_options({.enabled = false, .collision_query = &query});
+  append_with_options({.enabled = true});
+  FlatGroundQuery no_ground(false);
+  append_with_options({.enabled = true, .collision_query = &no_ground});
+}
+
+TEST(ClientFrameComposerTests, ContactShadowsHonorPerFrameCap) {
+  arv::client::EntityRenderAssets assets;
+  assets.model_by_type.emplace(
+      arv::EntityTypeID{4U},
+      arv::render::EntityModelID{10U});
+  assets.model_by_item.emplace(
+      arv::player::ItemID{2U},
+      arv::render::EntityModelID{20U});
+
+  std::vector<arv::client::ReplicatedEntityMirror> replicated(1U);
+  replicated.front().entity_type = arv::EntityTypeID{4U};
+  replicated.front().world_id = arv::WorldID{5U};
+  replicated.front().render_position = {1.5F, 1.0F, 1.5F};
+  const std::vector<arv::client::DroppedItemMirror> dropped{
+      {.world_id = arv::WorldID{5U},
+       .render_position = {3.0F, 1.0F, 3.0F},
+       .stack = {arv::player::ItemID{2U}, 1U}}};
+  FlatGroundQuery query;
+
+  arv::render::FramePacket frame;
+  frame.world_view.world_id = arv::WorldID{5U};
+  frame.camera = make_forward_camera();
+  const arv::client::ClientEntityFrameResult result =
+      arv::client::append_client_entity_frame_draws(
+          frame,
+          assets,
+          {.replicated_entities =
+               std::span<const arv::client::ReplicatedEntityMirror>{replicated},
+           .dropped_items =
+               std::span<const arv::client::DroppedItemMirror>{dropped},
+           .world_id = arv::WorldID{5U},
+           .first_person_camera = frame.camera,
+           .contact_shadows =
+               {.enabled = true,
+                .collision_query = &query,
+                .max_shadows_per_frame = 1U},
+           .callbacks =
+               {}});
+
+  EXPECT_EQ(result.contact_shadows_appended, 1U);
+  ASSERT_EQ(frame.contact_shadows.size(), 1U);
+  EXPECT_NEAR(frame.contact_shadows.front().alpha, 0.32F, 0.0001F);
 }
 
 TEST(ClientFrameComposerTests, AppendBlockAttachedVisibleSectionsSummarizesResults) {

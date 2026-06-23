@@ -23,6 +23,7 @@ public:
   void set_ui_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_sky_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_particle_shader_sources(std::string vertex_source, std::string fragment_source);
+  void set_contact_shadow_shader_sources(std::string vertex_source, std::string fragment_source);
   void set_chunk_texture_atlas(TextureArrayUploadData upload);
   void set_entity_texture_atlas(TextureArrayUploadData upload);
   void set_particle_texture_atlas(TextureArrayUploadData upload);
@@ -173,6 +174,12 @@ private:
     f32 rotation_radians{};
   };
 
+  struct ContactShadowInstanceData {
+    Vec3f center{};
+    Vec2f half_extents{};
+    f32 alpha{};
+  };
+
   void process_chunk_mesh_uploads();
 
   [[nodiscard]] bool upload_chunk_mesh_now(ChunkMeshUpload upload);
@@ -207,6 +214,7 @@ private:
   [[nodiscard]] bool ensure_ui_program();
   [[nodiscard]] bool ensure_sky_program();
   [[nodiscard]] bool ensure_particle_program();
+  [[nodiscard]] bool ensure_contact_shadow_program();
 
   void draw_sky();
   void draw_chunk_list(const std::vector<ChunkDrawItem>& draw_items, bool transparent);
@@ -217,6 +225,7 @@ private:
       const SkyUniforms& sky,
       f32 aspect,
       bool translucent);
+  void draw_contact_shadows();
   void draw_entity_previews();
   void draw_particles(ParticleRenderBlendMode blend_mode);
   void draw_ui();
@@ -226,6 +235,7 @@ private:
   void ensure_ui_buffers();
   void ensure_ui_shape_buffers();
   void ensure_particle_buffers();
+  void ensure_contact_shadow_buffers();
   void ensure_white_texture();
 
   u32 width_{};
@@ -319,6 +329,8 @@ private:
   GLint particle_camera_far_uniform_{-1};
   GLint particle_atlas_size_uniform_{-1};
   GLint particle_atlas_uniform_{-1};
+  GLuint contact_shadow_program_{};
+  GLint contact_shadow_view_projection_uniform_{-1};
   std::string chunk_vertex_shader_source_{};
   std::string chunk_fragment_shader_source_{};
   std::string entity_vertex_shader_source_{};
@@ -329,6 +341,8 @@ private:
   std::string sky_fragment_shader_source_{};
   std::string particle_vertex_shader_source_{};
   std::string particle_fragment_shader_source_{};
+  std::string contact_shadow_vertex_shader_source_{};
+  std::string contact_shadow_fragment_shader_source_{};
   FramePacket frame_{};
   HashMap<ChunkMeshKey, ChunkGpuState> chunks_;
   HashMap<EntityModelID, EntityModelAsset> entity_models_;
@@ -357,10 +371,14 @@ private:
   GLuint particle_vao_{};
   GLuint particle_instance_buffer_{};
   GLsizeiptr particle_instance_capacity_bytes_{};
+  GLuint contact_shadow_vao_{};
+  GLuint contact_shadow_instance_buffer_{};
+  GLsizeiptr contact_shadow_instance_capacity_bytes_{};
   bool gpu_profile_context_initialized_{};
   std::vector<const EntityDrawItem*> entity_draw_order_;
   std::vector<EntityInstanceData> entity_instances_;
   std::vector<ParticleInstanceData> particle_instances_;
+  std::vector<ContactShadowInstanceData> contact_shadow_instances_;
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_pivots_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_rotations_{};
   std::array<Vec3f, MaxEntityShaderBones> entity_bone_positions_{};

@@ -109,6 +109,16 @@ void read_render_sky_config(
   read_scalar(*sky, "cumulus_amount", config.cumulus_amount);
 }
 
+void read_render_shadows_config(
+    const DataValue& render,
+    RenderConfig::ShadowsConfig& config) {
+  const DataValue* shadows = render.get("shadows");
+  if (shadows == nullptr) {
+    return;
+  }
+  read_scalar(*shadows, "enabled", config.enabled);
+}
+
 void read_render_atlases_config(
     const DataValue& render,
     RenderConfig::AtlasesConfig& config) {
@@ -172,6 +182,10 @@ void put_render_sky_config(DataValue& root, const RenderConfig::SkyConfig& sky) 
   put(root, "render.sky.cumulus_amount", sky.cumulus_amount);
 }
 
+void put_render_shadows_config(DataValue& root, const RenderConfig::ShadowsConfig& shadows) {
+  put(root, "render.shadows.enabled", shadows.enabled);
+}
+
 void put_render_atlases_config(DataValue& root, const RenderConfig::AtlasesConfig& atlases) {
   const auto put_static_atlas = [&](std::string_view name, const RenderConfig::StaticAtlasConfig& atlas) {
     const std::string prefix = "render.atlases." + std::string{name};
@@ -217,6 +231,7 @@ void put_render_config(DataValue& root, const RenderConfig& render) {
           render.block_outline.color_b));
   put(root, "render.block_outline.thickness", render.block_outline.thickness);
   put_render_sky_config(root, render.sky);
+  put_render_shadows_config(root, render.shadows);
   put_render_atlases_config(root, render.atlases);
 }
 
@@ -241,6 +256,7 @@ void read_render_ui_sections(const DataValue& root, EngineConfig& config) {
     read_scalar(*render, "show_local_player_body", config.render.show_local_player_body);
     read_block_outline_config(*render, config.render.block_outline);
     read_render_sky_config(*render, config.render.sky);
+    read_render_shadows_config(*render, config.render.shadows);
     read_render_atlases_config(*render, config.render.atlases);
   }
 

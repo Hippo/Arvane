@@ -189,6 +189,8 @@ render:
   frame_pacing_target_fps: 120
   frame_pacing_spin_us: 250
   show_local_player_body: false
+  shadows:
+    enabled: false
   block_outline:
     color: "#1A334D"
     thickness: 0.75
@@ -377,6 +379,7 @@ chunk_pipeline:
   EXPECT_EQ(result.value().render.frame_pacing_target_fps, 120U);
   EXPECT_EQ(result.value().render.frame_pacing_spin_us, 250U);
   EXPECT_FALSE(result.value().render.show_local_player_body);
+  EXPECT_FALSE(result.value().render.shadows.enabled);
   EXPECT_NEAR(result.value().render.block_outline.color_r, 26.0F / 255.0F, 0.0001F);
   EXPECT_NEAR(result.value().render.block_outline.color_g, 51.0F / 255.0F, 0.0001F);
   EXPECT_NEAR(result.value().render.block_outline.color_b, 77.0F / 255.0F, 0.0001F);
@@ -1215,6 +1218,7 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   config.render.frame_pacing_enabled = true;
   config.render.frame_pacing_target_fps = 144U;
   config.render.show_local_player_body = false;
+  config.render.shadows.enabled = false;
   config.render.block_outline.color_r = 0.1F;
   config.render.block_outline.color_g = 0.2F;
   config.render.block_outline.color_b = 0.3F;
@@ -1232,6 +1236,7 @@ TEST(ConfigTests, SavesClientConfigFileWithMutableSettings) {
   EXPECT_NE(written.value().find("simulation_distance: 3"), std::string::npos);
   EXPECT_NE(written.value().find("frame_pacing_target_fps: 144"), std::string::npos);
   EXPECT_NE(written.value().find("show_local_player_body: false"), std::string::npos);
+  EXPECT_NE(written.value().find("enabled: false"), std::string::npos);
   EXPECT_NE(written.value().find("color: \"#1A334D\""), std::string::npos);
   EXPECT_NE(written.value().find("star_intensity: 2.25"), std::string::npos);
   EXPECT_NE(written.value().find("usage_threshold: 0.85"), std::string::npos);

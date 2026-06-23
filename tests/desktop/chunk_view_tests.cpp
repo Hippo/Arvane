@@ -44,6 +44,9 @@ public:
   void set_particle_shader_sources(std::string, std::string) override {
   }
 
+  void set_contact_shadow_shader_sources(std::string, std::string) override {
+  }
+
   void set_chunk_texture_atlas(arv::render::TextureArrayUploadData) override {
   }
 

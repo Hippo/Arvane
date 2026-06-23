@@ -57,6 +57,8 @@ render:
   frame_pacing_spin_us: 500
   frame_pacing_target_fps: 120
   max_chunk_mesh_uploads_per_frame: 8
+  shadows:
+    enabled: true
   show_local_player_body: true
   sky:
     cirrus_amount: 0.45

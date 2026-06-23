@@ -106,6 +106,7 @@ TEST(ClientSettingsTests, NormalizesRenderSettingsRanges) {
   settings.outline_green = 2.0F;
   settings.outline_blue = 0.5F;
   settings.outline_thickness = 9.0F;
+  settings.shadows_enabled = false;
 
   const arv::ui::RenderSettingsView normalized =
       arv::client::normalized_render_settings(settings);
@@ -124,6 +125,7 @@ TEST(ClientSettingsTests, NormalizesRenderSettingsRanges) {
   EXPECT_FLOAT_EQ(normalized.outline_green, 1.0F);
   EXPECT_FLOAT_EQ(normalized.outline_blue, 0.5F);
   EXPECT_FLOAT_EQ(normalized.outline_thickness, 2.0F);
+  EXPECT_FALSE(normalized.shadows_enabled);
 }
 
 TEST(ClientSettingsTests, NormalizesControlsAndSensitivityConversions) {

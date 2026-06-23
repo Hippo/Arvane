@@ -193,6 +193,7 @@ ui:
       render_stream_distance: Stream Distance
       render_mesh_upload_budget: Mesh Upload Budget
       render_local_player_body: Show Local Player Body
+      render_shadows: Shadows
       render_star_intensity: Star Intensity
       render_cloud_intensity: Cloud Intensity
       render_cirrus: Cirrus Clouds

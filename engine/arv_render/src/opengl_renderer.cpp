@@ -361,6 +361,17 @@ void OpenGLRenderer::set_particle_shader_sources(
   }
 }
 
+void OpenGLRenderer::set_contact_shadow_shader_sources(
+    std::string vertex_source,
+    std::string fragment_source) {
+  contact_shadow_vertex_shader_source_ = std::move(vertex_source);
+  contact_shadow_fragment_shader_source_ = std::move(fragment_source);
+  if (contact_shadow_program_ != 0) {
+    glDeleteProgram(contact_shadow_program_);
+    contact_shadow_program_ = 0;
+  }
+}
+
 void OpenGLRenderer::set_chunk_texture_atlas(TextureArrayUploadData upload) {
   destroy_gpu_texture(terrain_atlas_);
   if (upload.valid()) {
@@ -640,6 +651,7 @@ void OpenGLRenderer::render() {
   glDepthMask(GL_TRUE);
   draw_chunk_list(frame_.opaque_chunks, false);
   draw_entities(false);
+  draw_contact_shadows();
   draw_sky();
   glUseProgram(chunk_program_);
   glActiveTexture(GL_TEXTURE0);
@@ -696,6 +708,10 @@ void OpenGLRenderer::begin_shutdown() {
     glDeleteProgram(particle_program_);
     particle_program_ = 0;
   }
+  if (contact_shadow_program_ != 0) {
+    glDeleteProgram(contact_shadow_program_);
+    contact_shadow_program_ = 0;
+  }
   if (sky_vao_ != 0) {
     glDeleteVertexArrays(1, &sky_vao_);
     sky_vao_ = 0;
@@ -731,6 +747,12 @@ void OpenGLRenderer::begin_shutdown() {
   if (particle_vao_ != 0) {
     glDeleteVertexArrays(1, &particle_vao_);
   }
+  if (contact_shadow_instance_buffer_ != 0) {
+    glDeleteBuffers(1, &contact_shadow_instance_buffer_);
+  }
+  if (contact_shadow_vao_ != 0) {
+    glDeleteVertexArrays(1, &contact_shadow_vao_);
+  }
   ui_index_buffer_ = 0;
   ui_vertex_buffer_ = 0;
   ui_vao_ = 0;
@@ -744,6 +766,9 @@ void OpenGLRenderer::begin_shutdown() {
   particle_instance_buffer_ = 0;
   particle_vao_ = 0;
   particle_instance_capacity_bytes_ = 0;
+  contact_shadow_instance_buffer_ = 0;
+  contact_shadow_vao_ = 0;
+  contact_shadow_instance_capacity_bytes_ = 0;
   gpu_profile_context_initialized_ = false;
   render_frame_index_ = 0;
   frame_ = {};
@@ -1435,6 +1460,50 @@ bool OpenGLRenderer::ensure_particle_program() {
   return true;
 }
 
+bool OpenGLRenderer::ensure_contact_shadow_program() {
+  if (contact_shadow_program_ != 0) {
+    return true;
+  }
+
+  if (contact_shadow_vertex_shader_source_.empty() ||
+      contact_shadow_fragment_shader_source_.empty()) {
+    return false;
+  }
+
+  const GLuint vertex_shader =
+      compile_shader(GL_VERTEX_SHADER, contact_shadow_vertex_shader_source_.c_str());
+  const GLuint fragment_shader =
+      compile_shader(GL_FRAGMENT_SHADER, contact_shadow_fragment_shader_source_.c_str());
+  if (vertex_shader == 0 || fragment_shader == 0) {
+    if (vertex_shader != 0) {
+      glDeleteShader(vertex_shader);
+    }
+    if (fragment_shader != 0) {
+      glDeleteShader(fragment_shader);
+    }
+    return false;
+  }
+
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vertex_shader);
+  glAttachShader(program, fragment_shader);
+  glLinkProgram(program);
+  glDeleteShader(vertex_shader);
+  glDeleteShader(fragment_shader);
+
+  GLint success = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &success);
+  if (success != GL_TRUE) {
+    glDeleteProgram(program);
+    return false;
+  }
+
+  contact_shadow_program_ = program;
+  contact_shadow_view_projection_uniform_ =
+      glGetUniformLocation(contact_shadow_program_, "u_view_projection");
+  return true;
+}
+
 void OpenGLRenderer::draw_sky() {
   ARV_PROFILE_ZONE("Sky draw");
   if (!frame_.sky.enabled || !ensure_sky_program()) {
@@ -1783,6 +1852,79 @@ void OpenGLRenderer::draw_entities_for(
 
   glBindVertexArray(0);
   glUseProgram(0);
+}
+
+void OpenGLRenderer::draw_contact_shadows() {
+  ARV_PROFILE_ZONE("Contact shadow draw batch");
+  if (frame_.contact_shadows.empty() || !ensure_contact_shadow_program()) {
+    return;
+  }
+
+  contact_shadow_instances_.clear();
+  contact_shadow_instances_.reserve(frame_.contact_shadows.size());
+  for (const ContactShadowDrawItem& draw : frame_.contact_shadows) {
+    if (draw.world_id != frame_.world_view.world_id ||
+        draw.alpha <= 0.0F ||
+        draw.half_extents.x <= 0.0F ||
+        draw.half_extents.y <= 0.0F) {
+      continue;
+    }
+    contact_shadow_instances_.push_back(
+        {.center = draw.center,
+         .half_extents = draw.half_extents,
+         .alpha = std::clamp(draw.alpha, 0.0F, 1.0F)});
+  }
+  if (contact_shadow_instances_.empty()) {
+    return;
+  }
+
+  ensure_contact_shadow_buffers();
+
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_CULL_FACE);
+
+  glUseProgram(contact_shadow_program_);
+  glUniformMatrix4fv(
+      contact_shadow_view_projection_uniform_,
+      1,
+      GL_FALSE,
+      frame_.world_view.view_projection.values.data());
+
+  glBindVertexArray(contact_shadow_vao_);
+  const GLsizeiptr instance_bytes =
+      static_cast<GLsizeiptr>(
+          contact_shadow_instances_.size() * sizeof(ContactShadowInstanceData));
+  ensure_buffer_capacity(
+      GL_ARRAY_BUFFER,
+      contact_shadow_instance_buffer_,
+      contact_shadow_instance_capacity_bytes_,
+      instance_bytes,
+      GL_DYNAMIC_DRAW);
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      0,
+      instance_bytes,
+      contact_shadow_instances_.data());
+  ++gpu_buffer_uploads_last_frame_;
+  gpu_buffer_upload_bytes_last_frame_ += static_cast<u64>(instance_bytes);
+  glDrawArraysInstanced(
+      GL_TRIANGLES,
+      0,
+      6,
+      static_cast<GLsizei>(contact_shadow_instances_.size()));
+  vertices_submitted_last_frame_ +=
+      static_cast<u64>(contact_shadow_instances_.size()) * 6U;
+  triangles_submitted_last_frame_ +=
+      static_cast<u64>(contact_shadow_instances_.size()) * 2U;
+  ++draw_calls_last_frame_;
+
+  glBindVertexArray(0);
+  glUseProgram(0);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
 }
 
 void OpenGLRenderer::draw_particles(ParticleRenderBlendMode blend_mode) {
@@ -2340,6 +2482,48 @@ void OpenGLRenderer::ensure_particle_buffers() {
       sizeof(ParticleInstanceData),
       reinterpret_cast<const void*>(offsetof(ParticleInstanceData, rotation_radians)));
   glVertexAttribDivisor(6, 1);
+
+  glBindVertexArray(0);
+}
+
+void OpenGLRenderer::ensure_contact_shadow_buffers() {
+  if (contact_shadow_vao_ != 0) {
+    return;
+  }
+
+  glGenVertexArrays(1, &contact_shadow_vao_);
+  glBindVertexArray(contact_shadow_vao_);
+  glGenBuffers(1, &contact_shadow_instance_buffer_);
+  glBindBuffer(GL_ARRAY_BUFFER, contact_shadow_instance_buffer_);
+  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(
+      0,
+      3,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ContactShadowInstanceData),
+      reinterpret_cast<const void*>(offsetof(ContactShadowInstanceData, center)));
+  glVertexAttribDivisor(0, 1);
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(
+      1,
+      2,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ContactShadowInstanceData),
+      reinterpret_cast<const void*>(offsetof(ContactShadowInstanceData, half_extents)));
+  glVertexAttribDivisor(1, 1);
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(
+      2,
+      1,
+      GL_FLOAT,
+      GL_FALSE,
+      sizeof(ContactShadowInstanceData),
+      reinterpret_cast<const void*>(offsetof(ContactShadowInstanceData, alpha)));
+  glVertexAttribDivisor(2, 1);
 
   glBindVertexArray(0);
 }

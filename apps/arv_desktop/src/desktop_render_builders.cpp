@@ -6,7 +6,9 @@
 #include "arv/client/item_rendering.hpp"
 #include "arv/client/player_skin_rendering.hpp"
 #include "arv/client/sky_rendering.hpp"
+#include "arv/world/world_queries.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <optional>
@@ -55,6 +57,25 @@ block_attached_entries_for_chunk(
   return iter->second.entries;
 }
 
+[[nodiscard]] Aabb3f contact_shadow_bounds_for_entity(
+    const entity::EntityRegistry& entity_registry,
+    const client::ReplicatedEntityMirror& mirror) noexcept {
+  Vec3f box{0.6F, 1.8F, 0.6F};
+  const entity::EntityTypeRecord* record =
+      entity_registry.type(mirror.entity_type);
+  if (record != nullptr && record->components.collision.has_value()) {
+    box = record->components.collision->box;
+  }
+  box = {
+      std::max(box.x, 0.01F),
+      std::max(box.y, 0.01F),
+      std::max(box.z, 0.01F)};
+  const Vec3f position = mirror.render_position;
+  return {
+      {position.x - box.x * 0.5F, position.y, position.z - box.z * 0.5F},
+      {position.x + box.x * 0.5F, position.y + box.y, position.z + box.z * 0.5F}};
+}
+
 } // namespace
 
 usize populate_chunk_draw_lists(
@@ -98,6 +119,8 @@ void populate_world_frame_draw_items(
     DesktopGameSession& session,
     ChunkViewState& chunk_view,
     const client::EntityRenderAssets& entity_render_assets,
+    const voxel::BlockRegistry& block_registry,
+    const entity::EntityRegistry& entity_registry,
     const HashMap<std::string, render::TextureRegionHandle>& player_skin_regions,
     const io::ChunkDistanceConfig& chunk_distances,
     const io::RenderConfig& render_config,
@@ -190,6 +213,14 @@ void populate_world_frame_draw_items(
       [&](ChunkSectionCoord coord) {
     return chunk_inside_render_window(chunk_view, chunk_distances, coord);
   };
+  world::WorldCollisionQuery contact_shadow_query(
+      session.client_world,
+      block_registry,
+      false);
+  const auto replicated_entity_bounds =
+      [&](const client::ReplicatedEntityMirror& mirror) -> Aabb3f {
+    return contact_shadow_bounds_for_entity(entity_registry, mirror);
+  };
 
   (void)client::append_client_entity_frame_draws(
       frame,
@@ -223,6 +254,12 @@ void populate_world_frame_draw_items(
        .block_attached_section_options =
            {.inside_render_window =
                 FunctionRef<bool(ChunkSectionCoord)>{inside_render_window}},
+       .contact_shadows =
+           {.enabled = render_config.shadows.enabled,
+            .collision_query = &contact_shadow_query,
+            .replicated_entity_bounds =
+                FunctionRef<Aabb3f(const client::ReplicatedEntityMirror&)>{
+                    replicated_entity_bounds}},
        .callbacks =
            {.replicated_entities =
                 {.player_skin_info =

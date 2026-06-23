@@ -90,6 +90,7 @@ struct RenderSettingsView {
   i32 stream_distance{2};
   u32 mesh_upload_budget{8};
   bool show_local_player_body{true};
+  bool shadows_enabled{true};
   f32 star_intensity{1.25F};
   f32 cloud_intensity{1.25F};
   f32 cirrus_amount{0.45F};
