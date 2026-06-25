@@ -22,14 +22,15 @@ spawns:
     use:
       - table: arvane:worldgen/spawn_table/temperate_passive
         weight_scale: 1.0
-    rate_scale: 0.32
-    density_cap_scale: 0.5
+    budget_profile: arvane:worldgen/spawn_budget_profile/passive_conservative
+    density_multiplier: 0.9
+    soft_cap_multiplier: 0.95
     remove: []
     overrides:
       arvane:pig_grass:
-        weight: 1
+        weight: 2
       arvane:horse_grass:
-        weight: 3
+        weight: 2
     add: []
 
 features:

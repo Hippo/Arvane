@@ -153,6 +153,460 @@ namespace {
   return positions;
 }
 
+[[nodiscard]] SpawnBudgetProfileConfig default_budget_profile_for(
+    SpawnCategory category) {
+  SpawnBudgetProfileConfig profile;
+  profile.id = "arvane:runtime/default/" + std::string{spawn_category_name(category)};
+  profile.category = category;
+  return profile;
+}
+
+[[nodiscard]] SpawnBudgetProfileConfig default_budget_profile_for(
+    SpawnCategory category,
+    const NaturalSpawningConfig& config) {
+  SpawnBudgetProfileConfig profile = default_budget_profile_for(category);
+  profile.tick_interval = std::max<TickIndex>(config.interval_ticks, 1U);
+  profile.attempts_per_interval = std::max(config.attempts_per_player_per_category, 1U);
+  profile.max_successes_per_interval =
+      std::max(config.max_successes_per_player_per_tick, 1U);
+  profile.spawn_area.min_distance_blocks = config.min_distance_from_player_blocks;
+  profile.spawn_area.max_distance_blocks = config.max_distance_from_player_blocks;
+  profile.spawn_area.eligible_chunk_radius =
+      std::max<u32>(1U, (config.max_distance_from_player_blocks + ChunkSize - 1U) / ChunkSize);
+  const SpawnCategoryCapConfig& caps = config.caps[spawn_category_index(category)];
+  profile.population.soft_cap_per_player = std::max(caps.per_player, 1U);
+  profile.population.hard_cap_per_player = std::max(caps.per_player, 1U);
+  profile.population.density_per_eligible_chunk = 0.0F;
+  profile.population.max_per_chunk = std::max(caps.local_max, 1U);
+  profile.population.max_per_3x3_chunks = std::max(caps.local_max, 1U);
+  profile.credit.refill_per_interval =
+      static_cast<f32>(profile.attempts_per_interval + profile.max_successes_per_interval);
+  profile.credit.max_bank = profile.credit.refill_per_interval;
+  const NaturalDespawnCategoryConfig& despawn =
+      config.despawning[spawn_category_index(category)];
+  profile.despawn.enabled = despawn.natural_despawn;
+  profile.despawn.min_age_ticks = despawn.min_lifetime_ticks;
+  profile.despawn.distance_blocks = despawn.hard_distance_blocks;
+  profile.despawn.only_if_over_soft_cap = false;
+  profile.despawn.exclude_persistent = true;
+  return profile;
+}
+
+[[nodiscard]] TickIndex budget_tick_interval_for_table(
+    const BiomeSpawnTable& table,
+    const NaturalSpawningConfig& config) noexcept {
+  if (table.has_budget || table.budget.tick_interval != 0U) {
+    return table.budget.tick_interval;
+  }
+  return std::max<TickIndex>(config.interval_ticks, 1U);
+}
+
+[[nodiscard]] TickIndex doubled_tick_interval(TickIndex interval) noexcept {
+  constexpr TickIndex MaxTick = std::numeric_limits<TickIndex>::max();
+  return interval > MaxTick / 2U ? MaxTick : interval * 2U;
+}
+
+[[nodiscard]] f32 clamped_credit_bank(
+    f32 value,
+    const SpawnBudgetCreditConfig& credit) noexcept {
+  if (!std::isfinite(value) || value < 0.0F) {
+    return 0.0F;
+  }
+  return std::min(value, credit.max_bank);
+}
+
+[[nodiscard]] NaturalSpawnCreditSnapshot* find_credit_bank(
+    std::vector<NaturalSpawnCreditSnapshot>& banks,
+    PlayerID player,
+    SpawnCategory category,
+    std::string_view budget_profile_id) noexcept {
+  for (NaturalSpawnCreditSnapshot& bank : banks) {
+    if (bank.player == player &&
+        bank.category == category &&
+        bank.budget_profile_id == budget_profile_id) {
+      return &bank;
+    }
+  }
+  return nullptr;
+}
+
+[[nodiscard]] NaturalSpawnCreditSnapshot& find_or_add_credit_bank(
+    std::vector<NaturalSpawnCreditSnapshot>& banks,
+    PlayerID player,
+    SpawnCategory category,
+    std::string_view budget_profile_id) {
+  if (NaturalSpawnCreditSnapshot* bank =
+          find_credit_bank(banks, player, category, budget_profile_id);
+      bank != nullptr) {
+    return *bank;
+  }
+  banks.push_back({player, category, std::string{budget_profile_id}, 0.0F});
+  return banks.back();
+}
+
+[[nodiscard]] ChunkCoord chunk_column_for_position(Vec3f position) noexcept {
+  return {
+      floor_div(static_cast<i32>(std::floor(position.x)), ChunkSize),
+      floor_div(static_cast<i32>(std::floor(position.z)), ChunkSize)};
+}
+
+[[nodiscard]] ChunkCoord chunk_column_for_block(BlockPos pos) noexcept {
+  return {floor_div(pos.value.x, ChunkSize), floor_div(pos.value.z, ChunkSize)};
+}
+
+[[nodiscard]] u32 scaled_u32_ceil(u32 value, f32 scale) noexcept {
+  if (value == 0U || !std::isfinite(scale) || scale <= 0.0F) {
+    return 0U;
+  }
+  const double scaled =
+      std::ceil(static_cast<double>(value) * static_cast<double>(scale));
+  constexpr double MaxU32 = static_cast<double>(std::numeric_limits<u32>::max());
+  if (scaled >= MaxU32) {
+    return std::numeric_limits<u32>::max();
+  }
+  return static_cast<u32>(std::max(1.0, scaled));
+}
+
+[[nodiscard]] u32 target_population_for_budget(
+    const SpawnBudgetProfileConfig& budget,
+    const SpawnBudgetBiomeModifiers& modifiers,
+    u32 eligible_chunk_count,
+    u32 near_player_count) noexcept {
+  if (eligible_chunk_count == 0U || near_player_count == 0U) {
+    return 0U;
+  }
+  const u32 soft = scaled_u32_ceil(
+      budget.population.soft_cap_per_player * near_player_count,
+      modifiers.soft_cap_multiplier);
+  const double density_target =
+      static_cast<double>(budget.population.density_per_eligible_chunk) *
+      static_cast<double>(modifiers.density_multiplier) *
+      static_cast<double>(eligible_chunk_count);
+  u32 density = 0U;
+  if (std::isfinite(density_target) && density_target > 0.0) {
+    density = static_cast<u32>(std::ceil(density_target));
+  }
+  const u32 hard = budget.population.hard_cap_per_player * near_player_count;
+  return std::min(std::max(soft, density), hard);
+}
+
+struct PlannedEligibleChunk {
+  ChunkCoord column{};
+};
+
+struct BudgetChunkGroup {
+  SpawnBudgetProfileConfig budget{};
+  SpawnBudgetBiomeModifiers modifiers{};
+  std::vector<PlannedEligibleChunk> chunks{};
+};
+
+[[nodiscard]] std::string budget_group_key(
+    const SpawnBudgetProfileConfig& budget,
+    const SpawnBudgetBiomeModifiers& modifiers) {
+  return budget.id + ":" +
+         std::to_string(static_cast<double>(modifiers.density_multiplier)) + ":" +
+         std::to_string(static_cast<double>(modifiers.soft_cap_multiplier));
+}
+
+[[nodiscard]] BudgetChunkGroup& find_or_add_budget_group(
+    std::vector<BudgetChunkGroup>& groups,
+    const SpawnBudgetProfileConfig& budget,
+    const SpawnBudgetBiomeModifiers& modifiers) {
+  const std::string key = budget_group_key(budget, modifiers);
+  for (BudgetChunkGroup& group : groups) {
+    if (budget_group_key(group.budget, group.modifiers) == key) {
+      return group;
+    }
+  }
+  groups.push_back({budget, modifiers, {}});
+  return groups.back();
+}
+
+[[nodiscard]] std::vector<BudgetChunkGroup> collect_budget_chunk_groups(
+    const NaturalSpawnJobRequest& request,
+    const NaturalSpawnPlayerSnapshot& player,
+    SpawnCategory category,
+    const std::vector<Vec3f>& player_positions,
+    HashMap<ChunkCoord, worldgen::TerrainProfile>& profile_cache,
+    HashSet<ChunkCoord>& claimed_columns) {
+  std::vector<BudgetChunkGroup> groups;
+  if (request.dimension == nullptr || request.dimension->biomes.empty()) {
+    return groups;
+  }
+
+  const ChunkCoord player_column = chunk_column_for_position(player.position);
+  HashSet<ChunkCoord> seen_columns;
+  for (const ChunkSectionCoord section : request.loaded_chunks) {
+    const ChunkCoord column{section.value.x, section.value.z};
+    if (seen_columns.contains(column) || claimed_columns.contains(column)) {
+      continue;
+    }
+    seen_columns.insert(column);
+
+    auto profile_iter = profile_cache.find(column);
+    if (profile_iter == profile_cache.end()) {
+      profile_iter = profile_cache
+                         .emplace(
+                             column,
+                             worldgen::generate_terrain_profile(
+                                 *request.dimension,
+                                 request.generation_seed,
+                                 column))
+                         .first;
+    }
+
+    constexpr i32 LocalCenter = ChunkSize / 2;
+    const usize column_index = voxel::local_column_index({LocalCenter, LocalCenter});
+    const usize biome_index = std::min(
+        profile_iter->second.biome_by_column[column_index],
+        request.dimension->biomes.size() - 1U);
+    const std::string& biome_id = request.dimension->biomes[biome_index].raw.id;
+    const BiomeSpawnTable* table = request.rules.find_table(biome_id, category);
+    if (table == nullptr || table->empty()) {
+      continue;
+    }
+    const SpawnBudgetProfileConfig budget =
+        table->has_budget ? table->budget : default_budget_profile_for(category);
+    const i32 dx_chunks = std::abs(column.x - player_column.x);
+    const i32 dz_chunks = std::abs(column.z - player_column.z);
+    if (dx_chunks > static_cast<i32>(budget.spawn_area.eligible_chunk_radius) ||
+        dz_chunks > static_cast<i32>(budget.spawn_area.eligible_chunk_radius)) {
+      continue;
+    }
+
+    BlockPos representative{{
+        column.x * ChunkSize + LocalCenter,
+        profile_iter->second.surface_y_by_column[column_index] + 1,
+        column.z * ChunkSize + LocalCenter,
+    }};
+    if (category == SpawnCategory::Water) {
+      representative.value.y =
+          profile_iter->second.surface_y_by_column[column_index];
+    }
+    if (!has_distance_to_player(
+            representative,
+            player_positions,
+            budget.spawn_area.min_distance_blocks,
+            budget.spawn_area.max_distance_blocks)) {
+      continue;
+    }
+    if (!planned_candidate_section_is_simulated(
+            request,
+            representative,
+            player_positions)) {
+      continue;
+    }
+
+    BudgetChunkGroup& group =
+        find_or_add_budget_group(groups, budget, table->modifiers);
+    group.chunks.push_back({column});
+  }
+  return groups;
+}
+
+[[nodiscard]] u32 count_natural_entities_in_columns(
+    const std::vector<NaturalSpawnEntitySnapshot>& entities,
+    SpawnCategory category,
+    const std::vector<PlannedEligibleChunk>& chunks,
+    std::string_view entry_id = {}) {
+  HashSet<ChunkCoord> columns;
+  for (const PlannedEligibleChunk& chunk : chunks) {
+    columns.insert(chunk.column);
+  }
+  u32 count = 0U;
+  for (const NaturalSpawnEntitySnapshot& entity : entities) {
+    if (entity.category != category ||
+        (!entry_id.empty() && entity.source_entry_id != entry_id)) {
+      continue;
+    }
+    if (columns.contains(chunk_column_for_position(entity.position))) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] u32 count_natural_entities_in_chunk_area(
+    const std::vector<NaturalSpawnEntitySnapshot>& entities,
+    SpawnCategory category,
+    ChunkCoord center,
+    i32 radius_chunks,
+    std::string_view entry_id = {}) {
+  u32 count = 0U;
+  for (const NaturalSpawnEntitySnapshot& entity : entities) {
+    if (entity.category != category ||
+        (!entry_id.empty() && entity.source_entry_id != entry_id)) {
+      continue;
+    }
+    const ChunkCoord column = chunk_column_for_position(entity.position);
+    if (std::abs(column.x - center.x) <= radius_chunks &&
+        std::abs(column.z - center.z) <= radius_chunks) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] u32 count_entry_near_players(
+    const std::vector<NaturalSpawnEntitySnapshot>& entities,
+    std::string_view entry_id,
+    const std::vector<Vec3f>& player_positions,
+    u32 radius_blocks) {
+  if (entry_id.empty()) {
+    return 0U;
+  }
+  const f32 radius = static_cast<f32>(radius_blocks);
+  const f32 radius_sq = radius * radius;
+  u32 count = 0U;
+  for (const NaturalSpawnEntitySnapshot& entity : entities) {
+    if (entity.source_entry_id != entry_id) {
+      continue;
+    }
+    for (const Vec3f player : player_positions) {
+      if (horizontal_distance_squared(entity.position, player) <= radius_sq) {
+        ++count;
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+[[nodiscard]] bool profile_caps_allow_spawn(
+    const std::vector<NaturalSpawnEntitySnapshot>& entities,
+    const SpawnBudgetProfileConfig& budget,
+    const SpawnEntry& entry,
+    BlockPos candidate,
+    const std::vector<Vec3f>& player_positions) {
+  (void)player_positions;
+  const ChunkCoord column = chunk_column_for_block(candidate);
+  if (count_natural_entities_in_chunk_area(
+          entities,
+          entry.category,
+          column,
+          0,
+          {}) >= budget.population.max_per_chunk) {
+    return false;
+  }
+  if (budget.population.max_per_3x3_chunks.has_value() &&
+      count_natural_entities_in_chunk_area(
+          entities,
+          entry.category,
+          column,
+          1,
+          {}) >= budget.population.max_per_3x3_chunks.value()) {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool entry_caps_allow_spawn(
+    const std::vector<NaturalSpawnEntitySnapshot>& entities,
+    const SpawnBudgetProfileConfig& budget,
+    const SpawnEntry& entry,
+    BlockPos candidate,
+    const std::vector<Vec3f>& player_positions) {
+  const ChunkCoord column = chunk_column_for_block(candidate);
+  if (entry.caps.max_per_chunk_area.has_value() &&
+      count_natural_entities_in_chunk_area(
+          entities,
+          entry.category,
+          column,
+          1,
+          entry.id) >= entry.caps.max_per_chunk_area.value()) {
+    return false;
+  }
+  if (entry.caps.max_near_player.has_value() &&
+      count_entry_near_players(
+          entities,
+          entry.id,
+          player_positions,
+          budget.spawn_area.max_distance_blocks) >= entry.caps.max_near_player.value()) {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] SpawnBudgetProfileConfig budget_for_entity_snapshot(
+    const NaturalSpawnJobRequest& request,
+    const NaturalSpawnEntitySnapshot& entity,
+    HashMap<ChunkCoord, worldgen::TerrainProfile>& profile_cache) {
+  if (request.dimension == nullptr || request.dimension->biomes.empty()) {
+    return default_budget_profile_for(entity.category, request.config);
+  }
+  const ChunkCoord column = chunk_column_for_position(entity.position);
+  auto profile_iter = profile_cache.find(column);
+  if (profile_iter == profile_cache.end()) {
+    profile_iter = profile_cache
+                       .emplace(
+                           column,
+                           worldgen::generate_terrain_profile(
+                               *request.dimension,
+                               request.generation_seed,
+                               column))
+                       .first;
+  }
+  const i32 local_x = floor_mod(
+      static_cast<i32>(std::floor(entity.position.x)),
+      ChunkSize);
+  const i32 local_z = floor_mod(
+      static_cast<i32>(std::floor(entity.position.z)),
+      ChunkSize);
+  const usize column_index = voxel::local_column_index({local_x, local_z});
+  const usize biome_index = std::min(
+      profile_iter->second.biome_by_column[column_index],
+      request.dimension->biomes.size() - 1U);
+  const std::string& biome_id = request.dimension->biomes[biome_index].raw.id;
+  const BiomeSpawnTable* table = request.rules.find_table(biome_id, entity.category);
+  if (table == nullptr || table->empty() || !table->has_budget) {
+    return default_budget_profile_for(entity.category, request.config);
+  }
+  return table->budget;
+}
+
+[[nodiscard]] bool entity_is_mounted_or_occupied(
+    const WorldRuntime& world,
+    EntityID entity) noexcept {
+  if (world.mounted_rideable(entity).has_value()) {
+    return true;
+  }
+  const entity::RideableComponent* rideable = world.find_entity_rideable(entity);
+  if (rideable == nullptr) {
+    return false;
+  }
+  for (const entity::Seat& seat : rideable->seats) {
+    if (seat.occupant != EntityID{}) {
+      return true;
+    }
+  }
+  return false;
+}
+
+[[nodiscard]] std::vector<NaturalSpawnEntitySnapshot> natural_entity_snapshots(
+    const WorldRuntime& world) {
+  std::vector<NaturalSpawnEntitySnapshot> out;
+  const std::vector<EntityID> ids = world.entity_ids();
+  out.reserve(ids.size());
+  for (const EntityID id : ids) {
+    const NaturalSpawnComponent* natural = world.find_entity_natural_spawn(id);
+    const entity::EntityTransform* transform = world.find_entity_transform(id);
+    if (natural == nullptr || transform == nullptr) {
+      continue;
+    }
+    out.push_back({id,
+                   natural->category,
+                   natural->source_entity_type,
+                   natural->source_entry_id,
+                   transform->position,
+                   natural->spawn_tick,
+                   natural->transient,
+                   world.entity_is_persistent(id),
+                   world.player_for_entity(id).has_value(),
+                   entity_is_mounted_or_occupied(world, id)});
+  }
+  return out;
+}
+
 [[nodiscard]] bool has_world_budget(
     const SpawnLoadSnapshot& load,
     SpawnCategory category,
@@ -286,6 +740,8 @@ void merge_planning_counters(
   target.rejected_category_cap += source.rejected_category_cap;
   target.rejected_world_cap += source.rejected_world_cap;
   target.rejected_local_density += source.rejected_local_density;
+  target.rejected_entry_cap += source.rejected_entry_cap;
+  target.rejected_credit += source.rejected_credit;
   target.rejected_conditions += source.rejected_conditions;
   target.rejected_group_failed += source.rejected_group_failed;
   target.rejected_no_generation_context += source.rejected_no_generation_context;
@@ -405,8 +861,11 @@ SpawnRuleRegistry SpawnRuleRegistry::build_from_dimension(
       const worldgen::BiomeSpawnCategoryConfig& config =
           biome.raw.spawn_categories[category_index];
       if (config.specified) {
-        tables.categories[category_index].rate_scale = config.rate_scale;
-        tables.categories[category_index].density_cap_scale = config.density_cap_scale;
+        tables.categories[category_index].budget = config.budget;
+        tables.categories[category_index].modifiers = config.modifiers;
+        tables.categories[category_index].has_budget = true;
+      } else {
+        tables.categories[category_index].budget = default_budget_profile_for(category);
       }
     }
     for (const worldgen::BiomeSpawnEntryConfig& raw_entry : biome.raw.spawns) {
@@ -443,6 +902,7 @@ SpawnRuleRegistry SpawnRuleRegistry::build_from_dimension(
       }
 
       SpawnEntry entry;
+      entry.id = raw_entry.id.empty() ? raw_entry.entity.id : raw_entry.id.id;
       entry.entity_type = type_id.value();
       entry.entity_type_name = type->name;
       entry.category = raw_entry.category;
@@ -450,6 +910,7 @@ SpawnRuleRegistry SpawnRuleRegistry::build_from_dimension(
       entry.min_group = raw_entry.min_group;
       entry.max_group = raw_entry.max_group;
       entry.conditions = convert_conditions(raw_entry.conditions);
+      entry.caps = raw_entry.caps;
       entry.persistent_by_default = type->persistent_by_default;
       entry.replicated_by_default = type->replicated_by_default;
       entry.authored_components = type->components;
@@ -474,6 +935,44 @@ const BiomeSpawnTable* SpawnRuleRegistry::find_table(
     }
   }
   return nullptr;
+}
+
+bool SpawnRuleRegistry::has_due_budget_tick(
+    TickIndex tick,
+    const NaturalSpawningConfig& config) const noexcept {
+  bool has_spawn_entries = false;
+  for (const BiomeTables& tables : tables_) {
+    for (const BiomeSpawnTable& table : tables.categories) {
+      if (table.empty()) {
+        continue;
+      }
+      has_spawn_entries = true;
+      const TickIndex interval = budget_tick_interval_for_table(table, config);
+      if (interval != 0U && tick % interval == 0U) {
+        return true;
+      }
+    }
+  }
+  if (!has_spawn_entries) {
+    const TickIndex interval = std::max<TickIndex>(config.interval_ticks, 1U);
+    return tick % interval == 0U;
+  }
+  return false;
+}
+
+TickIndex SpawnRuleRegistry::max_budget_tick_interval(
+    const NaturalSpawningConfig& config) const noexcept {
+  TickIndex max_interval = std::max<TickIndex>(config.interval_ticks, 1U);
+  for (const BiomeTables& tables : tables_) {
+    for (const BiomeSpawnTable& table : tables.categories) {
+      if (table.empty()) {
+        continue;
+      }
+      max_interval =
+          std::max(max_interval, budget_tick_interval_for_table(table, config));
+    }
+  }
+  return max_interval;
 }
 
 usize SpawnRuleRegistry::entry_count() const noexcept {
@@ -649,7 +1148,10 @@ void NaturalSpawnSystem::set_rules(SpawnRuleRegistry rules) {
 std::optional<NaturalSpawnJobRequest> NaturalSpawnSystem::make_job_request(
     const WorldRuntime& world,
     TickIndex tick) {
-  if (!config_.enabled || tick % config_.interval_ticks != 0U) {
+  if (!config_.enabled) {
+    return std::nullopt;
+  }
+  if (!rules_.has_due_budget_tick(tick, config_)) {
     return std::nullopt;
   }
 
@@ -661,6 +1163,7 @@ std::optional<NaturalSpawnJobRequest> NaturalSpawnSystem::make_job_request(
   request.rules = rules_;
   request.clock = world.clock();
   request.generation_seed = world.generation_seed();
+  request.credit_banks = credit_banks_;
   request.random_seed =
       rng_() ^
       (static_cast<u64>(tick) * 0x9E3779B97F4A7C15ULL) ^
@@ -699,11 +1202,13 @@ std::optional<NaturalSpawnJobRequest> NaturalSpawnSystem::make_job_request(
     request.natural_entities.push_back({entity_id,
                                         natural->category,
                                         natural->source_entity_type,
+                                        natural->source_entry_id,
                                         transform->position,
                                         natural->spawn_tick,
                                         natural->transient,
                                         world.entity_is_persistent(entity_id),
-                                        world.player_for_entity(entity_id).has_value()});
+                                        world.player_for_entity(entity_id).has_value(),
+                                        entity_is_mounted_or_occupied(world, entity_id)});
   }
 
   request.loaded_chunks = world.loaded_chunk_coords();
@@ -741,46 +1246,54 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
     return result;
   }
 
+  HashMap<ChunkCoord, worldgen::TerrainProfile> profile_cache;
   const std::vector<Vec3f> positions = player_positions(request.players);
+  result.credit_banks = request.credit_banks;
 
   for (const NaturalSpawnEntitySnapshot& entity : request.natural_entities) {
-    if (entity.player_owned) {
+    if (entity.player_owned || entity.mounted_or_occupied) {
       continue;
     }
-    const NaturalDespawnCategoryConfig& despawn =
-        request.config.despawning[spawn_category_index(entity.category)];
-    if (!despawn.natural_despawn) {
+    const SpawnBudgetProfileConfig budget =
+        budget_for_entity_snapshot(request, entity, profile_cache);
+    if (!budget.despawn.enabled) {
       continue;
     }
     if (request.tick < entity.spawn_tick ||
-        request.tick - entity.spawn_tick < despawn.min_lifetime_ticks) {
+        request.tick - entity.spawn_tick < budget.despawn.min_age_ticks) {
       continue;
     }
-    if (entity.persistent && !entity.transient) {
+    if (budget.despawn.exclude_persistent && (entity.persistent || !entity.transient)) {
       continue;
+    }
+    if (budget.despawn.only_if_over_soft_cap) {
+      const u32 category_count =
+          request.load.natural_by_category[spawn_category_index(entity.category)];
+      const u32 soft_cap =
+          budget.population.soft_cap_per_player *
+          static_cast<u32>(std::max<usize>(request.players.size(), 1U));
+      if (category_count <= soft_cap) {
+        continue;
+      }
     }
 
     const f32 nearest_sq = nearest_player_distance_sq(entity.position, positions);
-    const f32 hard = static_cast<f32>(despawn.hard_distance_blocks);
-    const f32 soft = static_cast<f32>(despawn.soft_distance_blocks);
-    bool should_despawn = false;
-    if (!std::isfinite(nearest_sq) || nearest_sq >= hard * hard) {
-      should_despawn = true;
-    } else if (nearest_sq >= soft * soft) {
-      should_despawn = ((request.tick + entity.id.value) % 4U) == 0U;
-    }
-    if (should_despawn) {
+    const f32 distance = static_cast<f32>(budget.despawn.distance_blocks);
+    if (!std::isfinite(nearest_sq) || nearest_sq >= distance * distance) {
       result.despawn_intents.push_back({entity.id,
                                         entity.category,
                                         entity.source_entity_type,
-                                        entity.spawn_tick});
+                                        entity.source_entry_id,
+                                        entity.spawn_tick,
+                                        budget.despawn.min_age_ticks,
+                                        budget.despawn.distance_blocks,
+                                        budget.despawn.exclude_persistent});
       ++result.counters.despawn_intents_generated;
     }
   }
 
   if (request.dimension == nullptr || request.dimension->biomes.empty()) {
-    if (request.config.attempts_per_player_per_category > 0U &&
-        !request.players.empty()) {
+    if (!request.players.empty()) {
       ++result.counters.rejected_no_generation_context;
     }
     result.worker_duration_us =
@@ -789,7 +1302,6 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
   }
 
   std::mt19937_64 rng{request.random_seed};
-  HashMap<ChunkCoord, worldgen::TerrainProfile> profile_cache;
   SpawnLoadSnapshot planning_load = request.load;
   std::vector<NaturalSpawnEntitySnapshot> planning_entities = request.natural_entities;
   u32 world_successes = 0U;
@@ -808,174 +1320,253 @@ NaturalSpawnJobResult NaturalSpawnSystem::build_job_result(
       continue;
     }
 
+    HashSet<ChunkCoord> claimed_columns;
     for (const NaturalSpawnPlayerSnapshot& player : request.players) {
       if (world_successes >= request.config.max_successes_per_world_per_tick) {
         break;
       }
 
-      u32 player_successes = 0U;
-      for (u32 attempt = 0; attempt < request.config.attempts_per_player_per_category; ++attempt) {
-        if (player_successes >= request.config.max_successes_per_player_per_tick ||
-            world_successes >= request.config.max_successes_per_world_per_tick) {
-          break;
+      std::vector<BudgetChunkGroup> groups = collect_budget_chunk_groups(
+          request,
+          player,
+          category,
+          positions,
+          profile_cache,
+          claimed_columns);
+      for (BudgetChunkGroup& group : groups) {
+        for (const PlannedEligibleChunk& chunk : group.chunks) {
+          claimed_columns.insert(chunk.column);
+        }
+        const SpawnBudgetProfileConfig& budget = group.budget;
+        if (budget.tick_interval == 0U || request.tick % budget.tick_interval != 0U) {
+          continue;
         }
 
-        ++result.counters.attempts_total;
-        ++result.counters.attempts_last_interval;
+        const u32 existing_in_area = count_natural_entities_in_columns(
+            planning_entities,
+            category,
+            group.chunks);
+        const u32 target = target_population_for_budget(
+            budget,
+            group.modifiers,
+            static_cast<u32>(group.chunks.size()),
+            1U);
+        const u32 hard_cap = budget.population.hard_cap_per_player;
+        NaturalSpawnCreditSnapshot& bank = find_or_add_credit_bank(
+            result.credit_banks,
+            player.id,
+            category,
+            budget.id);
+        if (existing_in_area >= hard_cap) {
+          bank.credits = 0.0F;
+          ++result.counters.rejected_category_cap;
+          continue;
+        }
+        if (existing_in_area >= target) {
+          bank.credits = clamped_credit_bank(bank.credits, budget.credit);
+          ++result.counters.rejected_category_cap;
+          continue;
+        }
+        bank.credits = clamped_credit_bank(
+            bank.credits + budget.credit.refill_per_interval,
+            budget.credit);
+        if (bank.credits < budget.credit.spend_per_group_attempt) {
+          ++result.counters.rejected_credit;
+          continue;
+        }
 
-        const i32 min_distance =
-            static_cast<i32>(request.config.min_distance_from_player_blocks);
-        const i32 max_distance =
-            static_cast<i32>(request.config.max_distance_from_player_blocks);
-        std::uniform_int_distribution<i32> offset_dist(-max_distance, max_distance);
-        i32 dx = 0;
-        i32 dz = 0;
-        for (u32 tries = 0; tries < 8U; ++tries) {
-          dx = offset_dist(rng);
-          dz = offset_dist(rng);
-          const i32 distance_sq = dx * dx + dz * dz;
-          if (distance_sq >= min_distance * min_distance &&
-              distance_sq <= max_distance * max_distance) {
+        u32 group_successes = 0U;
+        for (u32 attempt = 0; attempt < budget.attempts_per_interval; ++attempt) {
+          if (group_successes >= budget.max_successes_per_interval ||
+              world_successes >= request.config.max_successes_per_world_per_tick ||
+              bank.credits < budget.credit.spend_per_group_attempt) {
             break;
           }
-        }
+          const u32 current_in_area = count_natural_entities_in_columns(
+              planning_entities,
+              category,
+              group.chunks);
+          if (current_in_area >= hard_cap) {
+            bank.credits = 0.0F;
+            ++result.counters.rejected_category_cap;
+            break;
+          }
+          if (current_in_area >= target) {
+            ++result.counters.rejected_category_cap;
+            break;
+          }
 
-        const i32 world_x = static_cast<i32>(std::floor(player.position.x)) + dx;
-        const i32 world_z = static_cast<i32>(std::floor(player.position.z)) + dz;
-        const ChunkCoord column{
-            floor_div(world_x, ChunkSize),
-            floor_div(world_z, ChunkSize)};
-        auto profile_iter = profile_cache.find(column);
-        if (profile_iter == profile_cache.end()) {
-          profile_iter = profile_cache
-                             .emplace(
-                                 column,
-                                 worldgen::generate_terrain_profile(
-                                     *request.dimension,
-                                     request.generation_seed,
-                                     column))
-                             .first;
-        }
+          ++result.counters.attempts_total;
+          ++result.counters.attempts_last_interval;
+          bank.credits -= budget.credit.spend_per_group_attempt;
 
-        const BlockPos candidate = pick_planned_candidate_near_player(
-            player,
-            category,
-            profile_iter->second,
-            column,
-            rng);
-        if (!has_distance_to_player(
-                candidate,
-                positions,
-                request.config.min_distance_from_player_blocks,
-                request.config.max_distance_from_player_blocks)) {
-          ++result.counters.rejected_conditions;
-          continue;
-        }
-
-        const ChunkSectionCoord section = block_to_chunk(candidate);
-        if (!contains_chunk_section(request.loaded_chunks, section)) {
-          ++result.counters.rejected_chunk_not_loaded;
-          continue;
-        }
-        if (!planned_candidate_section_is_simulated(request, candidate, positions)) {
-          ++result.counters.rejected_chunk_not_simulated;
-          continue;
-        }
-
-        const i32 local_x = floor_mod(candidate.value.x, ChunkSize);
-        const i32 local_z = floor_mod(candidate.value.z, ChunkSize);
-        const usize column_index = voxel::local_column_index({local_x, local_z});
-        const usize biome_index = std::min(
-            profile_iter->second.biome_by_column[column_index],
-            request.dimension->biomes.size() - 1U);
-        const std::string& biome_id = request.dimension->biomes[biome_index].raw.id;
-        const BiomeSpawnTable* table = request.rules.find_table(biome_id, category);
-        if (table == nullptr || table->empty()) {
-          ++result.counters.rejected_no_biome_table;
-          continue;
-        }
-        if (table->rate_scale < 1.0F) {
-          std::uniform_real_distribution<f32> rate_dist(0.0F, 1.0F);
-          if (rate_dist(rng) >= table->rate_scale) {
+          if (group.chunks.empty()) {
+            ++result.counters.rejected_no_biome_table;
+            continue;
+          }
+          const PlannedEligibleChunk& picked_chunk =
+              group.chunks[std::uniform_int_distribution<usize>(
+                  0U,
+                  group.chunks.size() - 1U)(rng)];
+          auto profile_iter = profile_cache.find(picked_chunk.column);
+          if (profile_iter == profile_cache.end()) {
+            ++result.counters.rejected_no_generation_context;
+            continue;
+          }
+          const BlockPos candidate = pick_planned_candidate_near_player(
+              player,
+              category,
+              profile_iter->second,
+              picked_chunk.column,
+              rng);
+          if (!has_distance_to_player(
+                  candidate,
+                  positions,
+                  budget.spawn_area.min_distance_blocks,
+                  budget.spawn_area.max_distance_blocks)) {
             ++result.counters.rejected_conditions;
             continue;
           }
-        }
-
-        std::uniform_int_distribution<u32> weight_dist(0U, table->total_weight - 1U);
-        const SpawnEntry* entry = table->weighted_pick(weight_dist(rng));
-        if (entry == nullptr) {
-          ++result.counters.rejected_no_biome_table;
-          continue;
-        }
-        u32 global_remaining = remaining_natural_entity_budget(planning_load, request.config);
-        if (global_remaining == 0U) {
-          ++result.counters.rejected_world_cap;
-          break;
-        }
-        if (!has_world_budget(
-                planning_load,
-                category,
-                request.players.size(),
-                request.config)) {
-          ++result.counters.rejected_world_cap;
-          continue;
-        }
-        if (!has_local_budget(
-                planning_entities,
-                candidate,
-                category,
-                entry->entity_type,
-                request.config,
-                table->density_cap_scale)) {
-          ++result.counters.rejected_local_density;
-          continue;
-        }
-        if (!time_conditions_pass(entry->conditions, request.clock)) {
-          ++result.counters.rejected_conditions;
-          continue;
-        }
-
-        std::uniform_int_distribution<u32> group_dist(entry->min_group, entry->max_group);
-        const u32 desired_count = std::min(group_dist(rng), global_remaining);
-        NaturalSpawnIntent intent;
-        intent.entry = *entry;
-        intent.positions.reserve(desired_count);
-        for (u32 index = 0; index < desired_count; ++index) {
-          const BlockPos pos =
-              index == 0U ? candidate : pick_planned_group_member(candidate, rng);
-          if (std::find(intent.positions.begin(), intent.positions.end(), pos) !=
-              intent.positions.end()) {
+          const ChunkSectionCoord section = block_to_chunk(candidate);
+          if (!contains_chunk_section(request.loaded_chunks, section)) {
+            ++result.counters.rejected_chunk_not_loaded;
             continue;
           }
-          intent.positions.push_back(pos);
-        }
-        if (intent.positions.size() < entry->min_group) {
-          ++result.counters.rejected_group_failed;
-          continue;
-        }
+          if (!planned_candidate_section_is_simulated(request, candidate, positions)) {
+            ++result.counters.rejected_chunk_not_simulated;
+            continue;
+          }
 
-        const usize category_index = spawn_category_index(category);
-        planning_load.natural_by_category[category_index] +=
-            static_cast<u32>(intent.positions.size());
-        planning_load.total_by_category[category_index] +=
-            static_cast<u32>(intent.positions.size());
-        for (const BlockPos pos : intent.positions) {
-          planning_entities.push_back({{},
-                                       category,
-                                       entry->entity_type,
-                                       block_floor_center(pos),
-                                       request.tick,
-                                       true,
-                                       false,
-                                       false});
-        }
+          const i32 local_x = floor_mod(candidate.value.x, ChunkSize);
+          const i32 local_z = floor_mod(candidate.value.z, ChunkSize);
+          const usize column_index = voxel::local_column_index({local_x, local_z});
+          const usize biome_index = std::min(
+              profile_iter->second.biome_by_column[column_index],
+              request.dimension->biomes.size() - 1U);
+          const std::string& biome_id = request.dimension->biomes[biome_index].raw.id;
+          const BiomeSpawnTable* table = request.rules.find_table(biome_id, category);
+          if (table == nullptr || table->empty()) {
+            ++result.counters.rejected_no_biome_table;
+            continue;
+          }
 
-        result.counters.spawn_intents_generated +=
-            static_cast<u64>(intent.positions.size());
-        result.spawn_intents.push_back(std::move(intent));
-        ++player_successes;
-        ++world_successes;
+          std::uniform_int_distribution<u32> weight_dist(0U, table->total_weight - 1U);
+          const SpawnEntry* entry = table->weighted_pick(weight_dist(rng));
+          if (entry == nullptr) {
+            ++result.counters.rejected_no_biome_table;
+            continue;
+          }
+          u32 global_remaining = remaining_natural_entity_budget(planning_load, request.config);
+          if (global_remaining == 0U) {
+            ++result.counters.rejected_world_cap;
+            break;
+          }
+          if (!has_world_budget(
+                  planning_load,
+                  category,
+                  request.players.size(),
+                  request.config)) {
+            ++result.counters.rejected_world_cap;
+            continue;
+          }
+          if (!profile_caps_allow_spawn(
+                  planning_entities,
+                  budget,
+                  *entry,
+                  candidate,
+                  positions)) {
+            ++result.counters.rejected_local_density;
+            continue;
+          }
+          if (!entry_caps_allow_spawn(
+                  planning_entities,
+                  budget,
+                  *entry,
+                  candidate,
+                  positions)) {
+            ++result.counters.rejected_entry_cap;
+            continue;
+          }
+          if (!time_conditions_pass(entry->conditions, request.clock)) {
+            ++result.counters.rejected_conditions;
+            continue;
+          }
+
+          std::uniform_int_distribution<u32> group_dist(entry->min_group, entry->max_group);
+          const f32 affordable_entities_f =
+              std::floor(bank.credits / budget.credit.spend_per_entity_spawned);
+          const u32 affordable_entities =
+              affordable_entities_f <= 0.0F ? 0U : static_cast<u32>(affordable_entities_f);
+          const u32 desired_count =
+              std::min({group_dist(rng), global_remaining, affordable_entities});
+          if (desired_count < entry->min_group) {
+            ++result.counters.rejected_credit;
+            continue;
+          }
+
+          NaturalSpawnIntent intent;
+          intent.entry = *entry;
+          intent.budget = budget;
+          intent.positions.reserve(desired_count);
+          for (u32 index = 0; index < desired_count; ++index) {
+            const BlockPos pos =
+                index == 0U ? candidate : pick_planned_group_member(candidate, rng);
+            if (std::find(intent.positions.begin(), intent.positions.end(), pos) !=
+                intent.positions.end()) {
+              continue;
+            }
+            if (!profile_caps_allow_spawn(
+                    planning_entities,
+                    budget,
+                    *entry,
+                    pos,
+                    positions)) {
+              continue;
+            }
+            if (!entry_caps_allow_spawn(
+                    planning_entities,
+                    budget,
+                    *entry,
+                    pos,
+                    positions)) {
+              continue;
+            }
+            intent.positions.push_back(pos);
+          }
+          if (intent.positions.size() < entry->min_group) {
+            ++result.counters.rejected_group_failed;
+            continue;
+          }
+
+          bank.credits = clamped_credit_bank(
+              bank.credits -
+                  budget.credit.spend_per_entity_spawned *
+                      static_cast<f32>(intent.positions.size()),
+              budget.credit);
+          const usize category_index = spawn_category_index(category);
+          planning_load.natural_by_category[category_index] +=
+              static_cast<u32>(intent.positions.size());
+          planning_load.total_by_category[category_index] +=
+              static_cast<u32>(intent.positions.size());
+          for (const BlockPos pos : intent.positions) {
+            planning_entities.push_back({{},
+                                         category,
+                                         entry->entity_type,
+                                         entry->id,
+                                         block_floor_center(pos),
+                                         request.tick,
+                                         true,
+                                         false,
+                                         false,
+                                         false});
+          }
+
+          result.counters.spawn_intents_generated +=
+              static_cast<u64>(intent.positions.size());
+          result.spawn_intents.push_back(std::move(intent));
+          ++group_successes;
+          ++world_successes;
+        }
       }
     }
   }
@@ -1018,8 +1609,17 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
     return stats;
   }
 
-  const TickIndex max_result_age =
-      std::max<TickIndex>(config_.interval_ticks * 2U, 1U);
+  TickIndex max_result_interval =
+      std::max<TickIndex>(
+          rules_.max_budget_tick_interval(config_),
+          std::max<TickIndex>(config_.interval_ticks, 1U));
+  for (const NaturalSpawnIntent& intent : result.spawn_intents) {
+    max_result_interval =
+        std::max(max_result_interval, intent.budget.tick_interval);
+  }
+  const TickIndex max_result_age = std::max<TickIndex>(
+      doubled_tick_interval(max_result_interval),
+      1U);
   if (result.world_id != world.id() ||
       tick < result.source_tick ||
       tick - result.source_tick > max_result_age) {
@@ -1029,12 +1629,19 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
         elapsed_microseconds(started, std::chrono::steady_clock::now());
     return stats;
   }
+  credit_banks_ = result.credit_banks;
 
   SpawnEvaluationContext context;
   context.block_registry = &block_registry;
   context.allow_loaded_candidate_sections_near_players = true;
   context.loaded_candidate_section_max_distance_blocks =
       config_.max_distance_from_player_blocks;
+  for (const NaturalSpawnIntent& intent : result.spawn_intents) {
+    context.loaded_candidate_section_max_distance_blocks =
+        std::max(
+            context.loaded_candidate_section_max_distance_blocks,
+            intent.budget.spawn_area.max_distance_blocks);
+  }
   const std::vector<PlayerID> player_ids = world.player_ids();
   context.player_positions.reserve(player_ids.size());
   for (const PlayerID player_id : player_ids) {
@@ -1050,16 +1657,16 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
     if (natural == nullptr ||
         natural->category != intent.category ||
         natural->source_entity_type != intent.source_entity_type ||
+        natural->source_entry_id != intent.source_entry_id ||
         natural->spawn_tick != intent.spawn_tick ||
-        world.player_for_entity(intent.entity).has_value()) {
+        world.player_for_entity(intent.entity).has_value() ||
+        entity_is_mounted_or_occupied(world, intent.entity)) {
       continue;
     }
-    const NaturalDespawnCategoryConfig& despawn_config =
-        config_.despawning[spawn_category_index(natural->category)];
-    if (!despawn_config.natural_despawn ||
-        tick < natural->spawn_tick ||
-        tick - natural->spawn_tick < despawn_config.min_lifetime_ticks ||
-        (world.entity_is_persistent(intent.entity) && !natural->transient)) {
+    if (tick < natural->spawn_tick ||
+        tick - natural->spawn_tick < intent.min_age_ticks ||
+        (intent.exclude_persistent &&
+         (world.entity_is_persistent(intent.entity) || !natural->transient))) {
       continue;
     }
     const entity::EntityTransform* transform =
@@ -1069,15 +1676,8 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
     }
     const f32 nearest_sq =
         nearest_player_distance_sq(transform->position, context.player_positions);
-    const f32 hard = static_cast<f32>(despawn_config.hard_distance_blocks);
-    const f32 soft = static_cast<f32>(despawn_config.soft_distance_blocks);
-    bool should_despawn = false;
-    if (!std::isfinite(nearest_sq) || nearest_sq >= hard * hard) {
-      should_despawn = true;
-    } else if (nearest_sq >= soft * soft) {
-      should_despawn = ((tick + intent.entity.value) % 4U) == 0U;
-    }
-    if (!should_despawn) {
+    const f32 distance = static_cast<f32>(intent.distance_blocks);
+    if (std::isfinite(nearest_sq) && nearest_sq < distance * distance) {
       continue;
     }
     const SpawnCategory category = natural->category;
@@ -1094,6 +1694,8 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
 
   load_tracker_.refresh(world);
   SpawnLoadSnapshot live_load = load_tracker_.snapshot();
+  std::vector<NaturalSpawnEntitySnapshot> live_entities =
+      natural_entity_snapshots(world);
   u32 committed_groups = 0U;
   for (const NaturalSpawnIntent& intent : result.spawn_intents) {
     if (intent.positions.empty() ||
@@ -1124,50 +1726,69 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
       ++counters_.rejected_world_cap;
       break;
     }
-    if (!load_tracker_.has_local_budget(
-            world,
+    if (!profile_caps_allow_spawn(
+            live_entities,
+            intent.budget,
+            intent.entry,
             root,
-            intent.entry.category,
-            intent.entry.entity_type,
-            config_)) {
+            context.player_positions)) {
       ++counters_.rejected_local_density;
+      continue;
+    }
+    if (!entry_caps_allow_spawn(
+            live_entities,
+            intent.budget,
+            intent.entry,
+            root,
+            context.player_positions)) {
+      ++counters_.rejected_entry_cap;
+      continue;
+    }
+    if (intent.positions.size() > global_remaining) {
+      ++counters_.rejected_world_cap;
       continue;
     }
 
     std::vector<BlockPos> valid_positions;
     valid_positions.reserve(intent.positions.size());
     for (const BlockPos pos : intent.positions) {
-      if (evaluator_.passes(
+      if (!evaluator_.passes(
               world,
               intent.entry,
               pos,
               intent.entry.category,
-              context)) {
-        valid_positions.push_back(pos);
+              context) ||
+          !profile_caps_allow_spawn(
+              live_entities,
+              intent.budget,
+              intent.entry,
+              pos,
+              context.player_positions) ||
+          !entry_caps_allow_spawn(
+              live_entities,
+              intent.budget,
+              intent.entry,
+              pos,
+              context.player_positions)) {
+        continue;
       }
+      valid_positions.push_back(pos);
     }
     if (valid_positions.size() < intent.entry.min_group) {
       ++counters_.rejected_group_failed;
       continue;
     }
-    if (valid_positions.size() > global_remaining) {
-      valid_positions.resize(global_remaining);
-      if (valid_positions.size() < intent.entry.min_group) {
-        ++counters_.rejected_group_failed;
-        continue;
-      }
-    }
 
-    const NaturalDespawnCategoryConfig& despawn_config =
-        config_.despawning[spawn_category_index(intent.entry.category)];
-    const bool transient = !despawn_config.save_transient;
+    const bool transient =
+        intent.budget.despawn.enabled || intent.budget.despawn.exclude_persistent;
     u32 spawned = 0U;
     for (const BlockPos pos : valid_positions) {
       EntityCreateInfo info;
       info.type_id = intent.entry.entity_type;
       info.type_name = intent.entry.entity_type_name;
       info.position = block_floor_center(pos);
-      info.persistent = !transient && intent.entry.persistent_by_default;
+      const bool persistent = !transient && intent.entry.persistent_by_default;
+      info.persistent = persistent;
       info.replicated = intent.entry.replicated_by_default;
       info.authored_components = intent.entry.authored_components;
       info.vehicle_definitions = vehicle_definitions;
@@ -1175,10 +1796,24 @@ NaturalSpawnApplyStats NaturalSpawnSystem::apply_job_result(
       if (!world.entity_exists(entity) ||
           !world.set_entity_natural_spawn(
               entity,
-              {intent.entry.category, intent.entry.entity_type, tick, transient})) {
+              {intent.entry.category,
+               intent.entry.entity_type,
+               intent.entry.id,
+               tick,
+               transient})) {
         ++counters_.rejected_entity_creation_failed;
         continue;
       }
+      live_entities.push_back({entity,
+                               intent.entry.category,
+                               intent.entry.entity_type,
+                               intent.entry.id,
+                               block_floor_center(pos),
+                               tick,
+                               transient,
+                               persistent,
+                               false,
+                               false});
       ++spawned;
     }
 
@@ -1329,14 +1964,6 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     ++counters_.rejected_no_biome_table;
     return 0U;
   }
-  if (table->rate_scale < 1.0F) {
-    std::uniform_real_distribution<f32> rate_dist(0.0F, 1.0F);
-    if (rate_dist(rng_) >= table->rate_scale) {
-      ++counters_.rejected_conditions;
-      return 0U;
-    }
-  }
-
   std::uniform_int_distribution<u32> weight_dist(0U, table->total_weight - 1U);
   const SpawnEntry* entry = table->weighted_pick(weight_dist(rng_));
   if (entry == nullptr) {
@@ -1347,14 +1974,26 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     ++counters_.rejected_world_cap;
     return 0U;
   }
-  if (!load_tracker_.has_local_budget(
-          world,
+  const SpawnBudgetProfileConfig budget =
+      table->has_budget ? table->budget : default_budget_profile_for(category);
+  const std::vector<NaturalSpawnEntitySnapshot> live_entities =
+      natural_entity_snapshots(world);
+  if (!profile_caps_allow_spawn(
+          live_entities,
+          budget,
+          *entry,
           candidate,
-          category,
-          entry->entity_type,
-          config_,
-          table->density_cap_scale)) {
+          context.player_positions)) {
     ++counters_.rejected_local_density;
+    return 0U;
+  }
+  if (!entry_caps_allow_spawn(
+          live_entities,
+          budget,
+          *entry,
+          candidate,
+          context.player_positions)) {
+    ++counters_.rejected_entry_cap;
     return 0U;
   }
   if (!evaluator_.passes(world, *entry, candidate, category, context)) {
@@ -1362,7 +2001,7 @@ u32 NaturalSpawnSystem::attempt_spawn_near_player(
     return 0U;
   }
 
-  return spawn_group(world, *entry, vehicle_definitions, candidate, context, tick);
+  return spawn_group(world, *entry, vehicle_definitions, candidate, context, budget, tick);
 }
 
 u32 NaturalSpawnSystem::spawn_group(
@@ -1371,6 +2010,7 @@ u32 NaturalSpawnSystem::spawn_group(
     const entity::VehicleDefinitionRegistry* vehicle_definitions,
     BlockPos root,
     const SpawnEvaluationContext& context,
+    const SpawnBudgetProfileConfig& budget,
     TickIndex tick) {
   std::uniform_int_distribution<u32> group_dist(entry.min_group, entry.max_group);
   const u32 desired_count = group_dist(rng_);
@@ -1393,9 +2033,7 @@ u32 NaturalSpawnSystem::spawn_group(
   }
 
   u32 spawned = 0U;
-  const NaturalDespawnCategoryConfig& despawn_config =
-      config_.despawning[spawn_category_index(entry.category)];
-  const bool transient = !despawn_config.save_transient;
+  const bool transient = budget.despawn.enabled || budget.despawn.exclude_persistent;
   for (const BlockPos pos : valid_positions) {
     EntityCreateInfo info;
     info.type_id = entry.entity_type;
@@ -1409,7 +2047,7 @@ u32 NaturalSpawnSystem::spawn_group(
     if (!world.entity_exists(entity) ||
         !world.set_entity_natural_spawn(
             entity,
-            {entry.category, entry.entity_type, tick, transient})) {
+            {entry.category, entry.entity_type, entry.id, tick, transient})) {
       ++counters_.rejected_entity_creation_failed;
       continue;
     }

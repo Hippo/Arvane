@@ -1256,10 +1256,12 @@ candidate biome from the active dimension terrain profile, and looks up the
 biome's spawn table for the sampled category.
 
 Biome spawn data is resolved from reusable worldgen spawn tables plus
-biome-local modifiers. Table entry weights only choose between entries after a
-candidate reaches a biome/category. Biome `rate_scale` lowers how often
-candidate attempts proceed in that biome, and `density_cap_scale` lowers the
-local natural entity cap for sparse or fragile biomes.
+biome-local budget references. Table entry weights only choose between entries
+after a candidate reaches a biome/category. Spawn budget profiles control how
+often attempts run, how many attempts and successes are allowed, the eligible
+spawn area, population targets, local caps, credit refill/spend, and natural
+despawn rules. Biome `density_multiplier` and `soft_cap_multiplier` adjust the
+referenced profile without copying full budget data into every biome.
 
 Natural spawning must not create chunk residency pressure. A candidate is valid
 only when its target chunk section is already loaded and either active or
@@ -1271,61 +1273,73 @@ generation, load missing chunks, or keep chunks alive.
 
 Work is bounded by:
 
-- `interval_ticks`
-- attempts per player and category
-- per-player and per-world success budgets
-- per-category caps
-- local density caps
+- profile `tick_interval`
+- profile `attempts_per_interval`
+- profile `max_successes_per_interval`
+- profile soft/hard/density population targets
+- profile per-chunk and 3x3 chunk caps
+- optional entry caps
+- global `max_natural_entities`
 
 Spawned entities are created through the world entity API using the authored
 entity type's components, replication defaults, and persistence defaults. Each
 natural entity also receives a natural-spawn marker containing its spawn
-category, source entity type, spawn tick, and transient flag.
+category, source entity type, source spawn entry ID, spawn tick, and transient
+flag.
 
 Natural despawning applies only to entities with that natural-spawn marker.
-Player-owned entities are ignored. Persistent natural entities that are not
-marked transient are kept by despawn passes. Transient natural entities are
-omitted from entity persistence even when the underlying entity type would
-normally be persistent.
+Player-owned entities, mounted or occupied rideables, command-spawned entities
+without a natural marker, and persistent natural entities excluded by the
+profile are ignored. Transient natural entities are omitted from entity
+persistence even when the underlying entity type would normally be persistent.
 
 Example configuration:
 
 ```yaml
-natural_spawning:
+data/arvane/worldgen/spawn_budget_profile/passive_conservative.yaml:
+
+category: passive
+tick_interval: 200
+attempts_per_interval: 6
+max_successes_per_interval: 1
+
+spawn_area:
+  min_distance_blocks: 24
+  max_distance_blocks: 128
+  eligible_chunk_radius: 8
+
+population:
+  soft_cap_per_player: 12
+  hard_cap_per_player: 20
+  density_per_eligible_chunk: 0.12
+  max_per_chunk: 4
+  max_per_3x3_chunks: 10
+
+credit:
+  refill_per_interval: 2
+  max_bank: 8
+  spend_per_group_attempt: 1
+  spend_per_entity_spawned: 1
+
+despawn:
   enabled: true
-  interval_ticks: 10
-  min_distance_from_player_blocks: 24
-  max_distance_from_player_blocks: 96
-  attempts_per_player_per_category: 24
-  max_successes_per_player_per_tick: 6
-  max_successes_per_world_per_tick: 48
-  max_natural_entities: 100
-  local_density_radius_blocks: 32
-  caps:
-    passive:
-      per_player: 48
-      per_world_soft: 1024
-      local_max: 24
-  despawning:
-    passive:
-      natural_despawn: false
-      soft_distance_blocks: 96
-      hard_distance_blocks: 160
-      min_lifetime_ticks: 600
-      save_transient: true
+  min_age_ticks: 12000
+  distance_blocks: 192
+  only_if_over_soft_cap: true
+  exclude_persistent: true
 ```
 
 The base passive pig and horse tables intentionally avoid a light-level
 condition for now so starter passive mobs are not blocked by newly generated or
 stale saved lighting. They require a standing surface tagged
 `arvane:spawn/grass_like`; replaceable non-fluid body/head blocks such as short
-grass do not block the spawn. Base biomes apply conservative passive
-`rate_scale` and `density_cap_scale` values so wildlife stays sparse rather
-than constantly clustering near players.
+grass do not block the spawn. Base biomes point passive spawning at the
+conservative passive budget profile and then apply small density/soft-cap
+modifiers so wildlife stays sparse rather than constantly clustering near
+players.
 
-The same category keys used by biome spawn tables are used by `caps` and
-`despawning`: `passive`, `hostile`, `ambient`, `water`, `underground`, and
-`special`.
+The same category keys used by biome spawn tables are used by budget profiles:
+`passive`, `hostile`, `ambient`, `water`, `underground`, and `special`.
 
 `max_natural_entities` is a global natural-spawn ceiling for the world. It
 limits entities created by the natural spawning system across all categories,

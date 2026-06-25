@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -49,9 +50,32 @@ std::shared_ptr<const arv::world::worldgen::ResolvedDimension> make_dimension(
 
   worldgen::BiomeConfig biome;
   biome.id = "arvane:bench/biome/plains";
+  auto& passive =
+      biome.spawn_categories[
+          arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)];
+  passive.specified = true;
+  passive.budget_profile = {"arvane:bench/spawn_budget_profile/passive"};
+  passive.budget = {};
+  passive.budget.id = passive.budget_profile.id;
+  passive.budget.category = arv::world::SpawnCategory::Passive;
+  passive.budget.tick_interval = 1U;
+  passive.budget.attempts_per_interval = 64U;
+  passive.budget.max_successes_per_interval = 8U;
+  passive.budget.spawn_area.min_distance_blocks = 0U;
+  passive.budget.spawn_area.max_distance_blocks = 64U;
+  passive.budget.spawn_area.eligible_chunk_radius = 8U;
+  passive.budget.population.soft_cap_per_player = 128U;
+  passive.budget.population.hard_cap_per_player = 1024U;
+  passive.budget.population.density_per_eligible_chunk = 2.0F;
+  passive.budget.population.max_per_chunk = 32U;
+  passive.budget.population.max_per_3x3_chunks = 128U;
+  passive.budget.credit.refill_per_interval = 128.0F;
+  passive.budget.credit.max_bank = 128.0F;
+  passive.budget.despawn.enabled = false;
   biome.spawns.reserve(entry_count);
   for (arv::u32 index = 0; index < entry_count; ++index) {
     worldgen::BiomeSpawnEntryConfig spawn;
+    spawn.id = {"arvane:bench_pig_" + std::to_string(index)};
     spawn.entity = {"arvane:bench_pig"};
     spawn.category = arv::world::SpawnCategory::Passive;
     spawn.weight = 1U + (index % 10U);
@@ -141,7 +165,11 @@ void add_existing_natural_entities(
     const arv::EntityID entity = world.create_entity(std::move(info));
     (void)world.set_entity_natural_spawn(
         entity,
-        {arv::world::SpawnCategory::Passive, type_id.value(), 0U, true});
+        {arv::world::SpawnCategory::Passive,
+         type_id.value(),
+         "arvane:bench_pig_existing",
+         0U,
+         true});
   }
 }
 

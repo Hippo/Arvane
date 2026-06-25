@@ -16,10 +16,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -96,6 +98,7 @@ arv::world::worldgen::BiomeSpawnEntryConfig make_spawn_config(
     arv::world::SpawnCategory category = arv::world::SpawnCategory::Passive,
     arv::u32 weight = 10U) {
   arv::world::worldgen::BiomeSpawnEntryConfig spawn;
+  spawn.id = {"test:" + entity.substr(entity.find(':') + 1) + "_grass"};
   spawn.entity = {std::move(entity)};
   spawn.category = category;
   spawn.weight = weight;
@@ -108,8 +111,38 @@ arv::world::worldgen::BiomeSpawnEntryConfig make_spawn_config(
   return spawn;
 }
 
+arv::world::SpawnBudgetProfileConfig make_test_budget_profile(
+    arv::world::SpawnCategory category = arv::world::SpawnCategory::Passive) {
+  arv::world::SpawnBudgetProfileConfig budget;
+  budget.id = "test:worldgen/spawn_budget_profile/" +
+              std::string{arv::world::spawn_category_name(category)};
+  budget.category = category;
+  budget.tick_interval = 1U;
+  budget.attempts_per_interval = 64U;
+  budget.max_successes_per_interval = 4U;
+  budget.spawn_area.min_distance_blocks = 0U;
+  budget.spawn_area.max_distance_blocks = 96U;
+  budget.spawn_area.eligible_chunk_radius = 8U;
+  budget.population.soft_cap_per_player = 32U;
+  budget.population.hard_cap_per_player = 64U;
+  budget.population.density_per_eligible_chunk = 1.0F;
+  budget.population.max_per_chunk = 8U;
+  budget.population.max_per_3x3_chunks = 32U;
+  budget.credit.refill_per_interval = 128.0F;
+  budget.credit.max_bank = 128.0F;
+  budget.credit.spend_per_group_attempt = 1.0F;
+  budget.credit.spend_per_entity_spawned = 1.0F;
+  budget.despawn.enabled = false;
+  budget.despawn.min_age_ticks = 0U;
+  budget.despawn.distance_blocks = 192U;
+  budget.despawn.only_if_over_soft_cap = false;
+  budget.despawn.exclude_persistent = true;
+  return budget;
+}
+
 std::shared_ptr<const arv::world::worldgen::ResolvedDimension> make_flat_spawn_dimension(
-    std::vector<arv::world::worldgen::BiomeSpawnEntryConfig> spawns = {}) {
+    std::vector<arv::world::worldgen::BiomeSpawnEntryConfig> spawns = {},
+    std::optional<arv::world::SpawnBudgetProfileConfig> budget_override = std::nullopt) {
   namespace worldgen = arv::world::worldgen;
 
   auto dimension = std::make_shared<worldgen::ResolvedDimension>();
@@ -130,6 +163,19 @@ std::shared_ptr<const arv::world::worldgen::ResolvedDimension> make_flat_spawn_d
   worldgen::BiomeConfig biome;
   biome.id = std::string{TestBiomeID};
   biome.spawns = std::move(spawns);
+  for (const worldgen::BiomeSpawnEntryConfig& spawn : biome.spawns) {
+    auto& category =
+        biome.spawn_categories[
+            arv::world::spawn_category_index(spawn.category)];
+    if (!category.specified) {
+      category.specified = true;
+      category.budget =
+          budget_override.has_value() && budget_override->category == spawn.category
+              ? budget_override.value()
+              : make_test_budget_profile(spawn.category);
+      category.budget_profile = {category.budget.id};
+    }
+  }
   dimension->biomes.push_back({std::move(biome), std::nullopt});
   return dimension;
 }
@@ -186,6 +232,7 @@ arv::world::SpawnEntry make_spawn_entry(
     throw std::runtime_error("test pig type record is missing");
   }
   arv::world::SpawnEntry entry;
+  entry.id = "test:pig_grass";
   entry.entity_type = type_id.value();
   entry.entity_type_name = type->name;
   entry.category = category;
@@ -271,6 +318,7 @@ arv::world::SpawnEntry make_spawn_vehicle_entry(
     throw std::runtime_error("test horse type record is missing");
   }
   arv::world::SpawnEntry entry;
+  entry.id = "test:horse_grass";
   entry.entity_type = type_id.value();
   entry.entity_type_name = type->name;
   entry.category = arv::world::SpawnCategory::Passive;
@@ -346,6 +394,34 @@ arv::world::worldgen::RegistryResult load_spawn_loader_fixture(
             "common.yaml",
         std::string{table_yaml});
   }
+  arv::testsupport::write_text(
+      packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "spawn_budget_profile" /
+          "passive.yaml",
+      "category: passive\n"
+      "tick_interval: 1\n"
+      "attempts_per_interval: 4\n"
+      "max_successes_per_interval: 1\n"
+      "spawn_area:\n"
+      "  min_distance_blocks: 0\n"
+      "  max_distance_blocks: 64\n"
+      "  eligible_chunk_radius: 4\n"
+      "population:\n"
+      "  soft_cap_per_player: 4\n"
+      "  hard_cap_per_player: 8\n"
+      "  density_per_eligible_chunk: 0.5\n"
+      "  max_per_chunk: 2\n"
+      "  max_per_3x3_chunks: 4\n"
+      "credit:\n"
+      "  refill_per_interval: 2\n"
+      "  max_bank: 4\n"
+      "  spend_per_group_attempt: 1\n"
+      "  spend_per_entity_spawned: 1\n"
+      "despawn:\n"
+      "  enabled: true\n"
+      "  min_age_ticks: 0\n"
+      "  distance_blocks: 64\n"
+      "  only_if_over_soft_cap: false\n"
+      "  exclude_persistent: true\n");
   arv::testsupport::write_text(
       packs_root / "bad_pack" / "data" / "bad" / "worldgen" / "biome" / "bad.yaml",
       "id: bad:worldgen/biome/bad\n"
@@ -461,6 +537,16 @@ void publish_generated_columns(
   }
 }
 
+arv::u32 count_natural_entities(const arv::world::WorldRuntime& world) {
+  arv::u32 count = 0U;
+  for (const arv::EntityID id : world.entity_ids()) {
+    if (world.find_entity_natural_spawn(id) != nullptr) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 } // namespace
 
 TEST(NaturalSpawnTypesTests, ParsesSpawnCategoriesAndTimePredicates) {
@@ -499,6 +585,26 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
   ASSERT_EQ(table->second.entries.size(), 2U);
   EXPECT_EQ(table->second.entries[0].id.id, "arvane:pig_grass");
   EXPECT_EQ(table->second.entries[1].id.id, "arvane:horse_grass");
+  EXPECT_EQ(table->second.entries[0].weight, 4U);
+  EXPECT_EQ(table->second.entries[1].weight, 1U);
+  EXPECT_EQ(table->second.entries[1].caps.max_near_player, 4U);
+  EXPECT_EQ(table->second.entries[1].caps.max_per_chunk_area, 2U);
+
+  const auto budget =
+      registry.value().spawn_budget_profiles.find(
+          "arvane:worldgen/spawn_budget_profile/passive_conservative");
+  ASSERT_NE(budget, registry.value().spawn_budget_profiles.end());
+  EXPECT_EQ(budget->second.category, arv::world::SpawnCategory::Passive);
+  EXPECT_EQ(budget->second.tick_interval, 200U);
+  EXPECT_EQ(budget->second.attempts_per_interval, 6U);
+  EXPECT_EQ(budget->second.max_successes_per_interval, 1U);
+  EXPECT_EQ(budget->second.population.soft_cap_per_player, 12U);
+  EXPECT_EQ(budget->second.population.hard_cap_per_player, 20U);
+  EXPECT_FLOAT_EQ(budget->second.population.density_per_eligible_chunk, 0.12F);
+  EXPECT_EQ(budget->second.population.max_per_chunk, 4U);
+  EXPECT_EQ(budget->second.population.max_per_3x3_chunks, 10U);
+  EXPECT_TRUE(budget->second.despawn.enabled);
+  EXPECT_EQ(budget->second.despawn.distance_blocks, 192U);
 
   const auto plains = registry.value().biomes.find("arvane:worldgen/biome/plains");
   ASSERT_NE(plains, registry.value().biomes.end());
@@ -507,8 +613,11 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
       plains->second.spawn_categories[
           arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)];
   EXPECT_TRUE(plains_passive.specified);
-  EXPECT_FLOAT_EQ(plains_passive.rate_scale, 0.35F);
-  EXPECT_FLOAT_EQ(plains_passive.density_cap_scale, 0.55F);
+  EXPECT_EQ(
+      plains_passive.budget_profile.id,
+      "arvane:worldgen/spawn_budget_profile/passive_conservative");
+  EXPECT_FLOAT_EQ(plains_passive.modifiers.density_multiplier, 1.0F);
+  EXPECT_FLOAT_EQ(plains_passive.modifiers.soft_cap_multiplier, 1.0F);
   const auto pig = std::find_if(
       plains->second.spawns.begin(),
       plains->second.spawns.end(),
@@ -518,7 +627,7 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(pig, plains->second.spawns.end());
-  EXPECT_EQ(pig->weight, 2U);
+  EXPECT_EQ(pig->weight, 4U);
   EXPECT_EQ(pig->min_group, 1U);
   EXPECT_EQ(pig->max_group, 2U);
   EXPECT_TRUE(pig->conditions.requires_surface);
@@ -532,7 +641,7 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
                spawn.category == arv::world::SpawnCategory::Passive;
       });
   ASSERT_NE(horse, plains->second.spawns.end());
-  EXPECT_EQ(horse->weight, 3U);
+  EXPECT_EQ(horse->weight, 2U);
   EXPECT_EQ(horse->min_group, 1U);
   EXPECT_EQ(horse->max_group, 1U);
   EXPECT_TRUE(horse->conditions.requires_surface);
@@ -561,10 +670,13 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
         biome->second.spawn_categories[
             arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)];
     EXPECT_TRUE(passive.specified) << biome_id;
-    EXPECT_GT(passive.rate_scale, 0.0F) << biome_id;
-    EXPECT_LE(passive.rate_scale, 0.35F) << biome_id;
-    EXPECT_GT(passive.density_cap_scale, 0.0F) << biome_id;
-    EXPECT_LE(passive.density_cap_scale, 0.55F) << biome_id;
+    EXPECT_EQ(
+        passive.budget_profile.id,
+        "arvane:worldgen/spawn_budget_profile/passive_conservative") << biome_id;
+    EXPECT_GT(passive.modifiers.density_multiplier, 0.0F) << biome_id;
+    EXPECT_LE(passive.modifiers.density_multiplier, 1.0F) << biome_id;
+    EXPECT_GT(passive.modifiers.soft_cap_multiplier, 0.0F) << biome_id;
+    EXPECT_LE(passive.modifiers.soft_cap_multiplier, 1.0F) << biome_id;
     const auto found_pig = std::find_if(
         biome->second.spawns.begin(),
         biome->second.spawns.end(),
@@ -601,8 +713,12 @@ TEST(NaturalSpawnLoaderTests, ParsesFirstPartyBiomeSpawnTables) {
   const arv::world::BiomeSpawnTable* plains_table =
       rules.find_table("arvane:worldgen/biome/plains", arv::world::SpawnCategory::Passive);
   ASSERT_NE(plains_table, nullptr);
-  EXPECT_FLOAT_EQ(plains_table->rate_scale, 0.35F);
-  EXPECT_FLOAT_EQ(plains_table->density_cap_scale, 0.55F);
+  EXPECT_TRUE(plains_table->has_budget);
+  EXPECT_EQ(
+      plains_table->budget.id,
+      "arvane:worldgen/spawn_budget_profile/passive_conservative");
+  EXPECT_FLOAT_EQ(plains_table->modifiers.density_multiplier, 1.0F);
+  EXPECT_FLOAT_EQ(plains_table->modifiers.soft_cap_multiplier, 1.0F);
 }
 
 TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnCategoryWithDiagnostic) {
@@ -645,10 +761,11 @@ TEST(NaturalSpawnLoaderTests, RejectsMissingSpawnTableReference) {
       "",
       "",
       "  passive:\n"
+      "    budget_profile: bad:worldgen/spawn_budget_profile/passive\n"
+      "    density_multiplier: 1.0\n"
+      "    soft_cap_multiplier: 1.0\n"
       "    use:\n"
       "      - table: bad:worldgen/spawn_table/missing\n"
-      "    rate_scale: 0.5\n"
-      "    density_cap_scale: 0.5\n"
       "    remove: []\n"
       "    add: []\n");
 
@@ -667,10 +784,11 @@ TEST(NaturalSpawnLoaderTests, RejectsMissingSpawnConditionReference) {
       "    weight: 1\n"
       "    conditions: bad:worldgen/spawn_condition/missing\n",
       "  passive:\n"
+      "    budget_profile: bad:worldgen/spawn_budget_profile/passive\n"
+      "    density_multiplier: 1.0\n"
+      "    soft_cap_multiplier: 1.0\n"
       "    use:\n"
       "      - table: bad:worldgen/spawn_table/common\n"
-      "    rate_scale: 0.5\n"
-      "    density_cap_scale: 0.5\n"
       "    remove: []\n"
       "    add: []\n");
 
@@ -691,10 +809,11 @@ TEST(NaturalSpawnLoaderTests, RejectsInvalidSpawnTableGroupRange) {
       "    max_group: 2\n"
       "    conditions: bad:worldgen/spawn_condition/grass\n",
       "  passive:\n"
+      "    budget_profile: bad:worldgen/spawn_budget_profile/passive\n"
+      "    density_multiplier: 1.0\n"
+      "    soft_cap_multiplier: 1.0\n"
       "    use:\n"
       "      - table: bad:worldgen/spawn_table/common\n"
-      "    rate_scale: 0.5\n"
-      "    density_cap_scale: 0.5\n"
       "    remove: []\n"
       "    add: []\n");
 
@@ -713,10 +832,11 @@ TEST(NaturalSpawnLoaderTests, RejectsEmptyResolvedBiomeSpawnList) {
       "    weight: 1\n"
       "    conditions: bad:worldgen/spawn_condition/grass\n",
       "  passive:\n"
+      "    budget_profile: bad:worldgen/spawn_budget_profile/passive\n"
+      "    density_multiplier: 1.0\n"
+      "    soft_cap_multiplier: 1.0\n"
       "    use:\n"
       "      - table: bad:worldgen/spawn_table/common\n"
-      "    rate_scale: 0.5\n"
-      "    density_cap_scale: 0.5\n"
       "    remove:\n"
       "      - bad:pig_grass\n"
       "    add: []\n");
@@ -865,7 +985,7 @@ TEST(NaturalSpawnLoadTests, EnforcesWorldAndLocalNaturalCaps) {
   const arv::EntityID entity = world.create_entity(std::move(info));
   ASSERT_TRUE(world.set_entity_natural_spawn(
       entity,
-      {arv::world::SpawnCategory::Passive, entry.entity_type, 0U, true}));
+      {arv::world::SpawnCategory::Passive, entry.entity_type, entry.id, 0U, true}));
 
   arv::world::NaturalSpawningConfig config;
   config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)].per_player = 1U;
@@ -926,7 +1046,7 @@ TEST(NaturalSpawnSystemTests, SpawnsMarkedNaturalEntitiesInLoadedActiveTerrain) 
     ++natural_count;
     EXPECT_EQ(natural->category, arv::world::SpawnCategory::Passive);
     EXPECT_EQ(natural->spawn_tick, 1U);
-    EXPECT_FALSE(natural->transient);
+    EXPECT_TRUE(natural->transient);
   }
   EXPECT_EQ(natural_count, system.counters().successes_total);
 }
@@ -968,6 +1088,161 @@ TEST(NaturalSpawnSystemTests, RespectsGlobalNaturalEntityCap) {
   EXPECT_GT(system.counters().rejected_world_cap, 0U);
 }
 
+TEST(NaturalSpawnSystemTests, BudgetDensityTargetIsClampedByHardCap) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.population.soft_cap_per_player = 1U;
+  budget.population.hard_cap_per_player = 3U;
+  budget.population.density_per_eligible_chunk = 10.0F;
+  budget.population.max_per_chunk = 8U;
+  budget.population.max_per_3x3_chunks = 32U;
+  budget.max_successes_per_interval = 8U;
+  budget.credit.refill_per_interval = 128.0F;
+  budget.credit.max_bank = 128.0F;
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)},
+      budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  world.ensure_player(arv::PlayerID{1}).position = {0.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.max_successes_per_world_per_tick = 16U;
+  config.max_natural_entities = 64U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  system.tick(world, blocks, entities, 1U);
+
+  EXPECT_EQ(count_natural_entities(world), 3U);
+  EXPECT_GT(system.counters().rejected_category_cap, 0U);
+}
+
+TEST(NaturalSpawnSystemTests, CreditsAccumulateWhenUnderBudgetAndStopAtTarget) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.population.soft_cap_per_player = 2U;
+  budget.population.hard_cap_per_player = 4U;
+  budget.population.density_per_eligible_chunk = 0.0F;
+  budget.max_successes_per_interval = 1U;
+  budget.credit.refill_per_interval = 2.0F;
+  budget.credit.max_bank = 2.0F;
+  budget.credit.spend_per_group_attempt = 1.0F;
+  budget.credit.spend_per_entity_spawned = 1.0F;
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)},
+      budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  world.ensure_player(arv::PlayerID{1}).position = {0.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.max_successes_per_world_per_tick = 8U;
+  config.max_natural_entities = 64U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  system.tick(world, blocks, entities, 1U);
+  EXPECT_EQ(count_natural_entities(world), 1U);
+  system.tick(world, blocks, entities, 2U);
+  EXPECT_EQ(count_natural_entities(world), 2U);
+  const arv::u64 attempts_after_target = system.counters().attempts_total;
+  system.tick(world, blocks, entities, 3U);
+
+  EXPECT_EQ(count_natural_entities(world), 2U);
+  EXPECT_EQ(system.counters().attempts_total, attempts_after_target);
+  EXPECT_GT(system.counters().rejected_category_cap, 0U);
+}
+
+TEST(NaturalSpawnSystemTests, EntryCapsLimitRareNaturalEntries) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.population.soft_cap_per_player = 8U;
+  budget.population.hard_cap_per_player = 8U;
+  budget.population.density_per_eligible_chunk = 0.0F;
+  budget.max_successes_per_interval = 8U;
+  budget.credit.refill_per_interval = 128.0F;
+  budget.credit.max_bank = 128.0F;
+  auto spawn = make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U);
+  spawn.caps.max_near_player = 1U;
+  const auto dimension = make_flat_spawn_dimension({spawn}, budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  world.ensure_player(arv::PlayerID{1}).position = {0.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.max_successes_per_world_per_tick = 16U;
+  config.max_natural_entities = 64U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  system.tick(world, blocks, entities, 1U);
+
+  EXPECT_EQ(count_natural_entities(world), 1U);
+  EXPECT_GT(system.counters().rejected_entry_cap, 0U);
+}
+
+TEST(NaturalSpawnSystemTests, DeterministicBudgetSimulationReportsCounters) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.population.soft_cap_per_player = 6U;
+  budget.population.hard_cap_per_player = 10U;
+  budget.population.density_per_eligible_chunk = 0.25F;
+  budget.max_successes_per_interval = 2U;
+  budget.credit.refill_per_interval = 8.0F;
+  budget.credit.max_bank = 16.0F;
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)},
+      budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  world.ensure_player(arv::PlayerID{1}).position = {0.0F, 1.0F, 0.0F};
+  world.ensure_player(arv::PlayerID{2}).position = {48.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.max_successes_per_world_per_tick = 16U;
+  config.max_natural_entities = 64U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  const auto started = std::chrono::steady_clock::now();
+  for (arv::TickIndex tick = 1U; tick <= 12U; ++tick) {
+    system.tick(world, blocks, entities, tick);
+  }
+  const auto elapsed_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - started)
+          .count();
+
+  const arv::world::NaturalSpawnCounters& counters = system.counters();
+  RecordProperty("attempts", static_cast<long long>(counters.attempts_total));
+  RecordProperty("successes", static_cast<long long>(counters.successes_total));
+  RecordProperty("final_natural_count", count_natural_entities(world));
+  RecordProperty("cap_rejections", static_cast<long long>(
+      counters.rejected_category_cap +
+      counters.rejected_world_cap +
+      counters.rejected_local_density +
+      counters.rejected_entry_cap));
+  RecordProperty("condition_rejections", static_cast<long long>(counters.rejected_conditions));
+  RecordProperty("elapsed_us", static_cast<long long>(elapsed_us));
+
+  EXPECT_GT(counters.attempts_total, 0U);
+  EXPECT_GT(counters.successes_total, 0U);
+  EXPECT_LE(count_natural_entities(world), budget.population.hard_cap_per_player * 2U);
+}
+
 TEST(NaturalSpawnJobTests, BuildsSpawnAndDespawnPlansWithoutMutatingWorld) {
   const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
   const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
@@ -985,7 +1260,7 @@ TEST(NaturalSpawnJobTests, BuildsSpawnAndDespawnPlansWithoutMutatingWorld) {
   const arv::EntityID transient_hostile = world.create_entity(std::move(info));
   ASSERT_TRUE(world.set_entity_natural_spawn(
       transient_hostile,
-      {arv::world::SpawnCategory::Hostile, entry.entity_type, 0U, true}));
+      {arv::world::SpawnCategory::Hostile, entry.entity_type, entry.id, 0U, true}));
   const arv::usize entity_count_before = world.entity_count();
 
   arv::world::NaturalSpawnSystem system;
@@ -1018,6 +1293,32 @@ TEST(NaturalSpawnJobTests, BuildsSpawnAndDespawnPlansWithoutMutatingWorld) {
   EXPECT_GT(result.counters.despawn_intents_generated, 0U);
   EXPECT_EQ(world.entity_count(), entity_count_before);
   EXPECT_TRUE(world.entity_exists(transient_hostile));
+}
+
+TEST(NaturalSpawnJobTests, ProfileTickIntervalGatesJobRequests) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.tick_interval = 20U;
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)},
+      budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 1.0F, 0.0F};
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  EXPECT_FALSE(system.make_job_request(world, 19U).has_value());
+  std::optional<arv::world::NaturalSpawnJobRequest> request =
+      system.make_job_request(world, 20U);
+  ASSERT_TRUE(request.has_value());
+  EXPECT_EQ(request->tick, 20U);
 }
 
 TEST(NaturalSpawnJobTests, SpawnsOnLoadedGroundWhenPlayerIsFlyingAboveSurface) {
@@ -1076,64 +1377,81 @@ TEST(NaturalSpawnSystemTests, PigsCanSpawnNearCurrentIntegratedSinglePlayerSeed)
   ASSERT_TRUE(rules.diagnostics().empty());
 
   constexpr arv::u64 CurrentSinglePlayerSeed = 32187121430964ULL;
-  const arv::Vec3f saved_player_position{
-      495.6519775390625F,
-      46.74935531616211F,
-      213.01556396484375F};
-  const arv::ChunkCoord center{
-      arv::floor_div(
-          static_cast<arv::i32>(std::floor(saved_player_position.x)),
-          arv::ChunkSize),
-      arv::floor_div(
-          static_cast<arv::i32>(std::floor(saved_player_position.z)),
-          arv::ChunkSize)};
+  struct SavedPositionCase {
+    const char* name;
+    arv::Vec3f position;
+    arv::TickIndex tick;
+  };
+  const std::array<SavedPositionCase, 3> saved_positions{{
+      {"older_regression_position",
+       {495.6519775390625F, 46.74935531616211F, 213.01556396484375F},
+       136000U},
+      {"current_Hippah_position",
+       {161.0006866455078F, 46.000999450683594F, 79.33663940429688F},
+       136200U},
+      {"current_Hippo_position",
+       {141.09474182128906F, 43.000999450683594F, -7.985311031341553F},
+       136400U},
+  }};
 
-  arv::world::WorldRuntime world{arv::WorldID{1}};
-  world.set_day_time_tick(33214U);
-  publish_generated_columns(world, dimension, CurrentSinglePlayerSeed, center, 5);
-  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
-  player.position = saved_player_position;
+  for (const SavedPositionCase& spawn_case : saved_positions) {
+    SCOPED_TRACE(spawn_case.name);
+    const arv::ChunkCoord center{
+        arv::floor_div(
+            static_cast<arv::i32>(std::floor(spawn_case.position.x)),
+            arv::ChunkSize),
+        arv::floor_div(
+            static_cast<arv::i32>(std::floor(spawn_case.position.z)),
+            arv::ChunkSize)};
 
-  arv::world::NaturalSpawnSystem system;
-  arv::world::NaturalSpawningConfig config;
-  config.interval_ticks = 1U;
-  config.min_distance_from_player_blocks = 24U;
-  config.max_distance_from_player_blocks = 64U;
-  config.attempts_per_player_per_category = 512U;
-  config.max_successes_per_player_per_tick = 8U;
-  config.max_successes_per_world_per_tick = 8U;
-  config.local_density_radius_blocks = 32U;
-  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
-      .per_player = 64U;
-  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
-      .per_world_soft = 256U;
-  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
-      .local_max = 32U;
-  system.configure(config);
-  system.set_rules(rules);
+    arv::world::WorldRuntime world{arv::WorldID{1}};
+    world.set_day_time_tick(44384U);
+    publish_generated_columns(world, dimension, CurrentSinglePlayerSeed, center, 5);
+    arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+    player.position = spawn_case.position;
 
-  system.tick(world, blocks, entities, 135940U);
+    arv::world::NaturalSpawnSystem system;
+    arv::world::NaturalSpawningConfig config;
+    config.interval_ticks = 1U;
+    config.min_distance_from_player_blocks = 24U;
+    config.max_distance_from_player_blocks = 64U;
+    config.attempts_per_player_per_category = 512U;
+    config.max_successes_per_player_per_tick = 8U;
+    config.max_successes_per_world_per_tick = 8U;
+    config.local_density_radius_blocks = 32U;
+    config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+        .per_player = 64U;
+    config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+        .per_world_soft = 256U;
+    config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+        .local_max = 32U;
+    system.configure(config);
+    system.set_rules(rules);
 
-  arv::u32 pig_count = 0U;
-  for (const arv::EntityID id : world.entity_ids()) {
-    const arv::world::NaturalSpawnComponent* natural =
-        world.find_entity_natural_spawn(id);
-    const arv::entity::EntityType* type = world.find_entity_type(id);
-    if (natural != nullptr && type != nullptr && type->type_name == "arvane:pig") {
-      ++pig_count;
+    arv::u32 pig_count = 0U;
+    for (arv::u32 interval = 0U; interval < 10U && pig_count == 0U; ++interval) {
+      system.tick(world, blocks, entities, spawn_case.tick + interval * 200U);
+      for (const arv::EntityID id : world.entity_ids()) {
+        const arv::world::NaturalSpawnComponent* natural =
+            world.find_entity_natural_spawn(id);
+        const arv::entity::EntityType* type = world.find_entity_type(id);
+        if (natural != nullptr && type != nullptr && type->type_name == "arvane:pig") {
+          ++pig_count;
+        }
+      }
     }
+    const arv::world::NaturalSpawnCounters& counters = system.counters();
+    EXPECT_GT(pig_count, 0U)
+        << "attempts=" << counters.attempts_total
+        << " intents=" << counters.spawn_intents_generated
+        << " committed=" << counters.spawn_intents_committed
+        << " no_table=" << counters.rejected_no_biome_table
+        << " conditions=" << counters.rejected_conditions
+        << " local_density=" << counters.rejected_local_density
+        << " group_failed=" << counters.rejected_group_failed
+        << " not_loaded=" << counters.rejected_chunk_not_loaded
+        << " not_simulated=" << counters.rejected_chunk_not_simulated;
   }
-  const arv::world::NaturalSpawnCounters& counters = system.counters();
-  EXPECT_GT(pig_count, 0U)
-      << "attempts=" << counters.attempts_total
-      << " intents=" << counters.spawn_intents_generated
-      << " committed=" << counters.spawn_intents_committed
-      << " no_table=" << counters.rejected_no_biome_table
-      << " conditions=" << counters.rejected_conditions
-      << " local_density=" << counters.rejected_local_density
-      << " group_failed=" << counters.rejected_group_failed
-      << " not_loaded=" << counters.rejected_chunk_not_loaded
-      << " not_simulated=" << counters.rejected_chunk_not_simulated;
 }
 
 TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {
@@ -1155,7 +1473,7 @@ TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {
   arv::world::NaturalSpawnJobResult stale;
   stale.world_id = world.id();
   stale.source_tick = 1U;
-  stale.spawn_intents.push_back({entry, {{{1, 1, 1}}}});
+  stale.spawn_intents.push_back({entry, make_test_budget_profile(), {{{1, 1, 1}}}});
   const arv::world::NaturalSpawnApplyStats stale_stats =
       system.apply_job_result(world, blocks, entities, stale, 8U);
   EXPECT_TRUE(stale_stats.stale);
@@ -1164,7 +1482,7 @@ TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {
   arv::world::NaturalSpawnJobResult blocked;
   blocked.world_id = world.id();
   blocked.source_tick = 8U;
-  blocked.spawn_intents.push_back({entry, {{{1, 1, 1}}}});
+  blocked.spawn_intents.push_back({entry, make_test_budget_profile(), {{{1, 1, 1}}}});
   const auto grass = blocks.find_variant("test:grass_block");
   ASSERT_TRUE(grass.has_value());
   ASSERT_TRUE(world.set_block({{1, 1, 1}}, grass.value()));
@@ -1175,10 +1493,80 @@ TEST(NaturalSpawnJobTests, ApplyRevalidatesBeforeCommittingSpawnIntents) {
   arv::world::NaturalSpawnJobResult valid;
   valid.world_id = world.id();
   valid.source_tick = 8U;
-  valid.spawn_intents.push_back({entry, {{{2, 1, 2}}}});
+  valid.spawn_intents.push_back({entry, make_test_budget_profile(), {{{2, 1, 2}}}});
   const arv::world::NaturalSpawnApplyStats valid_stats =
       system.apply_job_result(world, blocks, entities, valid, 8U);
   EXPECT_EQ(valid_stats.spawned, 1U);
+  EXPECT_EQ(system.counters().spawn_intents_committed, 1U);
+}
+
+TEST(NaturalSpawnJobTests, ApplyCommitsValidSubsetOfRevalidatedGroup) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::WorldRuntime world = make_spawn_world(blocks);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 1.0F, 0.0F};
+  const arv::world::SpawnEntry entry = make_spawn_entry(entities);
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 1U;
+  config.min_distance_from_player_blocks = 0U;
+  config.max_distance_from_player_blocks = 32U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+      .local_max = 4U;
+  system.configure(config);
+
+  const auto grass = blocks.find_variant("test:grass_block");
+  ASSERT_TRUE(grass.has_value());
+  ASSERT_TRUE(world.set_block({{1, 1, 1}}, grass.value()));
+
+  arv::world::NaturalSpawnJobResult mixed;
+  mixed.world_id = world.id();
+  mixed.source_tick = 8U;
+  mixed.spawn_intents.push_back(
+      {entry, make_test_budget_profile(), {{{2, 1, 2}, {1, 1, 1}}}});
+  const arv::world::NaturalSpawnApplyStats stats =
+      system.apply_job_result(world, blocks, entities, mixed, 8U);
+
+  EXPECT_EQ(stats.spawned, 1U);
+  EXPECT_EQ(system.counters().spawn_intents_committed, 1U);
+  EXPECT_EQ(system.counters().rejected_group_failed, 0U);
+}
+
+TEST(NaturalSpawnJobTests, ProfileTickIntervalKeepsAsyncResultsFresh) {
+  const arv::voxel::BlockRegistry blocks = make_spawn_block_registry();
+  const arv::entity::EntityRegistry entities = make_spawn_entity_registry();
+  arv::world::SpawnBudgetProfileConfig budget = make_test_budget_profile();
+  budget.tick_interval = 200U;
+  const auto dimension = make_flat_spawn_dimension(
+      {make_spawn_config("test:pig", arv::world::SpawnCategory::Passive, 20U)},
+      budget);
+  arv::world::WorldRuntime world = make_spawn_world(blocks, dimension);
+  arv::player::PlayerState& player = world.ensure_player(arv::PlayerID{1});
+  player.position = {0.0F, 1.0F, 0.0F};
+  const arv::world::SpawnEntry entry = make_spawn_entry(entities);
+
+  arv::world::NaturalSpawnSystem system;
+  arv::world::NaturalSpawningConfig config;
+  config.interval_ticks = 10U;
+  config.min_distance_from_player_blocks = 0U;
+  config.max_distance_from_player_blocks = 32U;
+  config.caps[arv::world::spawn_category_index(arv::world::SpawnCategory::Passive)]
+      .local_max = 4U;
+  system.configure(config);
+  system.set_rules(
+      arv::world::SpawnRuleRegistry::build_from_dimension(*dimension, entities, blocks));
+
+  arv::world::NaturalSpawnJobResult delayed;
+  delayed.world_id = world.id();
+  delayed.source_tick = 200U;
+  delayed.spawn_intents.push_back({entry, budget, {{{2, 1, 2}}}});
+  const arv::world::NaturalSpawnApplyStats stats =
+      system.apply_job_result(world, blocks, entities, delayed, 230U);
+
+  EXPECT_FALSE(stats.stale);
+  EXPECT_EQ(stats.spawned, 1U);
   EXPECT_EQ(system.counters().spawn_intents_committed, 1U);
 }
 
@@ -1202,7 +1590,7 @@ TEST(NaturalSpawnJobTests, ApplyVehicleSpawnIntentUsesVehicleDefinitions) {
   arv::world::NaturalSpawnJobResult valid;
   valid.world_id = world.id();
   valid.source_tick = 8U;
-  valid.spawn_intents.push_back({entry, {{{2, 1, 2}}}});
+  valid.spawn_intents.push_back({entry, make_test_budget_profile(), {{{2, 1, 2}}}});
   const arv::world::NaturalSpawnApplyStats stats =
       system.apply_job_result(world, blocks, entities, valid, 8U, false, &vehicles);
 
@@ -1362,15 +1750,15 @@ TEST(NaturalSpawnSystemTests, DespawnsTransientNaturalEntitiesButKeepsOthers) {
   const arv::EntityID transient_hostile = create_entity_at({200.0F, 1.0F, 200.0F}, false);
   ASSERT_TRUE(world.set_entity_natural_spawn(
       transient_hostile,
-      {arv::world::SpawnCategory::Hostile, entry.entity_type, 0U, true}));
+      {arv::world::SpawnCategory::Hostile, entry.entity_type, entry.id, 0U, true}));
   const arv::EntityID persistent_hostile = create_entity_at({220.0F, 1.0F, 200.0F}, true);
   ASSERT_TRUE(world.set_entity_natural_spawn(
       persistent_hostile,
-      {arv::world::SpawnCategory::Hostile, entry.entity_type, 0U, false}));
+      {arv::world::SpawnCategory::Hostile, entry.entity_type, entry.id, 0U, false}));
   const arv::EntityID passive = create_entity_at({240.0F, 1.0F, 200.0F}, true);
   ASSERT_TRUE(world.set_entity_natural_spawn(
       passive,
-      {arv::world::SpawnCategory::Passive, entry.entity_type, 0U, false}));
+      {arv::world::SpawnCategory::Passive, entry.entity_type, entry.id, 0U, false}));
   const arv::EntityID ordinary = create_entity_at({260.0F, 1.0F, 200.0F}, false);
 
   arv::world::NaturalSpawnSystem system;
@@ -1407,7 +1795,7 @@ TEST(NaturalSpawnPersistenceTests, FiltersTransientNaturalEntitiesFromSaveRecord
     const arv::EntityID entity = world.create_entity(std::move(info));
     EXPECT_TRUE(world.set_entity_natural_spawn(
         entity,
-        {arv::world::SpawnCategory::Passive, entry.entity_type, 0U, transient}));
+        {arv::world::SpawnCategory::Passive, entry.entity_type, entry.id, 0U, transient}));
     return entity;
   };
 

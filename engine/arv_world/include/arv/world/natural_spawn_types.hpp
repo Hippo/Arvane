@@ -6,6 +6,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace arv::world {
@@ -42,8 +43,61 @@ inline constexpr std::array<SpawnCategory, SpawnCategoryCount> AllSpawnCategorie
 struct NaturalSpawnComponent {
   SpawnCategory category{SpawnCategory::Passive};
   EntityTypeID source_entity_type{};
+  std::string source_entry_id{};
   TickIndex spawn_tick{};
   bool transient{true};
+};
+
+struct SpawnBudgetSpawnAreaConfig {
+  u32 min_distance_blocks{24};
+  u32 max_distance_blocks{128};
+  u32 eligible_chunk_radius{8};
+};
+
+struct SpawnBudgetPopulationConfig {
+  u32 soft_cap_per_player{12};
+  u32 hard_cap_per_player{20};
+  f32 density_per_eligible_chunk{0.12F};
+  u32 max_per_chunk{4};
+  std::optional<u32> max_per_3x3_chunks{10};
+};
+
+struct SpawnBudgetCreditConfig {
+  f32 refill_per_interval{2.0F};
+  f32 max_bank{8.0F};
+  f32 spend_per_group_attempt{1.0F};
+  f32 spend_per_entity_spawned{1.0F};
+};
+
+struct SpawnBudgetDespawnConfig {
+  bool enabled{true};
+  TickIndex min_age_ticks{12000};
+  u32 distance_blocks{192};
+  bool only_if_over_soft_cap{true};
+  bool exclude_persistent{true};
+};
+
+struct SpawnBudgetProfileConfig {
+  std::string id{};
+  u32 version{1};
+  SpawnCategory category{SpawnCategory::Passive};
+  TickIndex tick_interval{200};
+  u32 attempts_per_interval{6};
+  u32 max_successes_per_interval{1};
+  SpawnBudgetSpawnAreaConfig spawn_area{};
+  SpawnBudgetPopulationConfig population{};
+  SpawnBudgetCreditConfig credit{};
+  SpawnBudgetDespawnConfig despawn{};
+};
+
+struct SpawnBudgetBiomeModifiers {
+  f32 density_multiplier{1.0F};
+  f32 soft_cap_multiplier{1.0F};
+};
+
+struct SpawnEntryLocalCaps {
+  std::optional<u32> max_near_player{};
+  std::optional<u32> max_per_chunk_area{};
 };
 
 enum class TimePredicate : u8 {

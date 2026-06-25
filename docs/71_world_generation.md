@@ -1019,12 +1019,13 @@ spawns:
     use:
       - table: arvane:worldgen/spawn_table/temperate_passive
         weight_scale: 1.0
-    rate_scale: 0.35
-    density_cap_scale: 0.55
+    budget_profile: arvane:worldgen/spawn_budget_profile/passive_conservative
+    density_multiplier: 1.0
+    soft_cap_multiplier: 1.0
     remove: []
     overrides:
       arvane:horse_grass:
-        weight: 3
+        weight: 2
     add: []
 
 colors:
@@ -1148,7 +1149,8 @@ Biome features are only considered when the generated position belongs to the bi
 
 Optional natural entity spawn composition for the biome. Biomes do not contain
 the old inline-only spawn entry list. They compose reusable spawn tables and
-then apply local rate, density, remove, override, and add modifiers.
+then reference reusable spawn budget profiles plus local density/soft-cap
+modifiers, remove, override, and add modifiers.
 
 ```yaml
 spawns:
@@ -1156,12 +1158,13 @@ spawns:
     use:
       - table: arvane:worldgen/spawn_table/temperate_passive
         weight_scale: 1.0
-    rate_scale: 0.35
-    density_cap_scale: 0.55
+    budget_profile: arvane:worldgen/spawn_budget_profile/passive_conservative
+    density_multiplier: 1.0
+    soft_cap_multiplier: 1.0
     remove: []
     overrides:
       arvane:horse_grass:
-        weight: 3
+        weight: 2
     add: []
 ```
 
@@ -1181,8 +1184,9 @@ Biome category fields:
 | `use` | Ordered list of reusable spawn tables to import. |
 | `use[].table` | Spawn table resource ID. The table category must match the biome category. |
 | `use[].weight_scale` | Optional multiplier applied to imported entry weights before biome overrides. |
-| `rate_scale` | Per-biome/category spawn rate multiplier. Values below `1.0` make candidate attempts continue less often. |
-| `density_cap_scale` | Per-biome/category multiplier for the local natural entity density cap. |
+| `budget_profile` | Spawn budget profile resource ID. The profile category must match the biome category. |
+| `density_multiplier` | Optional multiplier for the profile's `density_per_eligible_chunk`. |
+| `soft_cap_multiplier` | Optional multiplier for the profile's `soft_cap_per_player`. |
 | `remove` | Spawn entry IDs to delete after all referenced tables are loaded. |
 | `overrides` | Map of spawn entry ID to local field overrides. Keys are entry IDs, not entity IDs. |
 | `add` | Biome-specific spawn entries appended after overrides. |
@@ -1206,7 +1210,7 @@ category: passive
 entries:
   - id: arvane:pig_grass
     entity: arvane:pig
-    weight: 2
+    weight: 4
     min_group: 1
     max_group: 2
     conditions: arvane:worldgen/spawn_condition/surface_grass_like
@@ -1214,8 +1218,53 @@ entries:
 
 Spawn table weights are relative only within the resolved biome category. They
 decide which entry is picked after an attempt reaches that biome/category.
-They do not control how often attempts are made; use biome `rate_scale` for
-frequency and `density_cap_scale` for local crowding.
+They do not control how often attempts are made, how many entities may exist,
+or when natural despawn is allowed; use spawn budget profiles for those limits.
+
+Spawn budget profile files live under:
+
+```text
+data/<namespace>/worldgen/spawn_budget_profile/<name>.yaml
+```
+
+Example:
+
+```yaml
+category: passive
+tick_interval: 200
+attempts_per_interval: 6
+max_successes_per_interval: 1
+
+spawn_area:
+  min_distance_blocks: 24
+  max_distance_blocks: 128
+  eligible_chunk_radius: 8
+
+population:
+  soft_cap_per_player: 12
+  hard_cap_per_player: 20
+  density_per_eligible_chunk: 0.12
+  max_per_chunk: 4
+  max_per_3x3_chunks: 10
+
+credit:
+  refill_per_interval: 2
+  max_bank: 8
+  spend_per_group_attempt: 1
+  spend_per_entity_spawned: 1
+
+despawn:
+  enabled: true
+  min_age_ticks: 12000
+  distance_blocks: 192
+  only_if_over_soft_cap: true
+  exclude_persistent: true
+```
+
+Budget profiles control category cadence, attempts, successes, eligible spawn
+area, target population, local caps, credit refill/spend, and natural despawn.
+Biome modifiers let a biome make the same profile denser/sparser without
+duplicating the full budget in every biome file.
 
 Reusable spawn condition files live under:
 
@@ -1241,6 +1290,8 @@ Entry fields:
 | `min_group` | Minimum number of entities required for a group spawn. |
 | `max_group` | Maximum group size. Must be greater than or equal to `min_group`. |
 | `conditions` | Optional reusable condition resource ID or inline placement predicates. |
+| `max_near_player` | Optional cap for this entry near players in the profile spawn radius. |
+| `max_per_chunk_area` | Optional cap for this entry in the candidate's 3x3 chunk area. |
 
 The referenced entity type must exist in the active entity registry and must be
 marked `spawnable: true`. Invalid entity references, non-spawnable entity

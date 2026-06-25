@@ -544,6 +544,8 @@ struct SpawnEntryOverrideConfig {
   std::optional<u8> min_group{};
   std::optional<u8> max_group{};
   std::optional<BiomeSpawnConditionConfig> conditions{};
+  std::optional<u32> max_near_player{};
+  std::optional<u32> max_per_chunk_area{};
 };
 
 [[nodiscard]] const BiomeSpawnConditionConfig* find_spawn_condition(
@@ -603,6 +605,28 @@ struct SpawnEntryOverrideConfig {
   return true;
 }
 
+[[nodiscard]] bool read_positive_optional_u32(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view field,
+    std::optional<u32>& out,
+    std::string_view field_prefix) {
+  if (parser.member(root, field) == nullptr) {
+    return true;
+  }
+  u32 value = 0U;
+  if (!parser.read_u32(root, field, value)) {
+    return false;
+  }
+  if (value == 0U) {
+    return parser.fail(
+        std::string{field_prefix} + "." + std::string{field},
+        "must be greater than zero");
+  }
+  out = value;
+  return true;
+}
+
 [[nodiscard]] bool parse_spawn_entry_config(
     Parser& parser,
     const io::DataValue& root,
@@ -611,13 +635,15 @@ struct SpawnEntryOverrideConfig {
     std::string_view field_prefix,
     BiomeSpawnEntryConfig& out,
     bool require_id) {
-  static constexpr std::array<std::string_view, 6> KnownFields{{
+  static constexpr std::array<std::string_view, 8> KnownFields{{
       "id",
       "entity",
       "weight",
       "min_group",
       "max_group",
       "conditions",
+      "max_near_player",
+      "max_per_chunk_area",
   }};
   if (!object_has_only_fields(parser, root, field_prefix, KnownFields)) {
     return false;
@@ -648,6 +674,20 @@ struct SpawnEntryOverrideConfig {
           out.conditions)) {
     return false;
   }
+  if (!read_positive_optional_u32(
+          parser,
+          root,
+          "max_near_player",
+          out.caps.max_near_player,
+          field_prefix) ||
+      !read_positive_optional_u32(
+          parser,
+          root,
+          "max_per_chunk_area",
+          out.caps.max_per_chunk_area,
+          field_prefix)) {
+    return false;
+  }
   return true;
 }
 
@@ -657,12 +697,14 @@ struct SpawnEntryOverrideConfig {
     const WorldGenRegistry& registry,
     std::string_view field_prefix,
     SpawnEntryOverrideConfig& out) {
-  static constexpr std::array<std::string_view, 5> KnownFields{{
+  static constexpr std::array<std::string_view, 7> KnownFields{{
       "entity",
       "weight",
       "min_group",
       "max_group",
       "conditions",
+      "max_near_player",
+      "max_per_chunk_area",
   }};
   if (!object_has_only_fields(parser, root, field_prefix, KnownFields)) {
     return false;
@@ -716,6 +758,20 @@ struct SpawnEntryOverrideConfig {
       return false;
     }
     out.conditions = std::move(parsed);
+  }
+  if (!read_positive_optional_u32(
+          parser,
+          root,
+          "max_near_player",
+          out.max_near_player,
+          field_prefix) ||
+      !read_positive_optional_u32(
+          parser,
+          root,
+          "max_per_chunk_area",
+          out.max_per_chunk_area,
+          field_prefix)) {
+    return false;
   }
   return true;
 }
@@ -816,6 +872,234 @@ struct SpawnTableUseConfig {
   return true;
 }
 
+[[nodiscard]] bool read_required_object(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view field,
+    const io::DataValue*& out) {
+  out = parser.member(root, field);
+  if (out == nullptr) {
+    return parser.fail(std::string{field}, "is required");
+  }
+  return parser.require_object(*out, field);
+}
+
+[[nodiscard]] bool validate_positive_finite(
+    Parser& parser,
+    f32 value,
+    std::string field) {
+  return std::isfinite(value) && value > 0.0F ||
+         parser.fail(std::move(field), "must be greater than zero");
+}
+
+[[nodiscard]] bool parse_spawn_budget_profile(
+    Parser& parser,
+    const io::DataValue& root,
+    std::string_view id,
+    SpawnBudgetProfileConfig& out) {
+  out.id = std::string{id};
+  if (!read_optional_common(parser, root, id, out.version)) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 10> KnownFields{{
+      "id",
+      "version",
+      "category",
+      "tick_interval",
+      "attempts_per_interval",
+      "max_successes_per_interval",
+      "spawn_area",
+      "population",
+      "credit",
+      "despawn",
+  }};
+  if (!object_has_only_fields(parser, root, "root", KnownFields)) {
+    return false;
+  }
+
+  std::string category_name;
+  if (!parser.read_string(root, "category", category_name)) {
+    return false;
+  }
+  const std::optional<SpawnCategory> category =
+      spawn_category_from_string(category_name);
+  if (!category.has_value()) {
+    return parser.fail("category", "unknown spawn category: " + category_name);
+  }
+  out.category = category.value();
+  u32 tick_interval = static_cast<u32>(out.tick_interval);
+  if (!parser.read_u32(root, "tick_interval", tick_interval) ||
+      !parser.read_u32(root, "attempts_per_interval", out.attempts_per_interval) ||
+      !parser.read_u32(
+          root,
+          "max_successes_per_interval",
+          out.max_successes_per_interval)) {
+    return false;
+  }
+  out.tick_interval = tick_interval;
+  if (out.tick_interval == 0U ||
+      out.attempts_per_interval == 0U ||
+      out.max_successes_per_interval == 0U) {
+    return parser.fail(
+        "root",
+        "tick_interval, attempts_per_interval, and max_successes_per_interval must be non-zero");
+  }
+
+  const io::DataValue* spawn_area = nullptr;
+  if (!read_required_object(parser, root, "spawn_area", spawn_area)) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 3> SpawnAreaFields{{
+      "min_distance_blocks",
+      "max_distance_blocks",
+      "eligible_chunk_radius",
+  }};
+  if (!object_has_only_fields(parser, *spawn_area, "spawn_area", SpawnAreaFields) ||
+      !parser.read_u32(
+          *spawn_area,
+          "min_distance_blocks",
+          out.spawn_area.min_distance_blocks) ||
+      !parser.read_u32(
+          *spawn_area,
+          "max_distance_blocks",
+          out.spawn_area.max_distance_blocks) ||
+      !parser.read_u32(
+          *spawn_area,
+          "eligible_chunk_radius",
+          out.spawn_area.eligible_chunk_radius)) {
+    return false;
+  }
+  if (out.spawn_area.min_distance_blocks > out.spawn_area.max_distance_blocks ||
+      out.spawn_area.eligible_chunk_radius == 0U) {
+    return parser.fail(
+        "spawn_area",
+        "min_distance_blocks must be <= max_distance_blocks and eligible_chunk_radius must be non-zero");
+  }
+
+  const io::DataValue* population = nullptr;
+  if (!read_required_object(parser, root, "population", population)) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 6> PopulationFields{{
+      "soft_cap_per_player",
+      "hard_cap_per_player",
+      "density_per_eligible_chunk",
+      "max_per_chunk",
+      "max_per_3x3_chunks",
+      "max_per_chunk_area",
+  }};
+  if (!object_has_only_fields(parser, *population, "population", PopulationFields) ||
+      !parser.read_u32(
+          *population,
+          "soft_cap_per_player",
+          out.population.soft_cap_per_player) ||
+      !parser.read_u32(
+          *population,
+          "hard_cap_per_player",
+          out.population.hard_cap_per_player) ||
+      !parser.read_f32(
+          *population,
+          "density_per_eligible_chunk",
+          out.population.density_per_eligible_chunk) ||
+      !parser.read_u32(*population, "max_per_chunk", out.population.max_per_chunk) ||
+      !read_positive_optional_u32(
+          parser,
+          *population,
+          "max_per_3x3_chunks",
+          out.population.max_per_3x3_chunks,
+          "population")) {
+    return false;
+  }
+  if (parser.member(*population, "max_per_chunk_area") != nullptr &&
+      !read_positive_optional_u32(
+          parser,
+          *population,
+          "max_per_chunk_area",
+          out.population.max_per_3x3_chunks,
+          "population")) {
+    return false;
+  }
+  if (out.population.soft_cap_per_player == 0U ||
+      out.population.hard_cap_per_player == 0U ||
+      out.population.max_per_chunk == 0U ||
+      out.population.soft_cap_per_player > out.population.hard_cap_per_player ||
+      !std::isfinite(out.population.density_per_eligible_chunk) ||
+      out.population.density_per_eligible_chunk < 0.0F) {
+    return parser.fail(
+        "population",
+        "population caps must be positive, soft_cap_per_player must be <= hard_cap_per_player, and density_per_eligible_chunk must be finite");
+  }
+
+  const io::DataValue* credit = nullptr;
+  if (!read_required_object(parser, root, "credit", credit)) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 4> CreditFields{{
+      "refill_per_interval",
+      "max_bank",
+      "spend_per_group_attempt",
+      "spend_per_entity_spawned",
+  }};
+  if (!object_has_only_fields(parser, *credit, "credit", CreditFields) ||
+      !parser.read_f32(
+          *credit,
+          "refill_per_interval",
+          out.credit.refill_per_interval) ||
+      !parser.read_f32(*credit, "max_bank", out.credit.max_bank) ||
+      !parser.read_f32(
+          *credit,
+          "spend_per_group_attempt",
+          out.credit.spend_per_group_attempt) ||
+      !parser.read_f32(
+          *credit,
+          "spend_per_entity_spawned",
+          out.credit.spend_per_entity_spawned) ||
+      !validate_positive_finite(parser, out.credit.refill_per_interval, "credit.refill_per_interval") ||
+      !validate_positive_finite(parser, out.credit.max_bank, "credit.max_bank") ||
+      !validate_positive_finite(
+          parser,
+          out.credit.spend_per_group_attempt,
+          "credit.spend_per_group_attempt") ||
+      !validate_positive_finite(
+          parser,
+          out.credit.spend_per_entity_spawned,
+          "credit.spend_per_entity_spawned")) {
+    return false;
+  }
+
+  const io::DataValue* despawn = nullptr;
+  if (!read_required_object(parser, root, "despawn", despawn)) {
+    return false;
+  }
+  static constexpr std::array<std::string_view, 5> DespawnFields{{
+      "enabled",
+      "min_age_ticks",
+      "distance_blocks",
+      "only_if_over_soft_cap",
+      "exclude_persistent",
+  }};
+  u32 min_age_ticks = static_cast<u32>(out.despawn.min_age_ticks);
+  if (!object_has_only_fields(parser, *despawn, "despawn", DespawnFields) ||
+      !parser.read_bool(*despawn, "enabled", out.despawn.enabled) ||
+      !parser.read_u32(*despawn, "min_age_ticks", min_age_ticks) ||
+      !parser.read_u32(*despawn, "distance_blocks", out.despawn.distance_blocks) ||
+      !parser.read_bool(
+          *despawn,
+          "only_if_over_soft_cap",
+          out.despawn.only_if_over_soft_cap) ||
+      !parser.read_bool(
+          *despawn,
+          "exclude_persistent",
+          out.despawn.exclude_persistent)) {
+    return false;
+  }
+  out.despawn.min_age_ticks = min_age_ticks;
+  if (out.despawn.enabled && out.despawn.distance_blocks == 0U) {
+    return parser.fail("despawn.distance_blocks", "must be greater than zero when enabled");
+  }
+  return true;
+}
+
 [[nodiscard]] bool parse_biome_spawns(
     Parser& parser,
     const io::DataValue& root,
@@ -840,12 +1124,13 @@ struct SpawnTableUseConfig {
     if (category_object == nullptr) {
       return parser.fail(
           category_prefix,
-          "must be an object with use, rate_scale, density_cap_scale, remove, overrides, and add");
+          "must be an object with use, budget_profile, density_multiplier, soft_cap_multiplier, remove, overrides, and add");
     }
-    static constexpr std::array<std::string_view, 6> KnownCategoryFields{{
+    static constexpr std::array<std::string_view, 7> KnownCategoryFields{{
         "use",
-        "rate_scale",
-        "density_cap_scale",
+        "budget_profile",
+        "density_multiplier",
+        "soft_cap_multiplier",
         "remove",
         "overrides",
         "add",
@@ -856,20 +1141,41 @@ struct SpawnTableUseConfig {
 
     BiomeSpawnCategoryConfig category_config;
     category_config.specified = true;
-    if (!parser.read_f32(entries, "rate_scale", category_config.rate_scale, false) ||
+    if (!parser.read_ref(entries, "budget_profile", category_config.budget_profile) ||
         !parser.read_f32(
             entries,
-            "density_cap_scale",
-            category_config.density_cap_scale,
+            "density_multiplier",
+            category_config.modifiers.density_multiplier,
+            false) ||
+        !parser.read_f32(
+            entries,
+            "soft_cap_multiplier",
+            category_config.modifiers.soft_cap_multiplier,
             false)) {
       return false;
     }
-    if (!std::isfinite(category_config.rate_scale) || category_config.rate_scale <= 0.0F) {
-      return parser.fail(category_prefix + ".rate_scale", "must be greater than zero");
+    const auto budget =
+        registry.spawn_budget_profiles.find(category_config.budget_profile.id);
+    if (budget == registry.spawn_budget_profiles.end()) {
+      return parser.fail(
+          category_prefix + ".budget_profile",
+          "unknown spawn budget profile: " + category_config.budget_profile.id);
     }
-    if (!std::isfinite(category_config.density_cap_scale) ||
-        category_config.density_cap_scale <= 0.0F) {
-      return parser.fail(category_prefix + ".density_cap_scale", "must be greater than zero");
+    if (budget->second.category != category.value()) {
+      return parser.fail(
+          category_prefix + ".budget_profile",
+          "spawn budget profile category is " +
+              std::string{spawn_category_name(budget->second.category)} +
+              ", expected " + category_name);
+    }
+    category_config.budget = budget->second;
+    if (!std::isfinite(category_config.modifiers.density_multiplier) ||
+        category_config.modifiers.density_multiplier <= 0.0F) {
+      return parser.fail(category_prefix + ".density_multiplier", "must be greater than zero");
+    }
+    if (!std::isfinite(category_config.modifiers.soft_cap_multiplier) ||
+        category_config.modifiers.soft_cap_multiplier <= 0.0F) {
+      return parser.fail(category_prefix + ".soft_cap_multiplier", "must be greater than zero");
     }
 
     std::vector<BiomeSpawnEntryConfig> resolved_entries;
@@ -961,6 +1267,12 @@ struct SpawnTableUseConfig {
         }
         if (override_config.conditions.has_value()) {
           target.conditions = std::move(override_config.conditions.value());
+        }
+        if (override_config.max_near_player.has_value()) {
+          target.caps.max_near_player = override_config.max_near_player.value();
+        }
+        if (override_config.max_per_chunk_area.has_value()) {
+          target.caps.max_per_chunk_area = override_config.max_per_chunk_area.value();
         }
         if (!validate_spawn_entry_group(
                 parser,
@@ -1591,6 +1903,26 @@ RegistryResult load_worldgen_registry_from_packs(const asset::PackManager& packs
     return load_spawn_tables;
   }
   registry = std::move(load_spawn_tables.value());
+
+  auto load_spawn_budget_profiles = load_category(
+      packs,
+      "worldgen/spawn_budget_profile",
+      std::move(registry),
+      [](Parser& parser, const io::DataValue& root, std::string_view id, WorldGenRegistry& out) {
+        SpawnBudgetProfileConfig config;
+        if (!parse_spawn_budget_profile(parser, root, id, config)) {
+          return false;
+        }
+        return insert_unique(
+            parser,
+            out.spawn_budget_profiles,
+            std::string{id},
+            std::move(config));
+      });
+  if (!load_spawn_budget_profiles) {
+    return load_spawn_budget_profiles;
+  }
+  registry = std::move(load_spawn_budget_profiles.value());
 
   auto load_biome = load_category(
       packs,

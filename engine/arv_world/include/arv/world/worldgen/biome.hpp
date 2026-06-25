@@ -4,6 +4,7 @@
 #include "arv/world/natural_spawn_types.hpp"
 
 #include <array>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -42,8 +43,8 @@ struct BiomeSpawnConditionConfig {
   std::vector<ResourceRef> block_tags_below{};
   std::vector<ResourceRef> block_tags_inside{};
   std::vector<ResourceRef> block_tags_head{};
-  u32 min_distance_from_player_blocks{24};
-  u32 max_distance_from_player_blocks{96};
+  u32 min_distance_from_player_blocks{};
+  u32 max_distance_from_player_blocks{std::numeric_limits<u32>::max()};
   std::optional<TimePredicate> time{};
 };
 
@@ -55,12 +56,14 @@ struct BiomeSpawnEntryConfig {
   u8 min_group{1};
   u8 max_group{1};
   BiomeSpawnConditionConfig conditions{};
+  SpawnEntryLocalCaps caps{};
 };
 
 struct BiomeSpawnCategoryConfig {
   bool specified{};
-  f32 rate_scale{1.0F};
-  f32 density_cap_scale{1.0F};
+  ResourceRef budget_profile{};
+  SpawnBudgetProfileConfig budget{};
+  SpawnBudgetBiomeModifiers modifiers{};
 };
 
 struct SpawnTableConfig {

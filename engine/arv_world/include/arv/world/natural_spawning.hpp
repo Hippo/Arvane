@@ -11,6 +11,7 @@
 
 #include <array>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <random>
 #include <span>
@@ -33,12 +34,13 @@ struct SpawnConditions {
   std::vector<std::string> block_tags_below{};
   std::vector<std::string> block_tags_inside{};
   std::vector<std::string> block_tags_head{};
-  u32 min_distance_from_player_blocks{24};
-  u32 max_distance_from_player_blocks{96};
+  u32 min_distance_from_player_blocks{};
+  u32 max_distance_from_player_blocks{std::numeric_limits<u32>::max()};
   std::optional<TimePredicate> time{};
 };
 
 struct SpawnEntry {
+  std::string id{};
   EntityTypeID entity_type{};
   std::string entity_type_name{};
   SpawnCategory category{SpawnCategory::Passive};
@@ -46,6 +48,7 @@ struct SpawnEntry {
   u8 min_group{1};
   u8 max_group{1};
   SpawnConditions conditions{};
+  SpawnEntryLocalCaps caps{};
   bool persistent_by_default{};
   bool replicated_by_default{true};
   entity::EntityComponentSet authored_components{};
@@ -62,8 +65,9 @@ struct SpawnDiagnostic {
 struct BiomeSpawnTable {
   std::vector<SpawnEntry> entries{};
   u32 total_weight{};
-  f32 rate_scale{1.0F};
-  f32 density_cap_scale{1.0F};
+  SpawnBudgetProfileConfig budget{};
+  SpawnBudgetBiomeModifiers modifiers{};
+  bool has_budget{};
 
   [[nodiscard]] bool empty() const noexcept;
   [[nodiscard]] const SpawnEntry* weighted_pick(u32 roll) const noexcept;
@@ -79,6 +83,12 @@ public:
   [[nodiscard]] const BiomeSpawnTable* find_table(
       std::string_view biome_id,
       SpawnCategory category) const noexcept;
+
+  [[nodiscard]] bool has_due_budget_tick(
+      TickIndex tick,
+      const NaturalSpawningConfig& config) const noexcept;
+  [[nodiscard]] TickIndex max_budget_tick_interval(
+      const NaturalSpawningConfig& config) const noexcept;
 
   [[nodiscard]] std::span<const SpawnDiagnostic> diagnostics() const noexcept {
     return diagnostics_;
@@ -105,6 +115,8 @@ struct NaturalSpawnCounters {
   u64 rejected_category_cap{};
   u64 rejected_world_cap{};
   u64 rejected_local_density{};
+  u64 rejected_entry_cap{};
+  u64 rejected_credit{};
   u64 rejected_conditions{};
   u64 rejected_group_failed{};
   u64 rejected_no_generation_context{};
@@ -167,15 +179,18 @@ struct NaturalSpawnEntitySnapshot {
   EntityID id{};
   SpawnCategory category{SpawnCategory::Passive};
   EntityTypeID source_entity_type{};
+  std::string source_entry_id{};
   Vec3f position{};
   TickIndex spawn_tick{};
   bool transient{true};
   bool persistent{};
   bool player_owned{};
+  bool mounted_or_occupied{};
 };
 
 struct NaturalSpawnIntent {
   SpawnEntry entry{};
+  SpawnBudgetProfileConfig budget{};
   std::vector<BlockPos> positions{};
 };
 
@@ -183,7 +198,18 @@ struct NaturalDespawnIntent {
   EntityID entity{};
   SpawnCategory category{SpawnCategory::Passive};
   EntityTypeID source_entity_type{};
+  std::string source_entry_id{};
   TickIndex spawn_tick{};
+  TickIndex min_age_ticks{};
+  u32 distance_blocks{};
+  bool exclude_persistent{true};
+};
+
+struct NaturalSpawnCreditSnapshot {
+  PlayerID player{};
+  SpawnCategory category{SpawnCategory::Passive};
+  std::string budget_profile_id{};
+  f32 credits{};
 };
 
 struct NaturalSpawnJobRequest {
@@ -197,6 +223,7 @@ struct NaturalSpawnJobRequest {
   u64 random_seed{};
   std::vector<NaturalSpawnPlayerSnapshot> players{};
   std::vector<NaturalSpawnEntitySnapshot> natural_entities{};
+  std::vector<NaturalSpawnCreditSnapshot> credit_banks{};
   std::vector<ChunkSectionCoord> loaded_chunks{};
   std::vector<ChunkSectionCoord> active_chunks{};
   SpawnLoadSnapshot load{};
@@ -209,6 +236,7 @@ struct NaturalSpawnJobResult {
   NaturalSpawnCounters counters{};
   std::vector<NaturalSpawnIntent> spawn_intents{};
   std::vector<NaturalDespawnIntent> despawn_intents{};
+  std::vector<NaturalSpawnCreditSnapshot> credit_banks{};
   u64 worker_duration_us{};
 };
 
@@ -313,6 +341,7 @@ private:
       const entity::VehicleDefinitionRegistry* vehicle_definitions,
       BlockPos root,
       const SpawnEvaluationContext& context,
+      const SpawnBudgetProfileConfig& budget,
       TickIndex tick);
   [[nodiscard]] std::optional<CandidateProfile> profile_for(
       const WorldRuntime& world,
@@ -344,6 +373,7 @@ private:
   u64 total_spawn_worker_cost_us_{};
   u64 measured_spawn_apply_ticks_{};
   u64 total_spawn_apply_cost_us_{};
+  std::vector<NaturalSpawnCreditSnapshot> credit_banks_{};
 };
 
 } // namespace arv::world

@@ -25,6 +25,7 @@ struct WorldGenRegistry {
   HashMap<std::string, BiomeConfig> biomes{};
   HashMap<std::string, BiomeSpawnConditionConfig> spawn_conditions{};
   HashMap<std::string, SpawnTableConfig> spawn_tables{};
+  HashMap<std::string, SpawnBudgetProfileConfig> spawn_budget_profiles{};
   HashMap<std::string, SurfaceRuleSetConfig> surface_rule_sets{};
   HashMap<std::string, CarverConfig> carvers{};
   HashMap<std::string, ConfiguredFeatureConfig> configured_features{};
