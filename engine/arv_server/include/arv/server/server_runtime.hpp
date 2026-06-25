@@ -252,6 +252,7 @@ public:
   net::NetworkResult start(const ServerStartInfo& start_info);
 
   void tick();
+  void pump_integrated_network_frame();
   void pump_chunk_streaming_frame(bool send_ready_chunks = true);
 
   void shutdown();

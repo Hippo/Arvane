@@ -2,6 +2,7 @@
 
 #include "arv/command/server_command_services.hpp"
 #include "arv/core/log.hpp"
+#include "arv/core/profiling.hpp"
 #include "arv/core/string.hpp"
 #include "arv/crypto/random.hpp"
 #include "arv/io/data_codecs.hpp"
@@ -512,6 +513,10 @@ net::NetworkResult ServerRuntime::start(const ServerStartInfo& start_info) {
 
 void ServerRuntime::tick() {
   impl_->tick();
+}
+
+void ServerRuntime::pump_integrated_network_frame() {
+  impl_->pump_integrated_network_frame();
 }
 
 void ServerRuntime::pump_chunk_streaming_frame(bool send_ready_chunks) {
@@ -1067,6 +1072,24 @@ void ServerRuntimeImpl::tick() {
   send_inventory_updates();
   send_text_variable_updates();
   ++tick_index_;
+}
+
+void ServerRuntimeImpl::pump_integrated_network_frame() {
+  if (state_ != ServerRuntimeState::Running || !transport_ ||
+      mode_ != ServerMode::Integrated) {
+    return;
+  }
+
+  ARV_PROFILE_ZONE("Integrated network frame pump");
+  inbound_events_ = network_thread_enabled_
+                        ? network_thread_.drain_events()
+                        : transport_->poll_events();
+  for (net::NetworkEvent& event : inbound_events_) {
+    handle_network_event(std::move(event));
+  }
+  tick_keep_alive();
+  send_inventory_updates();
+  send_text_variable_updates();
 }
 
 void ServerRuntimeImpl::shutdown() {

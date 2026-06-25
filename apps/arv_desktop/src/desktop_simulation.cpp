@@ -102,6 +102,11 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
     active_session.integrated_server->pump_chunk_streaming_frame(!fixed_tick_ran);
     active_session.client->poll_network();
     sessions_.collect_client_chunk_stream(active_session);
+  } else if (singleplayer_paused && has_active_integrated_session) {
+    active_session.integrated_server->pump_integrated_network_frame();
+    active_session.client->poll_network();
+    sessions_.collect_client_chunk_stream(active_session);
+    sessions_.refresh_inventory_slots(active_session);
   }
 
   sessions_.apply_pending_client_chunk_stream(

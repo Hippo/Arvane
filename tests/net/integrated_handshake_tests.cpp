@@ -1164,6 +1164,48 @@ TEST(IntegratedHandshakeTests, InventoryActionsFlowThroughAuthoritativeProtocolU
   EXPECT_GE(client.inventory_revision(), 2U);
 }
 
+TEST(IntegratedHandshakeTests, PausedNetworkPumpProcessesInventoryActionsWithoutTickingWorld) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::player::ItemID bucket_item =
+      item_registry.find_item("arvane:bucket").value();
+  auto transports = arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime server(std::move(transports.server));
+  ASSERT_TRUE(server.start({arv::server::ServerMode::Integrated,
+                            arv::DefaultBaseTps,
+                            {"in-process", 0},
+                            &block_registry,
+                            &item_registry}));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_TRUE(client.has_authoritative_inventory());
+  arv::player::PlayerState& player = connected_player(server);
+  ASSERT_TRUE(server.insert_player_inventory_stack(
+      player.player_id,
+      arv::player::ItemStack{bucket_item, 1U}).complete());
+  server.tick();
+  client.fixed_tick(server.tick_index());
+  ASSERT_TRUE(client.inventory().slot(0).has_value());
+
+  const arv::TickIndex tick_before_click = server.tick_index();
+  ASSERT_TRUE(client.request_inventory_slot_click(
+      0,
+      arv::player::InventoryClickButton::Primary));
+  server.pump_integrated_network_frame();
+  client.poll_network();
+
+  EXPECT_EQ(server.tick_index(), tick_before_click);
+  ASSERT_TRUE(player.inventory_cursor_stack.has_value());
+  EXPECT_FALSE(player.inventory.slot(0).has_value());
+  ASSERT_TRUE(client.inventory_cursor_stack().has_value());
+  EXPECT_FALSE(client.inventory().slot(0).has_value());
+}
+
 TEST(IntegratedHandshakeTests, BlockUpdatesReplicateAfterChunkStreaming) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
