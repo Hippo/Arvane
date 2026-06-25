@@ -786,9 +786,13 @@ TEST(ClientGameplayInteractionsTests, VisibleHeldItemStackRequiresVisibleGamepla
   EXPECT_EQ(visible->item, stone_item_id);
   EXPECT_EQ(visible->count, 4U);
 
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  EXPECT_TRUE(client.inventory_open());
+  EXPECT_TRUE(arv::client::visible_held_item_stack(client).has_value());
+
   client.submit_input(arv::client::InputFrame{.open_chat_pressed = true});
   EXPECT_TRUE(client.chat_open());
-  EXPECT_FALSE(arv::client::visible_held_item_stack(client).has_value());
+  EXPECT_TRUE(arv::client::visible_held_item_stack(client).has_value());
 }
 
 TEST(ClientGameplayInteractionsTests, HeldItemPlacementPreviewRejectsPlayerOverlap) {

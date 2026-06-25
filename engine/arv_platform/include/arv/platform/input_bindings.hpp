@@ -38,7 +38,7 @@ enum class LogicalAction : u8 {
   OpenInventory,
   OpenChat,
   ShowTabMenu,
-  TogglePauseMenu,
+  Cancel,
   ToggleDebugMenu,
   Count,
 };

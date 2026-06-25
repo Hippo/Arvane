@@ -17,7 +17,6 @@
 #include "arv/net/connection_state.hpp"
 #include "arv/base/ui/screens/account.hpp"
 #include "arv/base/ui/screens/main_menu.hpp"
-#include "arv/base/ui/screens/pause_menu.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -197,8 +196,6 @@ int DesktopFrameLoop::run() {
       gameplay_menu_stack_active_ = false;
       gameplay_screen_manager_.clear();
       reset_main_menu_stack();
-    } else if (gameplay_menu_stack_active_ && gameplay_screen_manager_.empty()) {
-      reset_gameplay_menu_stack();
     }
     bool has_world_session = session_world_ready(active_session);
     handle_debug_menu_input(platform_input, active_session, has_world_session);
@@ -209,13 +206,6 @@ int DesktopFrameLoop::run() {
     ui::UIScreenManager& active_screens = active_screen_manager();
     ui::UIContext menu_context = make_menu_context(active_screens);
     handle_captured_menu_input(platform_input, menu_context, active_screens, active_session);
-    handle_pause_menu_input(
-        platform_input,
-        menu_context,
-        active_screens,
-        active_session,
-        has_world_session);
-
     client::InputFrame client_input =
         has_world_session
             ? client::input_frame_from_platform_snapshot(platform_input)
@@ -373,7 +363,6 @@ void DesktopFrameLoop::reset_main_menu_stack() {
 
 void DesktopFrameLoop::reset_gameplay_menu_stack() {
   gameplay_screen_manager_.clear();
-  gameplay_screen_manager_.push(ui::make_gameplay_screen());
   invalidate_ui_tree_cache();
 }
 
@@ -451,7 +440,6 @@ void DesktopFrameLoop::handle_debug_menu_input(
       has_session && active_session != nullptr && active_session->client->chat_open();
   if (debug_menu_.open && platform_input.text_cancel_pressed) {
     debug_menu_.open = false;
-    platform_input.pause_menu_pressed = false;
     platform_input.text_cancel_pressed = false;
     platform_input.debug_menu_toggle_pressed = false;
     return;
@@ -473,46 +461,6 @@ void DesktopFrameLoop::begin_debug_frame(
       platform_input,
       framebuffer_,
       timing.delta.count());
-}
-
-void DesktopFrameLoop::handle_pause_menu_input(
-    const platform::InputSnapshot& platform_input,
-    ui::UIContext& menu_context,
-    ui::UIScreenManager& screens,
-    DesktopGameSession* active_session,
-    bool has_session) {
-  if (debug_menu_.open || !platform_input.pause_menu_pressed) {
-    return;
-  }
-  const bool has_live_session =
-      active_session != nullptr && active_session->client != nullptr;
-  const bool has_client_overlay =
-      has_live_session &&
-      (active_session->client->inventory_open() || active_session->client->chat_open());
-  if (gameplay_menu_stack_active_) {
-    const auto reset_gameplay_stack = [&]() {
-      reset_gameplay_menu_stack();
-    };
-    const client::GameplayPauseMenuRoutingCallbacks callbacks{
-        .reset_gameplay_screen_stack = reset_gameplay_stack,
-    };
-    (void)client::route_gameplay_pause_menu_input(
-        screens,
-        menu_context,
-        platform_input.pause_menu_pressed,
-        gameplay_menu_stack_active_,
-        has_session,
-        has_client_overlay,
-        callbacks);
-    return;
-  }
-
-  const ui::UIScreen* current_screen = screens.current();
-  if (current_screen != nullptr) {
-    (void)screens.handle_cancel(menu_context);
-  } else if (screens.empty()) {
-    screens.push(ui::make_main_menu_screen());
-  }
 }
 
 void DesktopFrameLoop::handle_captured_menu_input(

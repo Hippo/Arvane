@@ -343,7 +343,6 @@ struct UIContext {
 };
 
 enum class MenuScreenType : u8 {
-  Gameplay,
   MainMenu,
   SinglePlayerMenu,
   CreateWorld,
@@ -359,7 +358,6 @@ enum class MenuScreenType : u8 {
   KeyBinds,
   ControlsSettings,
   InterfaceSettings,
-  PauseMenu,
 };
 
 enum class UITextEditCommand : u8 {

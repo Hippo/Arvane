@@ -75,6 +75,17 @@ TEST(ClientInputMappingTests, ConvertsPlatformSnapshotToInputFrame) {
   EXPECT_EQ(frame.text_edit_events.front().clipboard_text, "clip");
 }
 
+TEST(ClientInputMappingTests, CancelEdgeAlsoRequestsInventory) {
+  arv::platform::InputSnapshot snapshot;
+  snapshot.text_cancel_pressed = true;
+
+  const arv::client::InputFrame frame =
+      arv::client::input_frame_from_platform_snapshot(snapshot);
+
+  EXPECT_TRUE(frame.open_inventory_pressed);
+  EXPECT_TRUE(frame.text_cancel_pressed);
+}
+
 TEST(ClientInputMappingTests, ConvertsCapturedPlatformBindingToUiView) {
   const arv::platform::RawInputEvent event{
       arv::platform::InputBinding{
@@ -145,7 +156,6 @@ TEST(ClientInputMappingTests, ClearsPerFramePlatformInputEdges) {
   input.open_chat_pressed = true;
   input.tab_menu_held = true;
   input.shift_modifier_held = true;
-  input.pause_menu_pressed = true;
   input.debug_menu_toggle_pressed = true;
   input.hotbar_select = 3U;
   input.hotbar_scroll_steps = -2;
@@ -190,7 +200,6 @@ TEST(ClientInputMappingTests, ClearsPerFramePlatformInputEdges) {
   EXPECT_FALSE(input.open_chat_pressed);
   EXPECT_TRUE(input.tab_menu_held);
   EXPECT_TRUE(input.shift_modifier_held);
-  EXPECT_FALSE(input.pause_menu_pressed);
   EXPECT_FALSE(input.debug_menu_toggle_pressed);
   EXPECT_FALSE(input.hotbar_select.has_value());
   EXPECT_EQ(input.hotbar_scroll_steps, 0);
@@ -220,7 +229,6 @@ TEST(ClientInputMappingTests, ClearsCapturedBindingPlatformInputEdges) {
   input.drop_item_pressed = true;
   input.open_inventory_pressed = true;
   input.open_chat_pressed = true;
-  input.pause_menu_pressed = true;
   input.debug_menu_toggle_pressed = true;
   input.hotbar_select = 8U;
   input.hotbar_scroll_steps = 1;
@@ -248,7 +256,6 @@ TEST(ClientInputMappingTests, ClearsCapturedBindingPlatformInputEdges) {
   EXPECT_TRUE(input.drop_item_pressed);
   EXPECT_FALSE(input.open_inventory_pressed);
   EXPECT_FALSE(input.open_chat_pressed);
-  EXPECT_FALSE(input.pause_menu_pressed);
   EXPECT_FALSE(input.debug_menu_toggle_pressed);
   EXPECT_FALSE(input.hotbar_select.has_value());
   EXPECT_EQ(input.hotbar_scroll_steps, 0);

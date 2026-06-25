@@ -214,10 +214,6 @@ ui:
       keybind_clear: Clear
       keybind_reset: Reset
       keybind_conflict: Conflict
-    pause:
-      title: Paused
-      resume: Resume
-      back_to_main_menu: Back to Main Menu
     account:
       edit: Edit
       empty: No profiles

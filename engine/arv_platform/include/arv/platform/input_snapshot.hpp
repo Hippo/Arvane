@@ -56,7 +56,6 @@ struct InputSnapshot {
   bool open_chat_pressed{};
   bool tab_menu_held{};
   bool shift_modifier_held{};
-  bool pause_menu_pressed{};
   bool debug_menu_toggle_pressed{};
   std::optional<u8> hotbar_select{};
   i8 hotbar_scroll_steps{};

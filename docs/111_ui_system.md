@@ -17,7 +17,7 @@ The UI system must support:
 
 - HUD overlays
 - inventory and hotbar UI
-- pause/settings screens
+- player-menu/settings screens
 - chat and text entry
 - tooltips
 - container screens
@@ -137,7 +137,7 @@ Examples:
 
 * HUD
 * main menu
-* pause menu
+* player menu
 * inventory
 * crafting table
 * chest/container
@@ -345,7 +345,7 @@ Else if current screen is closable:
   close current screen
 
 Else if in gameplay:
-  open pause menu
+  open player inventory
 ```
 
 Plugin/server-provided screens may request non-closable behavior, but the client should only honor this for trusted/system screens.
@@ -1729,7 +1729,7 @@ Examples:
 
 ```text
 Client
-  pause menu, settings, local HUD
+  player menu, settings, local HUD
 
 Server
   container screen, shop, NPC dialog
@@ -2025,7 +2025,7 @@ Missing assets use safe placeholders.
 * inventory grid
 * item slots
 * tooltips
-* pause menu
+* player menu
 * settings skeleton
 * chat input
 * server-authored rich chat history

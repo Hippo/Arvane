@@ -1,4 +1,7 @@
 bindings:
+  Cancel:
+    - device: keyboard
+      key: Escape
   DropItem:
     - device: keyboard
       key: Q
@@ -77,9 +80,6 @@ bindings:
   ToggleDebugMenu:
     - device: keyboard
       key: Grave
-  TogglePauseMenu:
-    - device: keyboard
-      key: Escape
   VehicleRollLeft:
     - device: keyboard
       key: X

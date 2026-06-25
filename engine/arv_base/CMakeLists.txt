@@ -11,7 +11,6 @@ set(ARV_BASE_UI_HEADERS
   include/arv/base/ui/screens/main_menu.hpp
   include/arv/base/ui/screens/menu_screens.hpp
   include/arv/base/ui/screens/multiplayer.hpp
-  include/arv/base/ui/screens/pause_menu.hpp
   include/arv/base/ui/screens/screen.hpp
   include/arv/base/ui/screens/settings.hpp
   include/arv/base/ui/screens/singleplayer.hpp
@@ -29,7 +28,6 @@ set(ARV_BASE_UI_HEADERS
 
 if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
   add_library(arv_base_ui STATIC
-    include/arv/base/ui/screens/pause_menu.hpp
     include/arv/base/ui/screens/screen.hpp
     include/arv/base/ui/screens/settings.hpp
     include/arv/base/ui/widgets/chat.hpp
@@ -42,7 +40,6 @@ if(EMSCRIPTEN AND ARVANE_BUILD_WEB)
     include/arv/base/ui/widgets/scoreboard.hpp
     include/arv/base/ui/widgets/tab_menu.hpp
     include/arv/base/ui/widgets/text_input.hpp
-    src/ui/screens/pause_menu.cpp
     src/ui/screens/screen_manager.cpp
     src/ui/screens/settings.cpp
     src/ui/widgets/chat.cpp
@@ -89,7 +86,6 @@ add_library(arv_base_ui STATIC
   src/ui/screens/account.cpp
   src/ui/screens/main_menu.cpp
   src/ui/screens/multiplayer.cpp
-  src/ui/screens/pause_menu.cpp
   src/ui/screens/screen_manager.cpp
   src/ui/screens/settings.cpp
   src/ui/screens/singleplayer.cpp

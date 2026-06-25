@@ -600,15 +600,14 @@ InputSnapshot OpenGLWindow::poll_input() {
                                 wheel_up_steps,
                                 wheel_down_steps) > 0;
   input.tab_menu_held = action_hold_active(window_, input_bindings_, LogicalAction::ShowTabMenu);
-  input.pause_menu_pressed =
+  input.text_cancel_pressed =
       action_press_count(
           window_,
           input_bindings_,
-          LogicalAction::TogglePauseMenu,
-          previous_action_active_[logical_action_index(LogicalAction::TogglePauseMenu)],
+          LogicalAction::Cancel,
+          previous_action_active_[logical_action_index(LogicalAction::Cancel)],
           wheel_up_steps,
           wheel_down_steps) > 0;
-  input.text_cancel_pressed = input.pause_menu_pressed;
   input.debug_menu_toggle_pressed =
       action_press_count(
           window_,

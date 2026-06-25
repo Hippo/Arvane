@@ -693,45 +693,6 @@ void normalize_render_chunk_distances(ui::RenderSettingsView& settings) noexcept
 
 } // namespace
 
-GameplayPauseMenuRoutingResult route_gameplay_pause_menu_input(
-    ui::UIScreenManager& screen_manager,
-    ui::UIContext& ui_context,
-    bool pause_menu_pressed,
-    bool gameplay_stack_active,
-    bool has_active_gameplay_session,
-    bool has_client_overlay,
-    const GameplayPauseMenuRoutingCallbacks& callbacks) {
-  GameplayPauseMenuRoutingResult result{};
-  if (!pause_menu_pressed) {
-    return result;
-  }
-  result.consumed_pause_menu = true;
-  if (!gameplay_stack_active) {
-    return result;
-  }
-
-  if (screen_manager.empty() && callbacks.reset_gameplay_screen_stack) {
-    callbacks.reset_gameplay_screen_stack();
-    result.reset_gameplay_screen_stack = true;
-  }
-
-  const ui::UIScreen* current_screen = screen_manager.current();
-  const bool on_gameplay_root =
-      current_screen != nullptr &&
-      current_screen->type() == ui::MenuScreenType::Gameplay;
-  if (current_screen != nullptr && !on_gameplay_root) {
-    result.routed_cancel = true;
-    result.consumed_text_cancel = true;
-    result.handled_cancel = screen_manager.handle_cancel(ui_context);
-  } else if (on_gameplay_root && has_active_gameplay_session &&
-             !has_client_overlay) {
-    result.routed_cancel = true;
-    result.consumed_text_cancel = true;
-    result.handled_cancel = screen_manager.handle_cancel(ui_context);
-  }
-  return result;
-}
-
 bool route_inventory_mouse_input(
     ui::UiTree& ui_tree,
     ClientRuntime& client,
@@ -957,6 +918,9 @@ bool route_blocking_screen_input(
   }
   if (platform_input.text_submit_pressed) {
     handled = screen_manager.handle_submit(ui_context) || handled;
+  }
+  if (platform_input.text_cancel_pressed) {
+    handled = screen_manager.handle_cancel(ui_context) || handled;
   }
   return handled;
 }

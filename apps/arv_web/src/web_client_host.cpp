@@ -154,9 +154,6 @@ void poll_web_session() {
   if (state == net::ConnectionState::Disconnected) {
     g_app.flushed_after_pack_ready = false;
     reset_web_session_host_state();
-  } else if (state == net::ConnectionState::InGame &&
-             g_app.ui.screen_manager.empty()) {
-    reset_gameplay_screen_stack();
   }
 }
 

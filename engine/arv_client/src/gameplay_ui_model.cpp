@@ -444,7 +444,7 @@ ui::GameplayUiModel build_gameplay_ui_model(GameplayUiModelInput input) {
               hotbar_slot_count},
           std::string{input.hotbar_item_popup_name},
           input.hotbar_item_popup_alpha,
-          !input.client.inventory_open() && !container_open,
+          !container_open,
       },
       {},
       std::move(player_menu),

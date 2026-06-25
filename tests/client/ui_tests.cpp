@@ -1912,103 +1912,6 @@ TEST(MenuScreenTests, AccountCreateSkinManagerCanCancelBackToSnapshot) {
   EXPECT_EQ(cancel.skin_hashes, (std::vector<std::string>{"skin-a", "skin-b"}));
 }
 
-TEST(MenuScreenTests, PauseResumeEmitsCommandAndClosesScreen) {
-  FixedTextMeasurer text;
-  arv::ui::UiTree tree;
-  CapturingCommandSink sink;
-  FixedMenuData data;
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_pause_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
-
-  screens.update(ctx);
-  tree.layout({800.0F, 600.0F}, &text);
-
-  EXPECT_EQ(tree.find_by_stable_id("pause_menu.panel"), nullptr);
-  const auto* backdrop = tree.find_by_stable_id("pause_menu.backdrop");
-  ASSERT_NE(backdrop, nullptr);
-  EXPECT_GT(backdrop->style.background.w, 0.0F);
-  EXPECT_LT(backdrop->style.background.w, 1.0F);
-  const auto* stack = tree.find_by_stable_id("pause_menu.stack");
-  ASSERT_NE(stack, nullptr);
-  EXPECT_FLOAT_EQ(stack->rect.x + stack->rect.width * 0.5F, 400.0F);
-  EXPECT_FLOAT_EQ(stack->rect.y + stack->rect.height * 0.5F, 300.0F);
-
-  EXPECT_TRUE(screens.pauses_singleplayer());
-  EXPECT_TRUE(screens.route_action({"menu.pause.resume", "pause.resume", "click"}, ctx));
-
-  EXPECT_TRUE(screens.empty());
-  ASSERT_EQ(sink.commands.size(), 1U);
-  EXPECT_TRUE(std::holds_alternative<arv::ui::ResumeGameCommand>(sink.commands[0]));
-}
-
-TEST(MenuScreenTests, GameplayRootIsNonBlockingBottomOfPauseStack) {
-  arv::ui::UiTree tree;
-  CapturingCommandSink sink;
-  FixedMenuData data;
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
-
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
-  EXPECT_FALSE(screens.blocks_gameplay_input());
-  EXPECT_FALSE(screens.pauses_singleplayer());
-  EXPECT_TRUE(screens.handle_cancel(ctx));
-
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
-  EXPECT_EQ(screens.depth(), 2U);
-  EXPECT_TRUE(screens.blocks_gameplay_input());
-  EXPECT_TRUE(screens.pauses_singleplayer());
-
-  EXPECT_TRUE(screens.route_action({"menu.pause.resume", "pause.resume", "click"}, ctx));
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
-  EXPECT_EQ(screens.depth(), 1U);
-  EXPECT_FALSE(screens.blocks_gameplay_input());
-  ASSERT_EQ(sink.commands.size(), 1U);
-  EXPECT_TRUE(std::holds_alternative<arv::ui::ResumeGameCommand>(sink.commands[0]));
-}
-
-TEST(MenuScreenTests, PauseBackToMainMenuLeavesStackForDesktopStateSwitch) {
-  arv::ui::UiTree tree;
-  CapturingCommandSink sink;
-  FixedMenuData data;
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  screens.push(arv::ui::make_pause_menu_screen());
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
-
-  EXPECT_TRUE(screens.route_action({"menu.pause.main_menu", "pause.main_menu", "click"}, ctx));
-
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
-  EXPECT_EQ(screens.depth(), 2U);
-  ASSERT_EQ(sink.commands.size(), 1U);
-  EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
-}
-
-TEST(MenuScreenTests, PauseMenuCanHideQuitForWeb) {
-  FixedTextMeasurer text;
-  arv::ui::UiTree tree;
-  CapturingCommandSink sink;
-  FixedMenuData data;
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen({.show_quit = false}));
-  arv::ui::UIContext ctx{tree, {800.0F, 600.0F}, &sink, &data, &screens, nullptr, &test_language()};
-
-  ASSERT_TRUE(screens.handle_cancel(ctx));
-  screens.update(ctx);
-  tree.layout({800.0F, 600.0F}, &text);
-
-  EXPECT_EQ(tree.find_by_stable_id("menu.pause.quit"), nullptr);
-  EXPECT_NE(tree.find_by_stable_id("menu.pause.main_menu"), nullptr);
-  EXPECT_TRUE(screens.route_action({"menu.pause.main_menu", "pause.main_menu", "click"}, ctx));
-  ASSERT_EQ(sink.commands.size(), 1U);
-  EXPECT_TRUE(std::holds_alternative<arv::ui::BackToMainMenuCommand>(sink.commands[0]));
-}
-
 TEST(MenuScreenTests, SettingsHubUsesPauseBackdropAndDomainCategories) {
   FixedTextMeasurer text;
   arv::ui::UiTree tree;
@@ -2246,8 +2149,8 @@ TEST(MenuScreenTests, KeyBindsCaptureResetClearAndWarnOnConflicts) {
   jump.secondary.binding = {true, arv::ui::InputBindingDevice::MouseButton, "MouseMiddle", "Middle Mouse", 0U};
 
   arv::ui::KeyBindEntryView pause;
-  pause.action_name = "TogglePauseMenu";
-  pause.display_name = "Toggle Pause";
+  pause.action_name = "Cancel";
+  pause.display_name = "Cancel";
   pause.primary.has_binding = true;
   pause.primary.binding = {true, arv::ui::InputBindingDevice::Keyboard, "Escape", "Escape", 0U};
   pause.primary.conflict = true;

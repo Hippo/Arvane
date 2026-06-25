@@ -200,6 +200,7 @@ TEST(GameplayUiModelProjectionTests, BuildsRuntimeBackedOpenChatAndInventoryMode
 
   EXPECT_EQ(model.hotbar.slot_count, arv::player::DefaultHotbarSlotCount);
   EXPECT_EQ(model.hotbar.slots.size(), arv::player::DefaultHotbarSlotCount);
+  EXPECT_TRUE(model.hotbar.visible);
   EXPECT_EQ(model.hotbar.item_name_popup, "Stone");
   EXPECT_FLOAT_EQ(model.hotbar.item_name_popup_alpha, 0.75F);
   EXPECT_FALSE(model.inventory.visible);
@@ -215,6 +216,31 @@ TEST(GameplayUiModelProjectionTests, BuildsRuntimeBackedOpenChatAndInventoryMode
   EXPECT_EQ(model.debug.fps, 144U);
   EXPECT_TRUE(model.ride_prompt.visible);
   EXPECT_EQ(model.ride_prompt.key_label, "R");
+}
+
+TEST(GameplayUiModelProjectionTests, PlayerInventoryKeepsGameplayHotbarVisible) {
+  arv::client::ClientRuntime client = make_client();
+  client.submit_input(arv::client::InputFrame{.open_inventory_pressed = true});
+  ASSERT_TRUE(client.inventory_open());
+
+  std::vector<arv::ui::UiItemStackView> slots(12);
+  slots[0] = stack_view("arvane:stone", "Stone", 6U);
+
+  const arv::ui::GameplayUiModel model =
+      arv::client::build_gameplay_ui_model(
+          {
+              .client = client,
+              .chat_config = arv::io::UiConfig::ChatConfig{},
+              .inventory_slots = std::span<const arv::ui::UiItemStackView>{
+                  slots.data(),
+                  slots.size()},
+              .inventory_title = "Inventory",
+              .viewport = {1280.0F, 720.0F},
+          });
+
+  EXPECT_TRUE(model.player_menu.visible);
+  EXPECT_TRUE(model.player_menu.inventory.visible);
+  EXPECT_TRUE(model.hotbar.visible);
 }
 
 TEST(GameplayUiModelProjectionTests, SnapshotBuilderUsesLanguageFallbackAndPopupGate) {

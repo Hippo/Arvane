@@ -544,7 +544,10 @@ void ClientInputRuntime::submit_input(
   const bool was_chat_open = ui.chat_open();
   const bool was_inventory_open = ui.inventory_open();
 
-  if (input.text_cancel_pressed && player_menu_settings_subpage_is_open(ui)) {
+  const bool inventory_back_pressed =
+      input.open_inventory_pressed && player_menu_settings_subpage_is_open(ui);
+  if ((input.text_cancel_pressed || inventory_back_pressed) &&
+      player_menu_settings_subpage_is_open(ui)) {
     ui.set_player_menu_settings_section(PlayerMenuSettingsSection::Overview);
   } else if (input.text_cancel_pressed && (ui.inventory_open() || ui.chat_open())) {
     ui.close_ui();

@@ -30,7 +30,6 @@ void apply_web_ui_settings_to_session(arv::client::ClientRuntime& session);
 
 [[nodiscard]] arv::ui::UiDisplayMetrics web_ui_metrics();
 [[nodiscard]] arv::ui::UIContext make_web_ui_context();
-void reset_gameplay_screen_stack();
 void route_web_ui_input();
 
 [[nodiscard]] bool load_web_language(const arv::asset::PackManager& packs);

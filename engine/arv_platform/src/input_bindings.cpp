@@ -40,7 +40,7 @@ constexpr std::array<ActionNameEntry, static_cast<usize>(LogicalAction::Count)> 
     {LogicalAction::OpenInventory, "OpenInventory"},
     {LogicalAction::OpenChat, "OpenChat"},
     {LogicalAction::ShowTabMenu, "ShowTabMenu"},
-    {LogicalAction::TogglePauseMenu, "TogglePauseMenu"},
+    {LogicalAction::Cancel, "Cancel"},
     {LogicalAction::ToggleDebugMenu, "ToggleDebugMenu"},
 }};
 
@@ -147,6 +147,9 @@ std::string_view logical_action_name(LogicalAction action) noexcept {
 }
 
 std::optional<LogicalAction> logical_action_from_name(std::string_view name) noexcept {
+  if (name == "TogglePauseMenu") {
+    return LogicalAction::Cancel;
+  }
   for (const auto& [action, action_name] : kActionNames) {
     if (action_name == name) {
       return action;
@@ -294,7 +297,7 @@ InputBindings default_input_bindings() {
   set_default_binding(bindings, LogicalAction::OpenInventory, InputDeviceType::Keyboard, "E");
   set_default_binding(bindings, LogicalAction::OpenChat, InputDeviceType::Keyboard, "T");
   set_default_binding(bindings, LogicalAction::ShowTabMenu, InputDeviceType::Keyboard, "Tab");
-  set_default_binding(bindings, LogicalAction::TogglePauseMenu, InputDeviceType::Keyboard, "Escape");
+  set_default_binding(bindings, LogicalAction::Cancel, InputDeviceType::Keyboard, "Escape");
   set_default_binding(bindings, LogicalAction::ToggleDebugMenu, InputDeviceType::Keyboard, "Grave");
   return bindings;
 }

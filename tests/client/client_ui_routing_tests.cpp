@@ -1,6 +1,5 @@
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/client_ui_routing.hpp"
-#include "arv/base/ui/screens/pause_menu.hpp"
 #include "arv/net/transport.hpp"
 
 #include <gtest/gtest.h>
@@ -428,6 +427,22 @@ TEST(ClientUiRoutingTests, BlockingScreenRoutesPointerScrollAndTextInput) {
   EXPECT_EQ(recording->submit_count, 1);
 }
 
+TEST(ClientUiRoutingTests, BlockingScreenRoutesCancel) {
+  arv::ui::UiTree tree;
+  arv::ui::UIContext context{tree};
+  arv::ui::UIScreenManager screens;
+  screens.push(std::make_unique<RecordingScreen>());
+
+  arv::platform::InputSnapshot input;
+  input.text_cancel_pressed = true;
+
+  EXPECT_TRUE(arv::client::route_blocking_screen_input(
+      screens,
+      context,
+      input));
+  EXPECT_TRUE(screens.empty());
+}
+
 TEST(ClientUiRoutingTests, CapturedScreenRoutesRawInputThroughSharedHelper) {
   arv::ui::UiTree tree;
   arv::ui::UIContext context{tree};
@@ -473,178 +488,6 @@ TEST(ClientUiRoutingTests, CapturedMouseInputIgnoresCancelCaptureHit) {
       context,
       input));
   EXPECT_EQ(recording->captured_count, 0);
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteOpensPauseFromGameplayRoot) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{};
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          true,
-          true,
-          true,
-          false,
-          callbacks);
-
-  EXPECT_TRUE(result.consumed_pause_menu);
-  EXPECT_TRUE(result.consumed_text_cancel);
-  EXPECT_TRUE(result.routed_cancel);
-  EXPECT_TRUE(result.handled_cancel);
-  EXPECT_FALSE(result.reset_gameplay_screen_stack);
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
-  EXPECT_EQ(screens.depth(), 2U);
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteSkipsPauseWhenClientOverlayActive) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{};
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          true,
-          true,
-          true,
-          true,
-          callbacks);
-
-  EXPECT_TRUE(result.consumed_pause_menu);
-  EXPECT_FALSE(result.consumed_text_cancel);
-  EXPECT_FALSE(result.routed_cancel);
-  EXPECT_FALSE(result.handled_cancel);
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
-  EXPECT_EQ(screens.depth(), 1U);
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteCancelsNestedScreen) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  screens.push(std::make_unique<RecordingScreen>());
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{};
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          true,
-          true,
-          true,
-          true,
-          callbacks);
-
-  EXPECT_TRUE(result.consumed_pause_menu);
-  EXPECT_TRUE(result.consumed_text_cancel);
-  EXPECT_TRUE(result.routed_cancel);
-  EXPECT_TRUE(result.handled_cancel);
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
-  EXPECT_EQ(screens.depth(), 1U);
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteResetsEmptyGameplayStack) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  bool reset_called = false;
-  const auto reset_gameplay_stack = [&]() {
-    reset_called = true;
-    screens.push(arv::ui::make_gameplay_screen());
-  };
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{
-      .reset_gameplay_screen_stack = reset_gameplay_stack,
-  };
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          true,
-          true,
-          true,
-          false,
-          callbacks);
-
-  EXPECT_TRUE(reset_called);
-  EXPECT_TRUE(result.reset_gameplay_screen_stack);
-  EXPECT_TRUE(result.consumed_pause_menu);
-  EXPECT_TRUE(result.consumed_text_cancel);
-  EXPECT_TRUE(result.routed_cancel);
-  EXPECT_TRUE(result.handled_cancel);
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::PauseMenu);
-  EXPECT_EQ(screens.depth(), 2U);
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteConsumesInactiveSessionWithoutReset) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  bool reset_called = false;
-  const auto reset_gameplay_stack = [&]() {
-    reset_called = true;
-    screens.push(arv::ui::make_gameplay_screen());
-  };
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{
-      .reset_gameplay_screen_stack = reset_gameplay_stack,
-  };
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          true,
-          false,
-          false,
-          false,
-          callbacks);
-
-  EXPECT_TRUE(result.consumed_pause_menu);
-  EXPECT_FALSE(result.consumed_text_cancel);
-  EXPECT_FALSE(result.routed_cancel);
-  EXPECT_FALSE(result.handled_cancel);
-  EXPECT_FALSE(result.reset_gameplay_screen_stack);
-  EXPECT_FALSE(reset_called);
-  EXPECT_TRUE(screens.empty());
-}
-
-TEST(ClientUiRoutingTests, GameplayPauseRouteIgnoresMissingPauseEdge) {
-  arv::ui::UiTree tree;
-  arv::ui::UIContext context{tree};
-  arv::ui::UIScreenManager screens;
-  screens.push(arv::ui::make_gameplay_screen());
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{};
-
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          screens,
-          context,
-          false,
-          true,
-          true,
-          false,
-          callbacks);
-
-  EXPECT_FALSE(result.consumed_pause_menu);
-  EXPECT_FALSE(result.consumed_text_cancel);
-  EXPECT_FALSE(result.routed_cancel);
-  EXPECT_FALSE(result.handled_cancel);
-  EXPECT_EQ(screens.depth(), 1U);
-  ASSERT_NE(screens.current(), nullptr);
-  EXPECT_EQ(screens.current()->type(), arv::ui::MenuScreenType::Gameplay);
 }
 
 TEST(ClientUiRoutingTests, ChatMouseRouteScrollsAndClampsHistoryOffset) {

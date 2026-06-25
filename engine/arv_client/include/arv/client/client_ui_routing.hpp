@@ -21,27 +21,6 @@ struct ChatMouseRoutingCallbacks {
   std::string copy_unavailable_message{};
 };
 
-struct GameplayPauseMenuRoutingCallbacks {
-  FunctionRef<void()> reset_gameplay_screen_stack{};
-};
-
-struct GameplayPauseMenuRoutingResult {
-  bool consumed_pause_menu{};
-  bool consumed_text_cancel{};
-  bool routed_cancel{};
-  bool handled_cancel{};
-  bool reset_gameplay_screen_stack{};
-};
-
-[[nodiscard]] GameplayPauseMenuRoutingResult route_gameplay_pause_menu_input(
-    ui::UIScreenManager& screen_manager,
-    ui::UIContext& ui_context,
-    bool pause_menu_pressed,
-    bool gameplay_stack_active,
-    bool has_active_gameplay_session,
-    bool has_client_overlay,
-    const GameplayPauseMenuRoutingCallbacks& callbacks);
-
 [[nodiscard]] bool route_inventory_mouse_input(
     ui::UiTree& ui_tree,
     ClientRuntime& client,

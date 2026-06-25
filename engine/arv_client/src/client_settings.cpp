@@ -166,6 +166,9 @@ std::string key_bind_conflict_key(const platform::InputBinding& binding) {
 }
 
 std::string key_bind_display_name(std::string_view action_name) {
+  if (action_name == "Cancel") {
+    return "Back / Inventory";
+  }
   std::string display;
   display.reserve(action_name.size() + 4U);
   for (usize index = 0; index < action_name.size(); ++index) {

@@ -273,10 +273,9 @@ void apply_logical_action(
     case LogicalAction::ShowTabMenu:
       input.tab_menu_held = down;
       break;
-    case LogicalAction::TogglePauseMenu:
+    case LogicalAction::Cancel:
       if (down && !repeat) {
         input.text_cancel_pressed = true;
-        input.pause_menu_pressed = true;
       }
       break;
     case LogicalAction::Hotbar1:
@@ -398,7 +397,7 @@ EM_BOOL on_key(int event_type, const EmscriptenKeyboardEvent* event, void*) {
       !event->repeat &&
       has_cursor_overlay &&
       (key_matches_action(*event, arv::platform::LogicalAction::OpenInventory) ||
-       key_matches_action(*event, arv::platform::LogicalAction::TogglePauseMenu) ||
+       key_matches_action(*event, arv::platform::LogicalAction::Cancel) ||
        (arv::web::g_app.session->chat_open() &&
         std::strcmp(event->key, "Enter") == 0));
   if (down && arv::web::g_app.session != nullptr &&

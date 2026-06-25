@@ -268,10 +268,7 @@ bool local_player_is_mounted(const ClientRuntime& client) noexcept {
 
 std::optional<player::ItemStack> visible_held_item_stack(
     const ClientRuntime& client) {
-  if (!client.has_authoritative_inventory() ||
-      client.inventory_open() ||
-      client.chat_open() ||
-      client.container_open()) {
+  if (!client.has_authoritative_inventory() || client.container_open()) {
     return std::nullopt;
   }
   const usize selected_slot = client.selected_hotbar_slot();

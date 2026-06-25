@@ -2,7 +2,6 @@
 
 #include "arv/asset/pack.hpp"
 #include "arv/asset/resource.hpp"
-#include "arv/base/ui/screens/pause_menu.hpp"
 #include "arv/base/ui/widgets/gameplay.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/client/client_input_mapping.hpp"
@@ -252,12 +251,6 @@ arv::ui::UIContext make_web_ui_context() {
       &g_ui_bridge};
 }
 
-void reset_gameplay_screen_stack() {
-  g_app.ui.screen_manager.clear();
-  g_app.ui.screen_manager.push(
-      arv::ui::make_gameplay_screen({.show_quit = false}));
-}
-
 namespace {
 
 [[nodiscard]] const arv::platform::InputSnapshot& browser_input_snapshot() {
@@ -325,40 +318,6 @@ void route_screen_mouse_input(arv::ui::UIContext& context) {
       browser_input_snapshot());
 }
 
-void handle_pause_menu_input(arv::ui::UIContext& context) {
-  arv::platform::InputSnapshot& input = g_app.input.snapshot;
-  if (!input.pause_menu_pressed) {
-    return;
-  }
-  const bool has_active_gameplay_session =
-      g_app.session != nullptr &&
-      g_app.session->connection_state() == arv::net::ConnectionState::InGame;
-  const bool has_client_overlay =
-      has_active_gameplay_session &&
-      (g_app.session->inventory_open() || g_app.session->chat_open());
-  const auto reset_gameplay_stack = [&]() {
-    reset_gameplay_screen_stack();
-  };
-  const arv::client::GameplayPauseMenuRoutingCallbacks callbacks{
-      .reset_gameplay_screen_stack = reset_gameplay_stack,
-  };
-  const arv::client::GameplayPauseMenuRoutingResult result =
-      arv::client::route_gameplay_pause_menu_input(
-          g_app.ui.screen_manager,
-          context,
-          input.pause_menu_pressed,
-          has_active_gameplay_session,
-          has_active_gameplay_session,
-          has_client_overlay,
-          callbacks);
-  if (result.consumed_text_cancel) {
-    input.text_cancel_pressed = false;
-  }
-  if (result.consumed_pause_menu) {
-    input.pause_menu_pressed = false;
-  }
-}
-
 void clear_input_after_captured_binding() {
   arv::platform::InputSnapshot& input = g_app.input.snapshot;
   arv::client::clear_platform_input_captured_binding_edges(input);
@@ -404,7 +363,6 @@ void route_web_ui_input() {
   if (route_captured_screen_input(context)) {
     return;
   }
-  handle_pause_menu_input(context);
   if (g_app.ui.screen_manager.blocks_gameplay_input()) {
     route_screen_mouse_input(context);
     return;

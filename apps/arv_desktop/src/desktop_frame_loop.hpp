@@ -176,12 +176,6 @@ private:
   void begin_debug_frame(
       const platform::InputSnapshot& platform_input,
       const FrameTiming& timing);
-  void handle_pause_menu_input(
-      const platform::InputSnapshot& platform_input,
-      ui::UIContext& menu_context,
-      ui::UIScreenManager& screens,
-      DesktopGameSession* active_session,
-      bool has_session);
   void handle_captured_menu_input(
       platform::InputSnapshot& platform_input,
       ui::UIContext& menu_context,

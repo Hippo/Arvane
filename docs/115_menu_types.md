@@ -224,38 +224,40 @@ Behavior:
 
 Settings screens should use the same `arv_ui` system as the rest of the player-facing menus.
 
-## In-Game Pause Menu
+## In-Game Player Menu
 
-The pause menu opens with `Escape` by default. The key must be configurable through the key bind system.
+The player menu opens with `Escape` or the inventory key by default. The keys must be configurable through the key bind system.
 
 UI elements:
 
 ```text
-Resume
-Back to Main Menu
+Inventory
+Crafting
 Settings
+Back to Main Menu
 Quit
 ```
 
 Behavior:
 
-* Opening the pause menu captures UI focus.
-* `Resume` closes the pause menu and returns to gameplay.
+* Opening the player menu captures UI focus.
+* Pressing `Escape` or the inventory key again closes the player menu unless a settings subpage is active.
+* On a settings subpage, `Escape` and the inventory key return to the settings overview before closing the menu.
 * `Back to Main Menu` leaves the current world/server session and returns to the main menu.
 * `Settings` opens the settings menu.
 * `Quit` exits the game.
 
 Singleplayer behavior:
 
-* Opening the pause menu pauses the integrated singleplayer server/world.
-* Closing the pause menu resumes the world.
-* Settings opened from the pause menu should preserve the paused state until gameplay resumes.
+* Opening the player menu pauses the integrated singleplayer server/world.
+* Closing the player menu resumes the world.
+* Settings opened from the player menu should preserve the paused state until gameplay resumes.
 
 Multiplayer behavior:
 
-* Opening the pause menu does not pause the remote server.
+* Opening the player menu does not pause the remote server.
 * The local client may pause local input/camera control while the menu is open.
-* Network processing must continue while the pause menu is open.
+* Network processing must continue while the player menu is open.
 
 ## Navigation Stack
 

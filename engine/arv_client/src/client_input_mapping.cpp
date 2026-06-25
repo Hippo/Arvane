@@ -10,7 +10,6 @@ void clear_platform_input_action_edges(platform::InputSnapshot& input) noexcept 
   input.text_backspace_pressed = false;
   input.text_submit_pressed = false;
   input.text_cancel_pressed = false;
-  input.pause_menu_pressed = false;
   input.debug_menu_toggle_pressed = false;
   input.hotbar_select.reset();
   input.hotbar_scroll_steps = 0;
@@ -79,7 +78,7 @@ InputFrame input_frame_from_platform_snapshot(const platform::InputSnapshot& inp
   frame.secondary_held = input.secondary_held;
   frame.drop_item_pressed = input.drop_item_pressed;
   frame.drop_item_held = input.drop_item_held;
-  frame.open_inventory_pressed = input.open_inventory_pressed;
+  frame.open_inventory_pressed = input.open_inventory_pressed || input.text_cancel_pressed;
   frame.open_chat_pressed = input.open_chat_pressed;
   frame.tab_menu_held = input.tab_menu_held;
   frame.hotbar_select = input.hotbar_select;
