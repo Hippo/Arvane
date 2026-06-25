@@ -45,7 +45,7 @@ struct CombatValidationFixture {
     player->selected_hotbar_slot = 0;
     player->resolved_permissions.core.can_interact = true;
     const std::optional<arv::player::ItemID> pickaxe =
-        item_registry.find_item("arvane:wood_pickaxe");
+        item_registry.find_item("arvane:iron_pickaxe");
     EXPECT_TRUE(pickaxe.has_value());
     EXPECT_TRUE(player->inventory.set_slot(
         0,
@@ -679,7 +679,7 @@ TEST(PlayerInteractionTests, TaggedAttackingItemCanApplyCriticalMultiplier) {
   fixture.config.critical_chance = 100.0F;
   fixture.config.critical_multiplier = 2.0F;
   const std::optional<arv::player::ItemID> sword =
-      fixture.item_registry.find_item("arvane:wood_sword");
+      fixture.item_registry.find_item("arvane:iron_sword");
   ASSERT_TRUE(sword.has_value());
   ASSERT_TRUE(fixture.player->inventory.set_slot(
       0,
@@ -717,7 +717,7 @@ TEST(PlayerInteractionTests, CriticalChanceZeroDisablesTaggedItemCriticals) {
   fixture.config.critical_chance = 0.0F;
   fixture.config.critical_multiplier = 2.0F;
   const std::optional<arv::player::ItemID> sword =
-      fixture.item_registry.find_item("arvane:wood_sword");
+      fixture.item_registry.find_item("arvane:iron_sword");
   ASSERT_TRUE(sword.has_value());
   ASSERT_TRUE(fixture.player->inventory.set_slot(
       0,
@@ -757,7 +757,7 @@ TEST(PlayerInteractionTests, ServerCriticalHitSpawnsClientParticleEvent) {
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
 
-  set_test_player_held_item(server, item_registry, "arvane:wood_sword");
+  set_test_player_held_item(server, item_registry, "arvane:iron_sword");
   arv::entity::EntityComponentSet components;
   components.collision = arv::entity::AuthoredCollisionComponent{{0.9F, 0.9F, 0.9F}};
   components.health = arv::entity::AuthoredHealthComponent{10.0F};
@@ -1381,7 +1381,7 @@ TEST(PlayerInteractionTests, VehicleAttacksDamageSmokeAndExplodeAtZeroHealth) {
   ASSERT_TRUE(client.connect_integrated());
   complete_integrated_handshake(server, client);
 
-  set_test_player_held_item(server, item_registry, "arvane:wood_sword");
+  set_test_player_held_item(server, item_registry, "arvane:iron_sword");
   arv::player::PlayerState& player_state = connected_player(server);
   player_state.position = {0.0F, 1.0F, 0.0F};
   player_state.velocity = {};
@@ -2054,7 +2054,7 @@ TEST(PlayerInteractionTests, MasonMarkerClicksSetSelectionWithoutEditingBlocks) 
   prepare_test_player(server, item_registry);
   arv::player::PlayerState& player_state = connected_player(server);
   const std::optional<arv::player::ItemID> sword =
-      item_registry.find_item("arvane:wood_sword");
+      item_registry.find_item("arvane:iron_sword");
   ASSERT_TRUE(sword.has_value());
   ASSERT_TRUE(player_state.inventory.set_slot(
       0,
@@ -2276,7 +2276,7 @@ TEST(PlayerInteractionTests, MatchingToolBreaksMineableBlocksFasterThanHand) {
   }
   EXPECT_EQ(server.voxel_world().get_block({{3, 1, 0}}), stone);
 
-  set_test_player_held_item(server, item_registry, "arvane:wood_pickaxe");
+  set_test_player_held_item(server, item_registry, "arvane:iron_pickaxe");
   for (int tick = 0; tick < 4; ++tick) {
     client.fixed_tick(server.tick_index());
     server.tick();
@@ -2388,7 +2388,7 @@ TEST(PlayerInteractionTests, BlockDropsSpawnWhenBrokenWithMatchingToolOrNoRequir
 
   (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
   ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, stone));
-  set_test_player_held_item(server, item_registry, "arvane:wood_pickaxe");
+  set_test_player_held_item(server, item_registry, "arvane:iron_pickaxe");
   client.submit_input(arv::client::InputFrame{.primary_pressed = true});
   client.fixed_tick(server.tick_index());
   server.tick();

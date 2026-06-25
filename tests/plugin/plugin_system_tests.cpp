@@ -441,7 +441,7 @@ TEST(PluginLoadTests, MasonPluginLoadsAndRegistersCommands) {
       marker_result.messages.front().text.find("Marker added to your inventory"),
       std::string::npos);
   const std::optional<arv::player::ItemID> sword =
-      item_registry.find_item("arvane:wood_sword");
+      item_registry.find_item("arvane:iron_sword");
   ASSERT_TRUE(sword.has_value());
   bool marker_found = false;
   for (const std::optional<arv::player::ItemStack>& slot : player.inventory.slots()) {

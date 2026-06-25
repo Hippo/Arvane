@@ -1035,10 +1035,10 @@ TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
   crafting_menu.crafting.search_selection_start = 1U;
   crafting_menu.crafting.search_selection_end = 3U;
   crafting_menu.crafting.recipes = {
-      {"arvane:wood_sword", "Wood Sword", slots[0], true, true},
+      {"arvane:iron_sword", "Iron Sword", slots[0], true, true},
   };
-  crafting_menu.crafting.selected_recipe_id = "arvane:wood_sword";
-  crafting_menu.crafting.selected_recipe_label = "Wood Sword";
+  crafting_menu.crafting.selected_recipe_id = "arvane:iron_sword";
+  crafting_menu.crafting.selected_recipe_label = "Iron Sword";
   crafting_menu.crafting.selected_ingredients = {
       {"Oak Log", 2U, 0U, false},
       {"Stone", 1U, 0U, false},

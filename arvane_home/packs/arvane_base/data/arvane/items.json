@@ -9,13 +9,45 @@
       "texture": "arvane:texture/item/coal"
     },
     {
-      "name": "arvane:wood_pickaxe",
+      "name": "arvane:copper",
+      "category": "resources",
+      "max_stack_size": 64,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/copper"
+    },
+    {
+      "name": "arvane:copper_bar",
+      "category": "resources",
+      "max_stack_size": 64,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/copper_bar"
+    },
+    {
+      "name": "arvane:iron",
+      "category": "resources",
+      "max_stack_size": 64,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/iron"
+    },
+    {
+      "name": "arvane:iron_bar",
+      "category": "resources",
+      "max_stack_size": 64,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/iron_bar"
+    },
+    {
+      "name": "arvane:iron_pickaxe",
       "behavior": "arvane:item_behavior/tool",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
       "render_type": "texture",
-      "texture": "arvane:texture/item/pickaxe",
+      "texture": "arvane:texture/item/iron_pickaxe",
       "held_animations": {
         "secondary_use_start": null
       },
@@ -35,7 +67,7 @@
       }
     },
     {
-      "name": "arvane:wood_sword",
+      "name": "arvane:iron_sword",
       "behavior": "arvane:item_behavior/tool",
       "category": "tools",
       "tags": [
@@ -44,7 +76,7 @@
       "max_stack_size": 1,
       "buoyancy": 1.0,
       "render_type": "texture",
-      "texture": "arvane:texture/item/sword",
+      "texture": "arvane:texture/item/iron_sword",
       "held_animations": {
         "secondary_use_start": null
       },
@@ -60,13 +92,13 @@
       }
     },
     {
-      "name": "arvane:wood_shovel",
+      "name": "arvane:iron_shovel",
       "behavior": "arvane:item_behavior/tool",
       "category": "tools",
       "max_stack_size": 1,
       "buoyancy": 1.0,
       "render_type": "texture",
-      "texture": "arvane:texture/item/shovel",
+      "texture": "arvane:texture/item/iron_shovel",
       "held_animations": {
         "secondary_use_start": null
       },

@@ -42,35 +42,35 @@ inline player::ItemRegistry make_test_item_registry(const voxel::BlockRegistry& 
   items.push_back(std::move(bucket));
 
   player::ItemDefinition pickaxe;
-  pickaxe.name = "arvane:wood_pickaxe";
-  pickaxe.display_name = "Wood Pickaxe";
+  pickaxe.name = "arvane:iron_pickaxe";
+  pickaxe.display_name = "Iron Pickaxe";
   pickaxe.category = "tools";
   pickaxe.max_stack_size = 1;
   pickaxe.explicit_render_type = player::ItemRenderType::Texture;
-  pickaxe.texture_asset = "arvane:texture/item/pickaxe";
+  pickaxe.texture_asset = "arvane:texture/item/iron_pickaxe";
   pickaxe.tool_category = "pickaxe";
   pickaxe.tool_break_speed_multiplier = 4.0F;
   pickaxe.attack_data = player::ItemAttackData{3.0F, 3.0F, 21U};
   items.push_back(std::move(pickaxe));
 
   player::ItemDefinition sword;
-  sword.name = "arvane:wood_sword";
-  sword.display_name = "Wood Sword";
+  sword.name = "arvane:iron_sword";
+  sword.display_name = "Iron Sword";
   sword.category = "tools";
   sword.tags.push_back("arvane:combat/attacking");
   sword.max_stack_size = 1;
   sword.explicit_render_type = player::ItemRenderType::Texture;
-  sword.texture_asset = "arvane:texture/item/sword";
+  sword.texture_asset = "arvane:texture/item/iron_sword";
   sword.attack_data = player::ItemAttackData{5.0F, 3.0F, 21U};
   items.push_back(std::move(sword));
 
   player::ItemDefinition shovel;
-  shovel.name = "arvane:wood_shovel";
-  shovel.display_name = "Wood Shovel";
+  shovel.name = "arvane:iron_shovel";
+  shovel.display_name = "Iron Shovel";
   shovel.category = "tools";
   shovel.max_stack_size = 1;
   shovel.explicit_render_type = player::ItemRenderType::Texture;
-  shovel.texture_asset = "arvane:texture/item/shovel";
+  shovel.texture_asset = "arvane:texture/item/iron_shovel";
   shovel.tool_category = "shovel";
   shovel.tool_break_speed_multiplier = 4.0F;
   shovel.attack_data = player::ItemAttackData{2.0F, 3.0F, 21U};

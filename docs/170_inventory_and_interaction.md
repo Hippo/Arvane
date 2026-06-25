@@ -106,7 +106,7 @@ Example authored names:
 - `arvane:stone`
 - `arvane:dirt`
 - `arvane:grass_block`
-- `arvane:wood_pickaxe`
+- `arvane:iron_pickaxe`
 - `arvane:torch`
 
 Runtime item IDs must not be hard-coded into gameplay logic.
@@ -117,7 +117,7 @@ Item definitions may include tags for gameplay grouping:
 
 ```json
 {
-  "name": "arvane:wood_sword",
+  "name": "arvane:iron_sword",
   "tags": ["arvane:combat/attacking"]
 }
 ```
@@ -131,7 +131,7 @@ Items may declare a stable behavior ID:
 
 ```json
 {
-  "name": "arvane:wood_pickaxe",
+  "name": "arvane:iron_pickaxe",
   "behavior": "arvane:item_behavior/tool"
 }
 ```
@@ -254,7 +254,7 @@ Used for:
 Required field:
 
 ```json
-"texture": "wood_pickaxe.png"
+"texture": "iron_pickaxe.png"
 ```
 
 ### `Model`
@@ -309,9 +309,9 @@ Example explicit item:
 
 ```json
 {
-  "name": "arvane:wood_pickaxe",
+  "name": "arvane:iron_pickaxe",
   "render_type": "texture",
-  "texture": "wood_pickaxe.png"
+  "texture": "iron_pickaxe.png"
 }
 ```
 

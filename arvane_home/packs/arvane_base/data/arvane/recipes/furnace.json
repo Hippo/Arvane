@@ -1,0 +1,32 @@
+{
+  "id": "arvane:furnace",
+  "type": "arvane:crafting",
+  "category": "arvane:building",
+  "icon": {
+    "item": "arvane:furnace"
+  },
+  "ingredients": [
+    {
+      "item": "arvane:copper",
+      "count": 1
+    },
+    {
+      "item": "arvane:stone",
+      "count": 8
+    }
+  ],
+  "result": {
+    "item": "arvane:furnace",
+    "count": 1
+  },
+  "unlock": {
+    "collect_items": [
+      "arvane:copper"
+    ]
+  },
+  "search_terms": [
+    "furnace",
+    "smelting",
+    "stone"
+  ]
+}

@@ -6,10 +6,14 @@ block:
       display_name: Dirt
     glass:
       display_name: Glass
+    furnace:
+      display_name: Furnace
     glowstone:
       display_name: Glowstone
     grass_block:
       display_name: Grass Block
+    copper_ore:
+      display_name: Copper Ore
     iron_ore:
       display_name: Iron Ore
     oak_leaves:
@@ -37,6 +41,18 @@ item:
       display_name: Missing Item
     coal:
       display_name: Coal
+    copper:
+      display_name: Copper
+    copper_bar:
+      display_name: Copper Bar
+    copper_ore:
+      display_name: Copper Ore
+    furnace:
+      display_name: Furnace
+    iron:
+      display_name: Iron
+    iron_bar:
+      display_name: Iron Bar
     iron_ore:
       display_name: Iron Ore
     oak_leaves:
@@ -49,12 +65,12 @@ item:
       display_name: Short Grass
     chest:
       display_name: Chest
-    wood_pickaxe:
-      display_name: Wood Pickaxe
-    wood_sword:
-      display_name: Wood Sword
-    wood_shovel:
-      display_name: Wood Shovel
+    iron_pickaxe:
+      display_name: Iron Pickaxe
+    iron_sword:
+      display_name: Iron Sword
+    iron_shovel:
+      display_name: Iron Shovel
     bucket:
       display_name: Bucket
     water_bucket:

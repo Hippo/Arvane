@@ -32,6 +32,7 @@ features:
   stages:
     underground_ores:
       - arvane:worldgen/placed_feature/ore_iron
+      - arvane:worldgen/placed_feature/ore_copper
 
 structure_sets:
   - arvane:worldgen/structure_set/small_ruins

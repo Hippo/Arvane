@@ -22,9 +22,9 @@ TEST(ItemUiModelTests, ProjectsInventoryContainerAndCursorStacks) {
   const std::optional<arv::player::ItemID> bucket_id =
       fixture.item_registry.find_item("arvane:bucket");
   const std::optional<arv::player::ItemID> pickaxe_id =
-      fixture.item_registry.find_item("arvane:wood_pickaxe");
+      fixture.item_registry.find_item("arvane:iron_pickaxe");
   const std::optional<arv::player::ItemID> sword_id =
-      fixture.item_registry.find_item("arvane:wood_sword");
+      fixture.item_registry.find_item("arvane:iron_sword");
   ASSERT_TRUE(bucket_id.has_value());
   ASSERT_TRUE(pickaxe_id.has_value());
   ASSERT_TRUE(sword_id.has_value());
@@ -59,11 +59,11 @@ TEST(ItemUiModelTests, ProjectsInventoryContainerAndCursorStacks) {
   EXPECT_EQ(projection.inventory_slots[0].count, 4U);
   ASSERT_EQ(projection.container_slots.size(), 2U);
   EXPECT_TRUE(projection.container_slots[0].item_name.empty());
-  EXPECT_EQ(projection.container_slots[1].item_name, "arvane:wood_pickaxe");
-  EXPECT_EQ(projection.container_slots[1].display_name, "Wood Pickaxe");
+  EXPECT_EQ(projection.container_slots[1].item_name, "arvane:iron_pickaxe");
+  EXPECT_EQ(projection.container_slots[1].display_name, "Iron Pickaxe");
   ASSERT_TRUE(projection.carried_stack.has_value());
-  EXPECT_EQ(projection.carried_stack->item_name, "arvane:wood_sword");
-  EXPECT_EQ(projection.carried_stack->display_name, "Wood Sword");
+  EXPECT_EQ(projection.carried_stack->item_name, "arvane:iron_sword");
+  EXPECT_EQ(projection.carried_stack->display_name, "Iron Sword");
 }
 
 TEST(ItemUiModelTests, OmitsContainerProjectionWhenContainerClosed) {

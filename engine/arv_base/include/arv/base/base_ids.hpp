@@ -52,7 +52,7 @@ inline constexpr std::string_view WaterBlockID = "arvane:water";
 inline constexpr std::string_view BucketItemID = "arvane:bucket";
 inline constexpr std::string_view WaterBucketItemID = "arvane:water_bucket";
 inline constexpr std::string_view CoalItemID = "arvane:coal";
-inline constexpr std::string_view WoodPickaxeItemID = "arvane:wood_pickaxe";
+inline constexpr std::string_view IronPickaxeItemID = "arvane:iron_pickaxe";
 
 inline constexpr std::string_view OverworldWorldgenDataID = "arvane:worldgen/dimension/overworld";
 

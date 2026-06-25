@@ -9,7 +9,7 @@
 namespace arv_mason {
 namespace {
 
-inline constexpr std::string_view MarkerItemName = "arvane:wood_sword";
+inline constexpr std::string_view MarkerItemName = "arvane:iron_sword";
 
 } // namespace
 

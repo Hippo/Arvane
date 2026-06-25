@@ -33,6 +33,7 @@ arv::voxel::BlockRegistry make_worldgen_registry() {
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:stone"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:sand"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:iron_ore"));
+  definitions.push_back(arv::voxel::make_full_cube_definition("arvane:copper_ore"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:oak_log"));
   definitions.push_back(arv::voxel::make_full_cube_definition("arvane:oak_leaves"));
   arv::voxel::BlockDefinition short_grass =

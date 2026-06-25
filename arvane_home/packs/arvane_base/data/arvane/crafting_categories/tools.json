@@ -2,7 +2,7 @@
   "id": "arvane:tools",
   "name": "Tools",
   "icon": {
-    "item": "arvane:wood_pickaxe"
+    "item": "arvane:iron_pickaxe"
   },
   "sort_order": 200
 }

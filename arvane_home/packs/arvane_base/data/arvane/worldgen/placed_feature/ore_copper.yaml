@@ -1,0 +1,23 @@
+id: arvane:worldgen/placed_feature/ore_copper
+version: 1
+
+feature: arvane:worldgen/configured_feature/ore_copper
+salt: 52981
+
+placement:
+  stage: underground_ores
+
+  count:
+    type: uniform
+    min: 6
+    max: 12
+
+  height:
+    type: trapezoid
+    min_y: -56
+    max_y: 72
+    peak_y: 8
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/land

@@ -54,6 +54,34 @@
       }
     },
     {
+      "name": "arvane:furnace",
+      "display_name": "Furnace",
+      "buoyancy": 1.0,
+      "render_category": "opaque",
+      "tags": [
+        "arvane:mineable/pickaxe"
+      ],
+      "blast": {
+        "resistance": 4.5
+      },
+      "textures": {
+        "top": "arvane:texture/block/furnace_top",
+        "bottom": "arvane:texture/block/furnace_top",
+        "side": "arvane:texture/block/furnace_side",
+        "north": "arvane:texture/block/furnace_front",
+        "particle": "arvane:texture/block/furnace_side"
+      },
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "hardness": 3.5
+      }
+    },
+    {
       "name": "arvane:glowstone",
       "buoyancy": 1.0,
       "render_category": "opaque",
@@ -134,6 +162,7 @@
     {
       "name": "arvane:iron_ore",
       "buoyancy": 1.0,
+      "drops": "arvane:iron",
       "render_category": "opaque",
       "tags": [
         "arvane:mineable/pickaxe"
@@ -142,6 +171,28 @@
         "resistance": 6.0
       },
       "textures": "arvane:texture/block/iron_ore",
+      "properties": {
+        "solid": true,
+        "collidable": true,
+        "opaque": true,
+        "blocks_light": true,
+        "full_cube": true,
+        "ao_occluder": true,
+        "hardness": 3.0
+      }
+    },
+    {
+      "name": "arvane:copper_ore",
+      "buoyancy": 1.0,
+      "drops": "arvane:copper",
+      "render_category": "opaque",
+      "tags": [
+        "arvane:mineable/pickaxe"
+      ],
+      "blast": {
+        "resistance": 6.0
+      },
+      "textures": "arvane:texture/block/copper_ore",
       "properties": {
         "solid": true,
         "collidable": true,

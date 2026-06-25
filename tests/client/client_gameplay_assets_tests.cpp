@@ -6,6 +6,7 @@
 #include "arv/client/block_render_assets.hpp"
 #include "arv/client/client_gameplay_assets.hpp"
 #include "arv/client/particles.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/entity/components.hpp"
 #include "support/temp_dir.hpp"
 
@@ -64,6 +65,63 @@ TEST(ClientGameplayAssetsTests, LoadsEntityItemAnimationAndUiTextureAssetsTogeth
   EXPECT_GT(gameplay_assets.value().item_animation_library.clip_count(), 0U);
   EXPECT_FALSE(gameplay_assets.value().ui_texture_assets.item_atlas.pages.empty());
   EXPECT_TRUE(gameplay_assets.value().ui_texture_assets.crosshair_image.valid);
+
+  const auto iron_ore_variant =
+      block_assets.value().block_registry.find_variant("arvane:iron_ore");
+  const auto copper_ore_variant =
+      block_assets.value().block_registry.find_variant("arvane:copper_ore");
+  const auto furnace_variant =
+      block_assets.value().block_registry.find_variant("arvane:furnace");
+  ASSERT_TRUE(iron_ore_variant.has_value());
+  ASSERT_TRUE(copper_ore_variant.has_value());
+  ASSERT_TRUE(furnace_variant.has_value());
+
+  const auto* iron_ore = block_assets.value().block_registry.block(
+      block_assets.value().block_registry.block_id(iron_ore_variant.value()));
+  const auto* copper_ore = block_assets.value().block_registry.block(
+      block_assets.value().block_registry.block_id(copper_ore_variant.value()));
+  const auto* furnace =
+      block_assets.value().block_registry.variant(furnace_variant.value());
+  ASSERT_NE(iron_ore, nullptr);
+  ASSERT_NE(copper_ore, nullptr);
+  ASSERT_NE(furnace, nullptr);
+  EXPECT_EQ(iron_ore->drops.kind, arv::voxel::BlockDropKind::Item);
+  EXPECT_EQ(iron_ore->drops.item_name, "arvane:iron");
+  EXPECT_EQ(copper_ore->drops.kind, arv::voxel::BlockDropKind::Item);
+  EXPECT_EQ(copper_ore->drops.item_name, "arvane:copper");
+  EXPECT_EQ(
+      furnace->texture_assets[arv::voxel::face_index(arv::voxel::BlockFace::NegativeZ)],
+      "arvane:texture/block/furnace_front");
+  EXPECT_EQ(
+      furnace->texture_assets[arv::voxel::face_index(arv::voxel::BlockFace::PositiveY)],
+      "arvane:texture/block/furnace_top");
+
+  const arv::player::ItemRegistry& item_registry =
+      gameplay_assets.value().entity_assets.item_registry;
+  EXPECT_TRUE(item_registry.find_item("arvane:copper").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:copper_bar").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:iron").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:iron_bar").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:iron_pickaxe").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:iron_sword").has_value());
+  EXPECT_TRUE(item_registry.find_item("arvane:iron_shovel").has_value());
+  EXPECT_FALSE(item_registry.find_item("arvane:wood_pickaxe").has_value());
+  EXPECT_FALSE(item_registry.find_item("arvane:wood_sword").has_value());
+  EXPECT_FALSE(item_registry.find_item("arvane:wood_shovel").has_value());
+
+  auto crafting_registry =
+      arv::crafting::load_crafting_registry_from_packs(packs.value(), item_registry);
+  ASSERT_TRUE(crafting_registry) << crafting_registry.error().message;
+  EXPECT_TRUE(crafting_registry.value().diagnostics.empty());
+  const arv::crafting::CraftingRecipe* furnace_recipe =
+      crafting_registry.value().registry.recipe("arvane:furnace");
+  ASSERT_NE(furnace_recipe, nullptr);
+  EXPECT_EQ(furnace_recipe->result.item_name, "arvane:furnace");
+  ASSERT_EQ(furnace_recipe->ingredients.size(), 2U);
+  EXPECT_EQ(furnace_recipe->ingredients[0].item_name, "arvane:copper");
+  EXPECT_EQ(furnace_recipe->ingredients[0].count, 1U);
+  EXPECT_EQ(furnace_recipe->ingredients[1].item_name, "arvane:stone");
+  EXPECT_EQ(furnace_recipe->ingredients[1].count, 8U);
 }
 
 TEST(ClientGameplayAssetsTests, LoadsGameplayAssetsFromInstalledClientBundleCache) {

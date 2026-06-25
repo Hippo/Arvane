@@ -1,9 +1,9 @@
 {
-  "id": "arvane:wood_sword",
+  "id": "arvane:iron_sword",
   "type": "arvane:crafting",
   "category": "arvane:combat",
   "icon": {
-    "item": "arvane:wood_sword"
+    "item": "arvane:iron_sword"
   },
   "ingredients": [
     {
@@ -16,7 +16,7 @@
     }
   ],
   "result": {
-    "item": "arvane:wood_sword",
+    "item": "arvane:iron_sword",
     "count": 1
   },
   "unlock": {

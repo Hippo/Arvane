@@ -14,7 +14,7 @@ std::span<const StarterInventoryItem> starter_inventory_items() noexcept {
       {ids::GlassBlockID, 64},
       {ids::GlowstoneBlockID, 64},
       {ids::CoalItemID, 32},
-      {ids::WoodPickaxeItemID, 1},
+      {ids::IronPickaxeItemID, 1},
       {ids::BucketItemID, 1},
       {ids::WaterBucketItemID, 1},
   }};

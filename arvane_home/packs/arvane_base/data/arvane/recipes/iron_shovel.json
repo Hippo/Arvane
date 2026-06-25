@@ -1,9 +1,9 @@
 {
-  "id": "arvane:wood_shovel",
+  "id": "arvane:iron_shovel",
   "type": "arvane:crafting",
   "category": "arvane:tools",
   "icon": {
-    "item": "arvane:wood_shovel"
+    "item": "arvane:iron_shovel"
   },
   "ingredients": [
     {
@@ -16,7 +16,7 @@
     }
   ],
   "result": {
-    "item": "arvane:wood_shovel",
+    "item": "arvane:iron_shovel",
     "count": 1
   },
   "unlock": {

@@ -1,9 +1,9 @@
 {
-  "id": "arvane:wood_pickaxe",
+  "id": "arvane:iron_pickaxe",
   "type": "arvane:crafting",
   "category": "arvane:tools",
   "icon": {
-    "item": "arvane:wood_pickaxe"
+    "item": "arvane:iron_pickaxe"
   },
   "ingredients": [
     {
@@ -16,7 +16,7 @@
     }
   ],
   "result": {
-    "item": "arvane:wood_pickaxe",
+    "item": "arvane:iron_pickaxe",
     "count": 1
   },
   "unlock": {

@@ -463,7 +463,7 @@ TEST(ProtocolTests, CraftingPacketsRoundTripThroughSerialization) {
   EXPECT_EQ(decoded_result.value().result, result.result);
 
   const arv::protocol::ClientboundRecipeBookSnapshot snapshot{
-      {"arvane:stone_stairs", "arvane:wood_pickaxe"}};
+      {"arvane:stone_stairs", "arvane:iron_pickaxe"}};
   const auto decoded_snapshot = arv::protocol::deserialize_clientbound_recipe_book_snapshot(
       arv::protocol::serialize_clientbound_recipe_book_snapshot(snapshot));
   ASSERT_TRUE(decoded_snapshot) << decoded_snapshot.error().message;

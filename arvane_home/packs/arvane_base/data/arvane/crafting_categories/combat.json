@@ -2,7 +2,7 @@
   "id": "arvane:combat",
   "name": "Combat",
   "icon": {
-    "item": "arvane:wood_sword"
+    "item": "arvane:iron_sword"
   },
   "sort_order": 300
 }

@@ -110,7 +110,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
       arv::Location{40.5F, 71.0F, -12.5F, 0.75F, -0.125F};
   player.game_mode_id = std::string{arv::player::CreativeGameModeID};
   player.selected_hotbar_slot = 3;
-  player.unlocked_recipe_ids = {"arvane:stone_stairs", "arvane:wood_pickaxe"};
+  player.unlocked_recipe_ids = {"arvane:stone_stairs", "arvane:iron_pickaxe"};
   ASSERT_TRUE(player.inventory.set_slot(
       0,
       arv::player::ItemStack{stone_item, 7, stack_data("player")}));
@@ -191,7 +191,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
     EXPECT_NE(player_json.find("\"inventory_version\": 2"), std::string::npos);
     EXPECT_NE(player_json.find("\"respawn\""), std::string::npos);
     EXPECT_NE(player_json.find("\"unlocked_recipes\""), std::string::npos);
-    EXPECT_NE(player_json.find("\"arvane:wood_pickaxe\""), std::string::npos);
+    EXPECT_NE(player_json.find("\"arvane:iron_pickaxe\""), std::string::npos);
     EXPECT_NE(player_json.find("\"data\""), std::string::npos);
     EXPECT_NE(player_json.find("\"player\""), std::string::npos);
     EXPECT_EQ(player_json.find("\"groups\""), std::string::npos);
@@ -259,7 +259,7 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_EQ(loaded.value().players[0].selected_hotbar_slot, 3U);
   EXPECT_EQ(
       loaded.value().players[0].unlocked_recipe_ids,
-      (std::vector<std::string>{"arvane:stone_stairs", "arvane:wood_pickaxe"}));
+      (std::vector<std::string>{"arvane:stone_stairs", "arvane:iron_pickaxe"}));
   ASSERT_TRUE(loaded.value().players[0].inventory.slot(0).has_value());
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->item, stone_item);
   EXPECT_EQ(loaded.value().players[0].inventory.slot(0)->count, 7U);
