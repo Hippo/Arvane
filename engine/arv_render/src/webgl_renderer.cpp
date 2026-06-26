@@ -601,6 +601,21 @@ void draw_webgl_ui_frame(
     i32 viewport_width,
     i32 viewport_height,
     WebGLUiTextures textures) {
+  u8 max_layer = 0U;
+  for (const UIRectDrawItem& rect : frame.ui_rects) {
+    max_layer = std::max(max_layer, rect.layer);
+  }
+  for (const UITexturedQuadDrawItem& quad : frame.ui_textured_quads) {
+    max_layer = std::max(max_layer, quad.layer);
+  }
+  for (const UIGlyphDrawItem& glyph : frame.ui_glyphs) {
+    max_layer = std::max(max_layer, glyph.layer);
+  }
+
+  glDisable(GL_DEPTH_TEST);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
   std::vector<WebGLUiVertex> color_vertices;
   std::vector<WebGLUiVertex> font_vertices;
   std::vector<WebGLUiVertex> terrain_vertices;
@@ -610,76 +625,88 @@ void draw_webgl_ui_frame(
   terrain_vertices.reserve(frame.ui_textured_quads.size() * 6U);
   item_vertices.reserve(frame.ui_textured_quads.size() * 6U);
 
-  for (const UIRectDrawItem& rect : frame.ui_rects) {
-    append_ui_rect_vertices(color_vertices, rect);
-  }
-  for (const UITexturedQuadDrawItem& quad : frame.ui_textured_quads) {
-    switch (quad.source) {
-      case UiTextureSource::TerrainAtlas:
-        append_ui_quad_vertices(
-            terrain_vertices,
-            quad.positions,
-            quad.uvs,
-            quad.color,
-            quad.page);
-        break;
-      case UiTextureSource::ItemAtlas:
-        append_ui_quad_vertices(
-            item_vertices,
-            quad.positions,
-            quad.uvs,
-            quad.color,
-            quad.page);
-        break;
-      case UiTextureSource::White:
-        append_ui_quad_vertices(
-            color_vertices,
-            quad.positions,
-            quad.uvs,
-            quad.color,
-            0U);
-        break;
-      case UiTextureSource::FontAtlas:
-        append_ui_quad_vertices(
-            font_vertices,
-            quad.positions,
-            quad.uvs,
-            quad.color,
-            quad.page);
-        break;
-      case UiTextureSource::PlayerSkinAtlas:
-        break;
-    }
-  }
-  for (const UIGlyphDrawItem& glyph : frame.ui_glyphs) {
-    append_ui_glyph_vertices(font_vertices, glyph);
-  }
+  for (u32 layer = 0U; layer <= static_cast<u32>(max_layer); ++layer) {
+    color_vertices.clear();
+    font_vertices.clear();
+    terrain_vertices.clear();
+    item_vertices.clear();
 
-  glDisable(GL_DEPTH_TEST);
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  draw_ui_vertices(color_vertices, renderer, viewport_width, viewport_height, 0, 0U);
-  draw_ui_vertices(
-      terrain_vertices,
-      renderer,
-      viewport_width,
-      viewport_height,
-      1,
-      textures.terrain_texture);
-  draw_ui_vertices(
-      item_vertices,
-      renderer,
-      viewport_width,
-      viewport_height,
-      1,
-      textures.item_texture);
-  draw_ui_vertices(
-      font_vertices,
-      renderer,
-      viewport_width,
-      viewport_height,
-      1,
-      textures.font_texture);
+    const u8 current_layer = static_cast<u8>(layer);
+    for (const UIRectDrawItem& rect : frame.ui_rects) {
+      if (rect.layer == current_layer) {
+        append_ui_rect_vertices(color_vertices, rect);
+      }
+    }
+    for (const UITexturedQuadDrawItem& quad : frame.ui_textured_quads) {
+      if (quad.layer != current_layer) {
+        continue;
+      }
+      switch (quad.source) {
+        case UiTextureSource::TerrainAtlas:
+          append_ui_quad_vertices(
+              terrain_vertices,
+              quad.positions,
+              quad.uvs,
+              quad.color,
+              quad.page);
+          break;
+        case UiTextureSource::ItemAtlas:
+          append_ui_quad_vertices(
+              item_vertices,
+              quad.positions,
+              quad.uvs,
+              quad.color,
+              quad.page);
+          break;
+        case UiTextureSource::White:
+          append_ui_quad_vertices(
+              color_vertices,
+              quad.positions,
+              quad.uvs,
+              quad.color,
+              0U);
+          break;
+        case UiTextureSource::FontAtlas:
+          append_ui_quad_vertices(
+              font_vertices,
+              quad.positions,
+              quad.uvs,
+              quad.color,
+              quad.page);
+          break;
+        case UiTextureSource::PlayerSkinAtlas:
+          break;
+      }
+    }
+    for (const UIGlyphDrawItem& glyph : frame.ui_glyphs) {
+      if (glyph.layer == current_layer) {
+        append_ui_glyph_vertices(font_vertices, glyph);
+      }
+    }
+
+    draw_ui_vertices(color_vertices, renderer, viewport_width, viewport_height, 0, 0U);
+    draw_ui_vertices(
+        terrain_vertices,
+        renderer,
+        viewport_width,
+        viewport_height,
+        1,
+        textures.terrain_texture);
+    draw_ui_vertices(
+        item_vertices,
+        renderer,
+        viewport_width,
+        viewport_height,
+        1,
+        textures.item_texture);
+    draw_ui_vertices(
+        font_vertices,
+        renderer,
+        viewport_width,
+        viewport_height,
+        1,
+        textures.font_texture);
+  }
   glDisable(GL_BLEND);
   glEnable(GL_DEPTH_TEST);
 }

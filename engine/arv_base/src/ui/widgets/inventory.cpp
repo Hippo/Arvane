@@ -29,6 +29,7 @@ constexpr f32 PlayerMenuExitHeight = 320.0F;
 constexpr f32 PlayerMenuPlaceholderHeight = 320.0F;
 constexpr f32 PlayerMenuMinimumTopOffset = 16.0F;
 constexpr f32 PlayerMenuContentTop = 66.0F;
+constexpr u8 InventoryTooltipLayer = 1U;
 constexpr f32 RecipeSlotSize = 44.0F;
 constexpr f32 RecipeSlotSpacing = 6.0F;
 constexpr f32 PlayerMenuSettingsX = 24.0F;
@@ -1366,7 +1367,7 @@ void append_player_menu_ui(UiTree& tree, PlayerMenuUiModel model) {
     append_inventory_section(
         tree,
         panel_id,
-        std::move(model.inventory),
+        model.inventory,
         {
             (PlayerMenuWidth - inventory_grid_width(
                                    PlayerMenuInventorySlotSize,
@@ -1670,6 +1671,7 @@ void append_item_tooltip(UiTree& tree, ItemTooltipUiModel model) {
   tooltip.style.background = theme.colors.surface_alt;
   tooltip.style.background.w = std::min(tooltip.style.background.w, 0.96F);
   tooltip.hit_test = false;
+  tooltip.layer = widgets_detail::InventoryTooltipLayer;
   widgets_detail::style_surface(tooltip, theme, theme.layout.radius_md);
   const UiNodeID tooltip_id = tree.add_child(tree.root_id(), std::move(tooltip));
 

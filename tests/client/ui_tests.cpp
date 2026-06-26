@@ -988,6 +988,9 @@ TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
   inventory_menu.inventory.title = "Inventory";
   inventory_menu.inventory.hotbar_slot_count = 9U;
   inventory_menu.inventory.slots = {slots.data(), slots.size()};
+  inventory_menu.inventory.cursor_stack =
+      arv::ui::UiItemStackView{"arvane:bucket", "Bucket", 2U};
+  inventory_menu.cursor_position = {320.0F, 260.0F};
   arv::ui::append_player_menu_ui(tree, inventory_menu);
   tree.layout({800.0F, 600.0F}, &text);
 
@@ -1014,6 +1017,13 @@ TEST(GameplayUiTests, PlayerMenuKeepsTabsStableAndSeparatesCraftingLanes) {
   ASSERT_NE(inventory_grid, nullptr);
   ASSERT_NE(inventory_first_slot, nullptr);
   ASSERT_NE(inventory_hotbar, nullptr);
+  const auto* cursor_stack = tree.find_by_stable_id("player_menu.cursor_stack");
+  ASSERT_NE(cursor_stack, nullptr);
+  EXPECT_NEAR(cursor_stack->rect.x, 300.0F, 0.001F);
+  EXPECT_NEAR(cursor_stack->rect.y, 240.0F, 0.001F);
+  const auto* cursor_count = tree.find_by_stable_id("player_menu.cursor_stack.count");
+  ASSERT_NE(cursor_count, nullptr);
+  EXPECT_EQ(cursor_count->text, "2");
   EXPECT_NEAR(inventory_grid->rect.width, 480.0F, 0.001F);
   EXPECT_NEAR(inventory_first_slot->rect.width, 48.0F, 0.001F);
   EXPECT_LE(
@@ -1533,9 +1543,61 @@ TEST(InventoryUiTests, AppendsItemTooltipNearCursor) {
   ASSERT_NE(tooltip, nullptr);
   ASSERT_NE(label, nullptr);
   EXPECT_FALSE(tooltip->hit_test);
+  EXPECT_EQ(tooltip->layer, 1U);
+  EXPECT_EQ(label->layer, tooltip->layer);
   EXPECT_EQ(label->text, "Stone");
   EXPECT_GT(tooltip->rect.x, 120.0F);
   EXPECT_GT(tooltip->rect.y, 160.0F);
+}
+
+TEST(InventoryUiTests, ItemTooltipDrawsOnLayerAboveItemIcons) {
+  FixedTextMeasurer text;
+  arv::ui::UiTree tree;
+
+  arv::ui::UiElement icon;
+  icon.stable_id = "test.item_icon";
+  icon.type = arv::ui::UiElementType::Image;
+  icon.layout.width_mode = arv::ui::UiSizeMode::Fixed;
+  icon.layout.height_mode = arv::ui::UiSizeMode::Fixed;
+  icon.layout.width = 40.0F;
+  icon.layout.height = 40.0F;
+  icon.layout.offset = {140.0F, 180.0F};
+  icon.image.valid = true;
+  icon.image.source = arv::render::UiTextureSource::ItemAtlas;
+  icon.image.uvs = {{
+      {0.0F, 0.0F},
+      {1.0F, 0.0F},
+      {1.0F, 1.0F},
+      {0.0F, 1.0F},
+  }};
+  tree.add_child(tree.root_id(), std::move(icon));
+
+  arv::ui::append_item_tooltip(
+      tree,
+      {true, "Stone", {800.0F, 600.0F}, {120.0F, 160.0F}});
+  tree.layout({800.0F, 600.0F}, &text);
+
+  arv::asset::FontSystem fonts;
+  arv::ui::UiFontStacks stacks;
+  arv::render::FramePacket frame;
+  arv::ui::append_ui_draw_commands(tree, fonts, stacks, frame);
+
+  const bool has_base_item_icon = std::any_of(
+      frame.ui_textured_quads.begin(),
+      frame.ui_textured_quads.end(),
+      [](const arv::render::UITexturedQuadDrawItem& quad) {
+        return quad.source == arv::render::UiTextureSource::ItemAtlas &&
+               quad.layer == 0U;
+      });
+  const bool has_overlay_tooltip_panel = std::any_of(
+      frame.ui_rects.begin(),
+      frame.ui_rects.end(),
+      [](const arv::render::UIRectDrawItem& rect) {
+        return rect.layer == 1U && rect.color.w > 0.0F;
+      });
+
+  EXPECT_TRUE(has_base_item_icon);
+  EXPECT_TRUE(has_overlay_tooltip_panel);
 }
 
 TEST(GameplayUiTests, EmptyPassiveChatDoesNotRenderABox) {
