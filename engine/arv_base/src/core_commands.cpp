@@ -166,6 +166,45 @@ constexpr u32 MaxGiveCount = 4096U;
   return out;
 }
 
+[[nodiscard]] std::string format_permission(const command::Command& definition) {
+  return definition.permission.empty() ? std::string{"none"} : definition.permission;
+}
+
+void add_multiline_field(
+    command::CommandResult& result,
+    std::string_view label,
+    std::string_view value) {
+  if (value.empty()) {
+    result.add_message(
+        command::CommandMessageKind::Info,
+        std::string{label} + ": none");
+    return;
+  }
+
+  if (value.find('\n') == std::string_view::npos) {
+    result.add_message(
+        command::CommandMessageKind::Info,
+        std::string{label} + ": " + std::string{value});
+    return;
+  }
+
+  result.add_message(command::CommandMessageKind::Info, std::string{label} + ":");
+  usize start = 0U;
+  while (start < value.size()) {
+    const usize end = value.find('\n', start);
+    const usize count =
+        end == std::string_view::npos ? std::string_view::npos : end - start;
+    const std::string_view line = value.substr(start, count);
+    result.add_message(
+        command::CommandMessageKind::Info,
+        "  " + std::string{line});
+    if (end == std::string_view::npos) {
+      break;
+    }
+    start = end + 1U;
+  }
+}
+
 [[nodiscard]] std::string format_argument_type(command::CommandArgumentType type) {
   switch (type) {
     case command::CommandArgumentType::String:
@@ -218,6 +257,56 @@ constexpr u32 MaxGiveCount = 4096U;
     out.append(argument.description);
   }
   return out;
+}
+
+[[nodiscard]] std::string_view help_lookup_name(std::string_view command_name) noexcept {
+  if (!command_name.empty() && command_name.front() == '/') {
+    command_name.remove_prefix(1U);
+  }
+  return command_name;
+}
+
+void add_command_detail_messages(
+    command::CommandResult& result,
+    const command::CommandLookup& lookup) {
+  const command::Command& definition = *lookup.command;
+  result.add_message(
+      command::CommandMessageKind::Info,
+      "Name: " + definition.name);
+  if (lookup.used_alias) {
+    result.add_message(
+        command::CommandMessageKind::Info,
+        "Matched alias: " + slash(lookup.input_name));
+  }
+  result.add_message(
+      command::CommandMessageKind::Info,
+      "Aliases: " + format_aliases(definition));
+  result.add_message(
+      command::CommandMessageKind::Info,
+      "Description: " + definition.description);
+  add_multiline_field(result, "Usage", definition.usage);
+  result.add_message(
+      command::CommandMessageKind::Info,
+      "Permission: " + format_permission(definition));
+  if (definition.arguments.empty()) {
+    result.add_message(command::CommandMessageKind::Info, "Arguments: none");
+  } else {
+    result.add_message(command::CommandMessageKind::Info, "Arguments:");
+    for (const command::CommandArgumentSpec& argument : definition.arguments) {
+      result.add_message(
+          command::CommandMessageKind::Info,
+          "  " + format_argument_spec(argument));
+    }
+  }
+  if (!definition.examples.empty()) {
+    result.add_message(command::CommandMessageKind::Info, "Examples:");
+    for (const std::string& example : definition.examples) {
+      result.add_message(command::CommandMessageKind::Info, "  " + example);
+    }
+  }
+  if (!definition.technical_notes.empty()) {
+    add_multiline_field(result, "Notes", definition.technical_notes);
+  }
 }
 
 [[nodiscard]] command::CommandResult services_unavailable(
@@ -369,7 +458,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
     u32 page{};
     if (!parse_page_number(ctx.args[0], page)) {
       const std::optional<command::CommandLookup> lookup =
-          registry->resolve(ctx.args[0]);
+          registry->resolve(help_lookup_name(ctx.args[0]));
       if (!lookup.has_value() || lookup->command == nullptr ||
           !command_visible_to_sender(ctx.sender, ctx.services, *lookup->command)) {
         return command::CommandResult::usage_error(format_msg(
@@ -382,29 +471,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
       const command::Command& definition = *lookup->command;
       command::CommandResult result = command::CommandResult::success(
           "Help for " + slash(command_name_for_display(definition)) + ":");
-      result.add_message(command::CommandMessageKind::Info, "Description: " + definition.description);
-      result.add_message(command::CommandMessageKind::Info, "Usage: " + definition.usage);
-      result.add_message(command::CommandMessageKind::Info, "Aliases: " + format_aliases(definition));
-      result.add_message(command::CommandMessageKind::Info, "Permission: " + definition.permission);
-      if (!definition.arguments.empty()) {
-        result.add_message(command::CommandMessageKind::Info, "Arguments:");
-        for (const command::CommandArgumentSpec& argument : definition.arguments) {
-          result.add_message(
-              command::CommandMessageKind::Info,
-              "  " + format_argument_spec(argument));
-        }
-      }
-      if (!definition.examples.empty()) {
-        result.add_message(command::CommandMessageKind::Info, "Examples:");
-        for (const std::string& example : definition.examples) {
-          result.add_message(command::CommandMessageKind::Info, "  " + example);
-        }
-      }
-      if (!definition.technical_notes.empty()) {
-        result.add_message(
-            command::CommandMessageKind::Info,
-            "Notes: " + definition.technical_notes);
-      }
+      add_command_detail_messages(result, lookup.value());
       return result;
     }
 

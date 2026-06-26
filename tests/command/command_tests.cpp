@@ -419,10 +419,21 @@ TEST(CommandTests, HelpCommandUsesRegisteredMetadataAndAliases) {
       arv::server::server_console_command_sender(),
       "/help summon");
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Name: summon"));
   EXPECT_TRUE(result_contains(result, "Usage: /summon <entity_id>"));
   EXPECT_TRUE(result_contains(result, "Aliases: /spawnentity, /entityspawn"));
   EXPECT_TRUE(result_contains(result, "Permission: arvane.command.summon"));
   EXPECT_TRUE(result_contains(result, "arvane:cow"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/help /tp");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Name: player.teleport"));
+  EXPECT_TRUE(result_contains(result, "Matched alias: /tp"));
+  EXPECT_TRUE(result_contains(result, "Aliases: /tp"));
+  EXPECT_TRUE(result_contains(result, "/tp [target] <x> <y> <z>"));
+  EXPECT_TRUE(result_contains(result, "/tp <target_player> <destination_player>"));
 }
 
 TEST(CommandTests, ConsoleCommandsDoNotNeedSlashAndBypassPlayerPermissions) {
