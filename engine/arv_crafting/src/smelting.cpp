@@ -220,7 +220,7 @@ using SmeltingResult = Expected<T, SmeltingRegistryError>;
     return SmeltingResult<std::vector<SmeltingRule>>::failure(
         pack_file_error(file, "failed to read file: " + text.error().message));
   }
-  auto parsed = parse_smelting_rules_yaml(
+  auto parsed = parse_smelting_rules_json(
       text.value(),
       item_registry,
       file.relative_path.generic_string());
@@ -263,16 +263,16 @@ std::span<const SmeltingRule> SmeltingRuleRegistry::rules() const noexcept {
   return rules_;
 }
 
-Expected<std::vector<SmeltingRule>, SmeltingRegistryError> parse_smelting_rules_yaml(
+Expected<std::vector<SmeltingRule>, SmeltingRegistryError> parse_smelting_rules_json(
     std::string_view text,
     const player::ItemRegistry& item_registry,
     std::string_view source_name) {
-  auto decoded = io::decode_yaml_value(text);
+  auto decoded = io::decode_json_value(text);
   if (!decoded) {
     return Expected<std::vector<SmeltingRule>, SmeltingRegistryError>::failure(
         error(context_message(
             source_name,
-            std::string{"failed to parse YAML: "} + decoded.error().describe())));
+            std::string{"failed to parse JSON: "} + decoded.error().describe())));
   }
 
   const io::DataValue* entries = smelting_entries_root(decoded.value().root);
@@ -313,7 +313,7 @@ SmeltingRuleRegistry::Result load_smelting_rule_registry_from_packs(
     const asset::PackManager& packs,
     const player::ItemRegistry& item_registry) {
   std::vector<SmeltingRule> rules;
-  for (const asset::PackDataFile& file : packs.data_files("smelting", ".yaml")) {
+  for (const asset::PackDataFile& file : packs.data_files("smelting", ".json")) {
     auto file_rules = parse_smelting_file(file, item_registry);
     if (!file_rules) {
       return SmeltingRuleRegistry::Result::failure(file_rules.error());

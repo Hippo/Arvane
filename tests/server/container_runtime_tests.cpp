@@ -62,15 +62,18 @@ namespace {
 [[nodiscard]] arv::player::ItemRegistry make_container_item_registry(
     const arv::voxel::BlockRegistry& block_registry) {
   std::vector<arv::player::ItemDefinition> items;
-  const auto add_item = [&items](std::string name) {
+  const auto add_item = [&items](
+                            std::string name,
+                            std::vector<std::string> tags = {}) {
     arv::player::ItemDefinition item;
     item.name = std::move(name);
+    item.tags = std::move(tags);
     item.max_stack_size = 64;
     item.explicit_render_type = arv::player::ItemRenderType::Texture;
     item.texture_asset = "arvane:texture/item/test";
     items.push_back(std::move(item));
   };
-  add_item("arvane:coal");
+  add_item("arvane:coal", {std::string{arv::crafting::SmeltingFuelItemTag}});
   add_item("arvane:copper");
   add_item("arvane:copper_bar");
   add_item("arvane:iron");
@@ -770,6 +773,7 @@ TEST(ContainerRuntimeTests, FurnaceStartsCycleAndDoesNotOutputBeforeDuration) {
   EXPECT_FALSE(fixture.client.active_container_inventory().slot(2U).has_value());
   ASSERT_TRUE(fixture.client.active_container_inventory().slot(0U).has_value());
   EXPECT_EQ(fixture.client.active_container_inventory().slot(0U)->count, 1U);
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
 
   ASSERT_TRUE(fixture.client.request_inventory_close());
   fixture.tick_round_trip();
@@ -777,8 +781,7 @@ TEST(ContainerRuntimeTests, FurnaceStartsCycleAndDoesNotOutputBeforeDuration) {
   fixture.open_furnace();
 
   EXPECT_FALSE(fixture.client.active_container_inventory().slot(2U).has_value());
-  ASSERT_TRUE(fixture.client.active_container_inventory().slot(1U).has_value());
-  EXPECT_EQ(fixture.client.active_container_inventory().slot(1U)->count, 1U);
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
 }
 
 TEST(ContainerRuntimeTests, FurnaceCompletesIronAndCopperCyclesLazily) {
@@ -841,7 +844,7 @@ TEST(ContainerRuntimeTests, FurnaceOutputCapacityBlocksCompletionWithoutItemLoss
       "arvane:iron",
       0U,
       "arvane:coal",
-      1U,
+      0U,
       arv::player::ItemStack{iron_bar, 64U});
   fixture.seed_active_furnace_cycle(
       "arvane:iron",
@@ -855,8 +858,7 @@ TEST(ContainerRuntimeTests, FurnaceOutputCapacityBlocksCompletionWithoutItemLoss
 
   ASSERT_TRUE(fixture.client.active_container_inventory().slot(2U).has_value());
   EXPECT_EQ(fixture.client.active_container_inventory().slot(2U)->count, 64U);
-  ASSERT_TRUE(fixture.client.active_container_inventory().slot(1U).has_value());
-  EXPECT_EQ(fixture.client.active_container_inventory().slot(1U)->count, 1U);
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
   const arv::world::BlockAttachedContainer* server_container =
       fixture.server.voxel_world().find_block_container(fixture.furnace_pos);
   ASSERT_NE(server_container, nullptr);
@@ -877,6 +879,17 @@ TEST(ContainerRuntimeTests, FurnaceDoesNotStartWithoutEnoughInputOrFuel) {
   ASSERT_TRUE(missing_fuel.client.active_container_inventory().slot(0U).has_value());
   EXPECT_EQ(missing_fuel.client.active_container_inventory().slot(0U)->count, 3U);
   EXPECT_FALSE(missing_fuel.client.active_container_inventory().slot(2U).has_value());
+
+  ContainerRuntimeFixture non_fuel;
+  non_fuel.seed_furnace("arvane:iron", 3U, "arvane:dirt", 1U);
+  non_fuel.open_furnace();
+  ASSERT_TRUE(non_fuel.client.active_container_inventory().slot(0U).has_value());
+  EXPECT_EQ(non_fuel.client.active_container_inventory().slot(0U)->count, 3U);
+  ASSERT_TRUE(non_fuel.client.active_container_inventory().slot(1U).has_value());
+  EXPECT_EQ(
+      non_fuel.client.active_container_inventory().slot(1U)->item,
+      non_fuel.item_registry.find_item("arvane:dirt").value());
+  EXPECT_FALSE(non_fuel.client.active_container_inventory().slot(2U).has_value());
 }
 
 TEST(ContainerRuntimeTests, FurnaceOutputSlotRejectsPlayerInput) {
@@ -921,8 +934,7 @@ TEST(ContainerRuntimeTests, FurnaceSmeltsAfterPlayerInsertsInputAndFuel) {
       1U));
   fixture.tick_round_trip();
   EXPECT_FALSE(fixture.client.active_container_inventory().slot(0U).has_value());
-  ASSERT_TRUE(fixture.client.active_container_inventory().slot(1U).has_value());
-  EXPECT_EQ(fixture.client.active_container_inventory().slot(1U)->count, 1U);
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
 
   ASSERT_TRUE(fixture.client.request_inventory_close());
   fixture.tick_round_trip();
@@ -934,6 +946,38 @@ TEST(ContainerRuntimeTests, FurnaceSmeltsAfterPlayerInsertsInputAndFuel) {
   ASSERT_TRUE(fixture.client.active_container_inventory().slot(2U).has_value());
   EXPECT_EQ(fixture.client.active_container_inventory().slot(2U)->item, iron_bar);
   EXPECT_EQ(fixture.client.active_container_inventory().slot(2U)->count, 1U);
+}
+
+TEST(ContainerRuntimeTests, FurnaceRejectsNonFuelForFuelSlot) {
+  ContainerRuntimeFixture fixture;
+  fixture.give_player_dirt(12U);
+  fixture.open_furnace();
+
+  ASSERT_TRUE(fixture.client.request_container_shift_transfer(
+      arv::player::ContainerSlotSource::PlayerInventory,
+      0U));
+  fixture.tick_round_trip();
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
+  ASSERT_TRUE(fixture.client.inventory().slot(0U).has_value());
+  EXPECT_EQ(fixture.client.inventory().slot(0U)->count, 12U);
+
+  ASSERT_TRUE(fixture.client.request_container_slot_click(
+      arv::player::ContainerSlotSource::PlayerInventory,
+      0U,
+      arv::player::InventoryClickButton::Primary));
+  fixture.tick_round_trip();
+  ASSERT_TRUE(fixture.client.inventory_cursor_stack().has_value());
+  EXPECT_FALSE(fixture.client.inventory().slot(0U).has_value());
+
+  ASSERT_TRUE(fixture.client.request_container_slot_click(
+      arv::player::ContainerSlotSource::OpenedContainer,
+      1U,
+      arv::player::InventoryClickButton::Primary));
+  fixture.tick_round_trip();
+
+  EXPECT_FALSE(fixture.client.active_container_inventory().slot(1U).has_value());
+  ASSERT_TRUE(fixture.client.inventory_cursor_stack().has_value());
+  EXPECT_EQ(fixture.client.inventory_cursor_stack()->count, 12U);
 }
 
 TEST(ContainerRuntimeTests, ChestPlacementResolvesFacingFromPlayerLook) {

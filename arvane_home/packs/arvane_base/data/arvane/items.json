@@ -3,6 +3,9 @@
     {
       "name": "arvane:coal",
       "category": "resources",
+      "tags": [
+        "arvane:smelting/fuel"
+      ],
       "max_stack_size": 64,
       "buoyancy": 1.0,
       "render_type": "texture",

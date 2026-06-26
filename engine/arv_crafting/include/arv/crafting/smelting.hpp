@@ -13,6 +13,8 @@
 
 namespace arv::crafting {
 
+inline constexpr std::string_view SmeltingFuelItemTag = "arvane:smelting/fuel";
+
 struct SmeltingRule {
   std::string input_name{};
   player::ItemID input{};
@@ -42,7 +44,7 @@ private:
 };
 
 [[nodiscard]] Expected<std::vector<SmeltingRule>, SmeltingRegistryError>
-parse_smelting_rules_yaml(
+parse_smelting_rules_json(
     std::string_view text,
     const player::ItemRegistry& item_registry,
     std::string_view source_name = "smelting data");

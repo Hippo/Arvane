@@ -44,15 +44,18 @@ void write_pack_manifest(
 [[nodiscard]] arv::player::ItemRegistry make_smelting_item_registry(
     const arv::voxel::BlockRegistry& block_registry) {
   std::vector<arv::player::ItemDefinition> items;
-  const auto add_item = [&items](std::string name) {
+  const auto add_item = [&items](
+                            std::string name,
+                            std::vector<std::string> tags = {}) {
     arv::player::ItemDefinition item;
     item.name = std::move(name);
+    item.tags = std::move(tags);
     item.max_stack_size = 64;
     item.explicit_render_type = arv::player::ItemRenderType::Texture;
     item.texture_asset = "arvane:texture/item/test";
     items.push_back(std::move(item));
   };
-  add_item("arvane:coal");
+  add_item("arvane:coal", {std::string{arv::crafting::SmeltingFuelItemTag}});
   add_item("arvane:copper");
   add_item("arvane:copper_bar");
   add_item("arvane:iron");
@@ -77,15 +80,22 @@ TEST(SmeltingTests, LoadsRulesAndAppliesDefaults) {
   const std::filesystem::path packs = temp.path / "packs";
   write_pack_manifest(packs, "arvane_base");
   write_text(
-      packs / "arvane_base/data/arvane/smelting.yaml",
-      "smelting:\n"
-      "  - input: arvane:iron\n"
-      "    input_count: 3\n"
-      "    output: arvane:iron_bar\n"
-      "    output_count: 1\n"
-      "    duration_secs: 20\n"
-      "  - input: arvane:copper\n"
-      "    output: arvane:copper_bar\n");
+      packs / "arvane_base/data/arvane/smelting.json",
+      "{\n"
+      "  \"smelting\": [\n"
+      "    {\n"
+      "      \"input\": \"arvane:iron\",\n"
+      "      \"input_count\": 3,\n"
+      "      \"output\": \"arvane:iron_bar\",\n"
+      "      \"output_count\": 1,\n"
+      "      \"duration_secs\": 20\n"
+      "    },\n"
+      "    {\n"
+      "      \"input\": \"arvane:copper\",\n"
+      "      \"output\": \"arvane:copper_bar\"\n"
+      "    }\n"
+      "  ]\n"
+      "}\n");
 
   auto manager = arv::asset::PackManager::load_from_packs_root(packs);
   ASSERT_TRUE(manager) << manager.error().describe();
@@ -122,28 +132,32 @@ TEST(SmeltingTests, RejectsUnknownItemsAndNonPositiveValues) {
   const arv::player::ItemRegistry item_registry =
       make_smelting_item_registry(block_registry);
 
-  auto bad_count = arv::crafting::parse_smelting_rules_yaml(
-      "smelting:\n"
-      "  - input: arvane:iron\n"
-      "    input_count: 0\n"
-      "    output: arvane:iron_bar\n",
+  auto bad_count = arv::crafting::parse_smelting_rules_json(
+      "{\n"
+      "  \"smelting\": [\n"
+      "    {\"input\": \"arvane:iron\", \"input_count\": 0, \"output\": \"arvane:iron_bar\"}\n"
+      "  ]\n"
+      "}\n",
       item_registry);
   ASSERT_FALSE(bad_count);
   EXPECT_NE(bad_count.error().message.find("input_count"), std::string::npos);
 
-  auto bad_duration = arv::crafting::parse_smelting_rules_yaml(
-      "smelting:\n"
-      "  - input: arvane:iron\n"
-      "    output: arvane:iron_bar\n"
-      "    duration_secs: -1\n",
+  auto bad_duration = arv::crafting::parse_smelting_rules_json(
+      "{\n"
+      "  \"smelting\": [\n"
+      "    {\"input\": \"arvane:iron\", \"output\": \"arvane:iron_bar\", \"duration_secs\": -1}\n"
+      "  ]\n"
+      "}\n",
       item_registry);
   ASSERT_FALSE(bad_duration);
   EXPECT_NE(bad_duration.error().message.find("duration_secs"), std::string::npos);
 
-  auto unknown = arv::crafting::parse_smelting_rules_yaml(
-      "smelting:\n"
-      "  - input: arvane:not_real\n"
-      "    output: arvane:iron_bar\n",
+  auto unknown = arv::crafting::parse_smelting_rules_json(
+      "{\n"
+      "  \"smelting\": [\n"
+      "    {\"input\": \"arvane:not_real\", \"output\": \"arvane:iron_bar\"}\n"
+      "  ]\n"
+      "}\n",
       item_registry);
   ASSERT_FALSE(unknown);
   EXPECT_NE(unknown.error().message.find("unknown item"), std::string::npos);
@@ -155,12 +169,13 @@ TEST(SmeltingTests, RejectsDuplicateInputRules) {
   const arv::player::ItemRegistry item_registry =
       make_smelting_item_registry(block_registry);
 
-  auto duplicate = arv::crafting::parse_smelting_rules_yaml(
-      "smelting:\n"
-      "  - input: arvane:iron\n"
-      "    output: arvane:iron_bar\n"
-      "  - input: arvane:iron\n"
-      "    output: arvane:copper_bar\n",
+  auto duplicate = arv::crafting::parse_smelting_rules_json(
+      "{\n"
+      "  \"smelting\": [\n"
+      "    {\"input\": \"arvane:iron\", \"output\": \"arvane:iron_bar\"},\n"
+      "    {\"input\": \"arvane:iron\", \"output\": \"arvane:copper_bar\"}\n"
+      "  ]\n"
+      "}\n",
       item_registry);
   ASSERT_FALSE(duplicate);
   EXPECT_NE(duplicate.error().message.find("duplicate"), std::string::npos);

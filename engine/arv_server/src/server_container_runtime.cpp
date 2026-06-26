@@ -1,5 +1,6 @@
 #include "server_runtime_internal.hpp"
 
+#include "arv/crafting/crafting.hpp"
 #include "arv/protocol/container_sync.hpp"
 
 #include <algorithm>
@@ -192,9 +193,25 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
          container.inventory.slot_count() >= FurnaceSlotCount;
 }
 
-[[nodiscard]] bool has_furnace_fuel(const player::Inventory& inventory) noexcept {
+[[nodiscard]] bool is_furnace_fuel(
+    player::ItemID item,
+    const player::ItemRegistry& item_registry) noexcept {
+  return crafting::item_has_tag(item_registry, item, crafting::SmeltingFuelItemTag);
+}
+
+[[nodiscard]] bool has_furnace_fuel(
+    const player::Inventory& inventory,
+    const player::ItemRegistry& item_registry) noexcept {
   const std::optional<player::ItemStack>& fuel = inventory.slot(FurnaceFuelSlot);
-  return fuel.has_value() && fuel->count > 0U;
+  return fuel.has_value() && fuel->count > 0U &&
+         is_furnace_fuel(fuel->item, item_registry);
+}
+
+[[nodiscard]] bool consume_furnace_fuel(
+    player::Inventory& inventory,
+    const player::ItemRegistry& item_registry) {
+  return has_furnace_fuel(inventory, item_registry) &&
+         inventory.consume_one(FurnaceFuelSlot);
 }
 
 [[nodiscard]] player::ItemStack furnace_output_stack(
@@ -255,7 +272,7 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
   if (!input.has_value() || input->item != rule.input || input->count < rule.input_count) {
     return false;
   }
-  return has_furnace_fuel(inventory) &&
+  return has_furnace_fuel(inventory, item_registry) &&
          can_accept_furnace_output(
              inventory,
              rule.output,
@@ -269,6 +286,9 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
     Seconds start_at,
     const player::ItemRegistry& item_registry) {
   if (!can_start_furnace_cycle(container.inventory, rule, item_registry)) {
+    return false;
+  }
+  if (!consume_furnace_fuel(container.inventory, item_registry)) {
     return false;
   }
   if (!container.inventory.remove_amount(FurnaceInputSlot, rule.input_count).has_value()) {
@@ -319,8 +339,7 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
     if (now_seconds + FurnaceTimeEpsilon < cycle.start_at + cycle.duration_secs) {
       break;
     }
-    if (!has_furnace_fuel(container.inventory) ||
-        !can_accept_furnace_output(
+    if (!can_accept_furnace_output(
             container.inventory,
             cycle.output,
             cycle.output_count,
@@ -332,8 +351,7 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
             container.inventory,
             cycle.output,
             cycle.output_count,
-            *item_registry) ||
-        !container.inventory.consume_one(FurnaceFuelSlot)) {
+            *item_registry)) {
       break;
     }
     const Seconds next_start_at = cycle.start_at + cycle.duration_secs;
@@ -393,12 +411,34 @@ constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
   const bool smeltable =
       smelting_registry != nullptr &&
       smelting_registry->find_by_input(source_stack->item) != nullptr;
+  const bool fuel = is_furnace_fuel(source_stack->item, item_registry);
+  if (!smeltable && !fuel) {
+    return false;
+  }
   return shift_transfer_stack_to_slot(
       source,
       source_slot,
       container.inventory,
       smeltable ? FurnaceInputSlot : FurnaceFuelSlot,
       item_registry);
+}
+
+[[nodiscard]] bool furnace_slot_accepts_carried_stack(
+    usize slot_index,
+    const std::optional<player::ItemStack>& carried_stack,
+    const player::ItemRegistry& item_registry,
+    const crafting::SmeltingRuleRegistry* smelting_registry) noexcept {
+  if (!carried_stack.has_value()) {
+    return true;
+  }
+  if (slot_index == FurnaceInputSlot) {
+    return smelting_registry != nullptr &&
+           smelting_registry->find_by_input(carried_stack->item) != nullptr;
+  }
+  if (slot_index == FurnaceFuelSlot) {
+    return is_furnace_fuel(carried_stack->item, item_registry);
+  }
+  return true;
 }
 
 [[nodiscard]] bool apply_furnace_output_slot_click(
@@ -599,6 +639,15 @@ void ServerRuntimeImpl::handle_container_action(
       } else if (player::Inventory* inventory =
                      inventory_for_source(action.source, *player_state, *container);
                  inventory != nullptr) {
+        if (block_container_is_furnace(*container) &&
+            action.source == player::ContainerSlotSource::OpenedContainer &&
+            !furnace_slot_accepts_carried_stack(
+                action.slot_index,
+                player_state->inventory_cursor_stack,
+                *item_registry_,
+                smelting_registry_)) {
+          break;
+        }
         const player::InventoryOperationResult result =
             player::apply_inventory_slot_click(
                 *inventory,
