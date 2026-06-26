@@ -96,6 +96,7 @@ struct DesktopSessionDependencies {
   const voxel::BlockRegistry& block_registry;
   const player::ItemRegistry& item_registry;
   const crafting::CraftingRecipeRegistry& crafting_registry;
+  const crafting::SmeltingRuleRegistry& smelting_registry;
   const player::ContainerTypeRegistry& container_types;
   const player::ContainerUiLayoutRegistry& container_layouts;
   const player::GameModeRegistry& game_modes;

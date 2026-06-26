@@ -672,6 +672,7 @@ struct ServerRuntimeImpl {
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};
   const crafting::CraftingRecipeRegistry* crafting_registry_{};
+  const crafting::SmeltingRuleRegistry* smelting_registry_{};
   const player::ContainerTypeRegistry* container_types_{};
   const player::ContainerUiLayoutRegistry* container_layouts_{};
   const entity::EntityRegistry* entity_registry_{};

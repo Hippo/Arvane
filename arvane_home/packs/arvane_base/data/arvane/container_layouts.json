@@ -1,6 +1,61 @@
 {
   "container_layouts": [
     {
+      "name": "arvane:furnace",
+      "id": "arvane:furnace",
+      "size": [
+        426,
+        306
+      ],
+      "slot_groups": [
+        {
+          "id": "furnace",
+          "source": "container",
+          "start_slot": 0,
+          "slot_count": 3,
+          "columns": 3,
+          "position": [
+            106,
+            38
+          ],
+          "slot_spacing": [
+            88,
+            44
+          ]
+        },
+        {
+          "id": "inventory",
+          "source": "player_inventory",
+          "start_slot": 9,
+          "slot_count": 27,
+          "columns": 9,
+          "position": [
+            18,
+            104
+          ],
+          "slot_spacing": [
+            44,
+            44
+          ]
+        },
+        {
+          "id": "hotbar",
+          "source": "player_inventory",
+          "start_slot": 0,
+          "slot_count": 9,
+          "columns": 9,
+          "position": [
+            18,
+            248
+          ],
+          "slot_spacing": [
+            44,
+            44
+          ]
+        }
+      ]
+    },
+    {
       "name": "arvane:chest",
       "id": "arvane:chest",
       "size": [

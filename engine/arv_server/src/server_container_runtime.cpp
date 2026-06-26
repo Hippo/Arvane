@@ -3,10 +3,24 @@
 #include "arv/protocol/container_sync.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <string_view>
 #include <vector>
 
 namespace arv::server::detail {
 namespace {
+
+constexpr std::string_view FurnaceContainerType = "arvane:furnace";
+constexpr usize FurnaceInputSlot = 0U;
+constexpr usize FurnaceFuelSlot = 1U;
+constexpr usize FurnaceOutputSlot = 2U;
+constexpr usize FurnaceSlotCount = 3U;
+constexpr Seconds FurnaceTimeEpsilon = 0.0001F;
+
+[[nodiscard]] Seconds server_time_seconds(TickIndex tick_index, TickRate base_tps) noexcept {
+  return static_cast<Seconds>(tick_index) /
+         static_cast<Seconds>(std::max<TickRate>(base_tps, 1U));
+}
 
 [[nodiscard]] bool same_container_source(
     const ContainerSession& session,
@@ -172,6 +186,262 @@ namespace {
          insert_result.leftover->count != source_stack->count;
 }
 
+[[nodiscard]] bool block_container_is_furnace(
+    const world::BlockAttachedContainer& container) noexcept {
+  return container.container_type == FurnaceContainerType &&
+         container.inventory.slot_count() >= FurnaceSlotCount;
+}
+
+[[nodiscard]] bool has_furnace_fuel(const player::Inventory& inventory) noexcept {
+  const std::optional<player::ItemStack>& fuel = inventory.slot(FurnaceFuelSlot);
+  return fuel.has_value() && fuel->count > 0U;
+}
+
+[[nodiscard]] player::ItemStack furnace_output_stack(
+    player::ItemID item,
+    u16 count) {
+  return player::ItemStack{item, count};
+}
+
+[[nodiscard]] bool can_accept_furnace_output(
+    const player::Inventory& inventory,
+    player::ItemID output,
+    u16 output_count,
+    const player::ItemRegistry& item_registry) {
+  const player::ItemRecord* item = item_registry.item(output);
+  if (item == nullptr || output_count == 0U || output_count > item->max_stack_size) {
+    return false;
+  }
+  const std::optional<player::ItemStack>& slot = inventory.slot(FurnaceOutputSlot);
+  if (!slot.has_value()) {
+    return true;
+  }
+  const player::ItemStack produced = furnace_output_stack(output, output_count);
+  return player::item_stacks_compatible(slot.value(), produced) &&
+         slot->count <= item->max_stack_size - output_count;
+}
+
+[[nodiscard]] bool add_furnace_output(
+    player::Inventory& inventory,
+    player::ItemID output,
+    u16 output_count,
+    const player::ItemRegistry& item_registry) {
+  if (!can_accept_furnace_output(inventory, output, output_count, item_registry)) {
+    return false;
+  }
+  const std::optional<player::ItemStack>& slot = inventory.slot(FurnaceOutputSlot);
+  if (!slot.has_value()) {
+    return inventory.set_slot(
+        FurnaceOutputSlot,
+        furnace_output_stack(output, output_count));
+  }
+  player::ItemStack merged = slot.value();
+  merged.count = static_cast<u16>(merged.count + output_count);
+  return inventory.set_slot(FurnaceOutputSlot, merged);
+}
+
+[[nodiscard]] const crafting::SmeltingRule* smelting_rule_for_input(
+    const player::Inventory& inventory,
+    const crafting::SmeltingRuleRegistry& registry) noexcept {
+  const std::optional<player::ItemStack>& input = inventory.slot(FurnaceInputSlot);
+  return input.has_value() ? registry.find_by_input(input->item) : nullptr;
+}
+
+[[nodiscard]] bool can_start_furnace_cycle(
+    const player::Inventory& inventory,
+    const crafting::SmeltingRule& rule,
+    const player::ItemRegistry& item_registry) {
+  const std::optional<player::ItemStack>& input = inventory.slot(FurnaceInputSlot);
+  if (!input.has_value() || input->item != rule.input || input->count < rule.input_count) {
+    return false;
+  }
+  return has_furnace_fuel(inventory) &&
+         can_accept_furnace_output(
+             inventory,
+             rule.output,
+             rule.output_count,
+             item_registry);
+}
+
+[[nodiscard]] bool start_furnace_cycle(
+    world::BlockAttachedContainer& container,
+    const crafting::SmeltingRule& rule,
+    Seconds start_at,
+    const player::ItemRegistry& item_registry) {
+  if (!can_start_furnace_cycle(container.inventory, rule, item_registry)) {
+    return false;
+  }
+  if (!container.inventory.remove_amount(FurnaceInputSlot, rule.input_count).has_value()) {
+    return false;
+  }
+  container.furnace.active_cycle = world::FurnaceCycleState{
+      rule.input,
+      rule.input_count,
+      rule.output,
+      rule.output_count,
+      rule.duration_secs,
+      start_at};
+  return true;
+}
+
+[[nodiscard]] bool try_start_furnace_cycle_from_input(
+    world::BlockAttachedContainer& container,
+    const crafting::SmeltingRuleRegistry& registry,
+    const player::ItemRegistry& item_registry,
+    Seconds start_at) {
+  const crafting::SmeltingRule* rule =
+      smelting_rule_for_input(container.inventory, registry);
+  return rule != nullptr &&
+         start_furnace_cycle(container, *rule, start_at, item_registry);
+}
+
+[[nodiscard]] bool resolve_furnace_smelting(
+    world::BlockAttachedContainer& container,
+    const crafting::SmeltingRuleRegistry* smelting_registry,
+    const player::ItemRegistry* item_registry,
+    Seconds now_seconds) {
+  if (!block_container_is_furnace(container) ||
+      smelting_registry == nullptr ||
+      item_registry == nullptr) {
+    return false;
+  }
+
+  bool changed = false;
+  while (container.furnace.active_cycle.has_value()) {
+    world::FurnaceCycleState& cycle = container.furnace.active_cycle.value();
+    if (cycle.duration_secs <= 0.0F ||
+        !std::isfinite(cycle.duration_secs) ||
+        !std::isfinite(cycle.start_at)) {
+      container.furnace.active_cycle.reset();
+      changed = true;
+      break;
+    }
+    if (now_seconds + FurnaceTimeEpsilon < cycle.start_at + cycle.duration_secs) {
+      break;
+    }
+    if (!has_furnace_fuel(container.inventory) ||
+        !can_accept_furnace_output(
+            container.inventory,
+            cycle.output,
+            cycle.output_count,
+            *item_registry)) {
+      break;
+    }
+
+    if (!add_furnace_output(
+            container.inventory,
+            cycle.output,
+            cycle.output_count,
+            *item_registry) ||
+        !container.inventory.consume_one(FurnaceFuelSlot)) {
+      break;
+    }
+    const Seconds next_start_at = cycle.start_at + cycle.duration_secs;
+    changed = true;
+
+    if (!try_start_furnace_cycle_from_input(
+            container,
+            *smelting_registry,
+            *item_registry,
+            next_start_at)) {
+      container.furnace.active_cycle.reset();
+      break;
+    }
+  }
+
+  if (!container.furnace.active_cycle.has_value() &&
+      try_start_furnace_cycle_from_input(
+          container,
+          *smelting_registry,
+          *item_registry,
+          now_seconds)) {
+    changed = true;
+  }
+  return changed;
+}
+
+[[nodiscard]] bool shift_transfer_stack_to_slot(
+    player::Inventory& source,
+    usize source_slot,
+    player::Inventory& destination,
+    usize destination_slot,
+    const player::ItemRegistry& item_registry) {
+  const std::optional<player::ItemStack> source_stack = source.slot(source_slot);
+  if (!source_stack.has_value()) {
+    return false;
+  }
+  (void)source.clear_slot(source_slot);
+  player::ItemStack moving = source_stack.value();
+  const player::InventoryOperationResult result =
+      destination.merge_stack_into_slot(destination_slot, moving, item_registry);
+  if (moving.count > 0U) {
+    (void)source.set_slot(source_slot, moving);
+  }
+  return result.moved_count > 0U;
+}
+
+[[nodiscard]] bool shift_transfer_stack_into_furnace(
+    player::Inventory& source,
+    usize source_slot,
+    world::BlockAttachedContainer& container,
+    const player::ItemRegistry& item_registry,
+    const crafting::SmeltingRuleRegistry* smelting_registry) {
+  const std::optional<player::ItemStack> source_stack = source.slot(source_slot);
+  if (!source_stack.has_value()) {
+    return false;
+  }
+  const bool smeltable =
+      smelting_registry != nullptr &&
+      smelting_registry->find_by_input(source_stack->item) != nullptr;
+  return shift_transfer_stack_to_slot(
+      source,
+      source_slot,
+      container.inventory,
+      smeltable ? FurnaceInputSlot : FurnaceFuelSlot,
+      item_registry);
+}
+
+[[nodiscard]] bool apply_furnace_output_slot_click(
+    world::BlockAttachedContainer& container,
+    player::InventoryClickButton button,
+    std::optional<player::ItemStack>& carried_stack,
+    const player::ItemRegistry& item_registry) {
+  std::optional<player::ItemStack> output_stack =
+      container.inventory.slot(FurnaceOutputSlot);
+  if (!output_stack.has_value()) {
+    return false;
+  }
+
+  if (!carried_stack.has_value()) {
+    const u16 taken =
+        button == player::InventoryClickButton::Primary
+            ? output_stack->count
+            : static_cast<u16>((output_stack->count + 1U) / 2U);
+    carried_stack = container.inventory.remove_amount(FurnaceOutputSlot, taken);
+    return carried_stack.has_value();
+  }
+
+  if (!player::item_stacks_compatible(carried_stack.value(), output_stack.value())) {
+    return false;
+  }
+  const player::ItemRecord* item = item_registry.item(output_stack->item);
+  if (item == nullptr || carried_stack->count >= item->max_stack_size) {
+    return false;
+  }
+
+  const u16 capacity = static_cast<u16>(item->max_stack_size - carried_stack->count);
+  const u16 moved =
+      button == player::InventoryClickButton::Primary
+          ? std::min(capacity, output_stack->count)
+          : std::min<u16>(capacity, 1U);
+  if (moved == 0U) {
+    return false;
+  }
+  carried_stack->count = static_cast<u16>(carried_stack->count + moved);
+  (void)container.inventory.remove_amount(FurnaceOutputSlot, moved);
+  return true;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::handle_open_container_block(
@@ -222,6 +492,13 @@ void ServerRuntimeImpl::handle_open_container_block(
       container_type->slot_count);
   if (container == nullptr) {
     return;
+  }
+  if (resolve_furnace_smelting(
+          *container,
+          smelting_registry_,
+          item_registry_,
+          server_time_seconds(tick_index_, base_tps_))) {
+    send_container_content_to_viewers(request.world_id, request.block);
   }
 
   close_container_sessions_for_player_session(
@@ -301,12 +578,27 @@ void ServerRuntimeImpl::handle_container_action(
     return;
   }
 
-  bool changed = false;
+  const Seconds now_seconds = server_time_seconds(tick_index_, base_tps_);
+  bool changed = resolve_furnace_smelting(
+      *container,
+      smelting_registry_,
+      item_registry_,
+      now_seconds);
   switch (action.kind) {
     case protocol::ContainerActionKind::SlotClick: {
-      player::Inventory* inventory =
-          inventory_for_source(action.source, *player_state, *container);
-      if (inventory != nullptr) {
+      if (block_container_is_furnace(*container) &&
+          action.source == player::ContainerSlotSource::OpenedContainer &&
+          action.slot_index == FurnaceOutputSlot) {
+        changed =
+            apply_furnace_output_slot_click(
+                *container,
+                action.button,
+                player_state->inventory_cursor_stack,
+                *item_registry_) ||
+            changed;
+      } else if (player::Inventory* inventory =
+                     inventory_for_source(action.source, *player_state, *container);
+                 inventory != nullptr) {
         const player::InventoryOperationResult result =
             player::apply_inventory_slot_click(
                 *inventory,
@@ -314,7 +606,7 @@ void ServerRuntimeImpl::handle_container_action(
                 action.button,
                 player_state->inventory_cursor_stack,
                 *item_registry_);
-        changed = result.accepted();
+        changed = result.accepted() || changed;
       }
       break;
     }
@@ -325,22 +617,46 @@ void ServerRuntimeImpl::handle_container_action(
           destination_for_shift_transfer(action.source, *player_state, *container);
       if (source != nullptr && destination != nullptr &&
           source->is_valid_slot(action.slot_index)) {
-        changed = shift_transfer_stack(
-            *source,
-            action.slot_index,
-            *destination,
-            *item_registry_);
+        if (block_container_is_furnace(*container) &&
+            action.source == player::ContainerSlotSource::PlayerInventory) {
+          changed =
+              shift_transfer_stack_into_furnace(
+                  *source,
+                  action.slot_index,
+                  *container,
+                  *item_registry_,
+                  smelting_registry_) ||
+              changed;
+        } else {
+          changed =
+              shift_transfer_stack(
+                  *source,
+                  action.slot_index,
+                  *destination,
+                  *item_registry_) ||
+              changed;
+        }
       }
       break;
     }
     case protocol::ContainerActionKind::DropCursor:
-      changed = drop_player_inventory_cursor(player_state->player_id).has_value();
+      changed =
+          drop_player_inventory_cursor(player_state->player_id).has_value() ||
+          changed;
       break;
     case protocol::ContainerActionKind::DropOneCursor:
-      changed = drop_one_from_player_inventory_cursor(player_state->player_id).has_value();
+      changed =
+          drop_one_from_player_inventory_cursor(player_state->player_id).has_value() ||
+          changed;
       break;
   }
 
+  changed = resolve_furnace_smelting(
+                *container,
+                smelting_registry_,
+                item_registry_,
+                now_seconds) ||
+            changed;
   if (changed) {
     send_container_content_to_viewers(
         container_session.world_id,

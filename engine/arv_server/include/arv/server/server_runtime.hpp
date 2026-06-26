@@ -7,6 +7,7 @@
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
 #include "arv/crafting/crafting.hpp"
+#include "arv/crafting/smelting.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/config.hpp"
@@ -195,6 +196,7 @@ struct ServerStartInfo {
   const player::ContainerTypeRegistry* container_types{};
   const player::ContainerUiLayoutRegistry* container_layouts{};
   const crafting::CraftingRecipeRegistry* crafting_registry{};
+  const crafting::SmeltingRuleRegistry* smelting_registry{};
 };
 
 struct DroppedItemStack {

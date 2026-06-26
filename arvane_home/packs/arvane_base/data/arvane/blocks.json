@@ -71,6 +71,9 @@
         "north": "arvane:texture/block/furnace_front",
         "particle": "arvane:texture/block/furnace_side"
       },
+      "container": {
+        "type": "arvane:furnace"
+      },
       "properties": {
         "solid": true,
         "collidable": true,

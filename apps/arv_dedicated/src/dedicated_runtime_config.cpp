@@ -148,6 +148,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.block_registry = &registries.block_registry;
   server_start_info.item_registry = &registries.item_registry;
   server_start_info.crafting_registry = &registries.crafting_registry;
+  server_start_info.smelting_registry = &registries.smelting_registry;
   server_start_info.container_types = &registries.container_types;
   server_start_info.container_layouts = &registries.container_layouts;
   server_start_info.game_modes = &runtime_config.game_modes;

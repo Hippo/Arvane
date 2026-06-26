@@ -8,6 +8,7 @@
 #include "arv/client/render_asset_upload.hpp"
 #include "arv/client/particles.hpp"
 #include "arv/core/log.hpp"
+#include "arv/crafting/smelting.hpp"
 #include "arv/io/config.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/persistence/save.hpp"
@@ -226,6 +227,12 @@ DesktopLoadedAssetsResult load_desktop_assets(
     core::warn("assets", diagnostic.describe());
   }
   loaded.crafting_registry = std::move(crafting_result.value().registry);
+  auto smelting_result =
+      crafting::load_smelting_rule_registry_from_packs(packs, loaded.item_registry);
+  if (!smelting_result) {
+    return asset_failure("smelting", smelting_result.error().message);
+  }
+  loaded.smelting_registry = std::move(smelting_result.value());
 
   loaded.item_animation_library =
       std::move(gameplay_assets.item_animation_library);

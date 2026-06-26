@@ -476,6 +476,7 @@ std::vector<SavedBlockContainer> WorldRuntime::saved_block_containers(
     record.local = voxel::local_pos(local_key);
     record.container_type = container->container_type;
     record.slot_count = static_cast<u32>(container->inventory.slot_count());
+    record.furnace = container->furnace;
     const auto& slots = container->inventory.slots();
     for (usize slot = 0; slot < slots.size(); ++slot) {
       if (!slots[slot].has_value()) {
@@ -506,6 +507,7 @@ void WorldRuntime::restore_saved_block_containers(
     BlockAttachedContainer container;
     container.container_type = record.container_type;
     container.inventory = player::Inventory{record.slot_count};
+    container.furnace = record.furnace;
     for (const BlockContainerSlotRecord& slot : record.slots) {
       if (slot.slot >= record.slot_count) {
         continue;

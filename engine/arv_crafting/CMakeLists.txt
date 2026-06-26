@@ -1,10 +1,12 @@
 set(ARV_CRAFTING_HEADERS
   include/arv/crafting/crafting.hpp
+  include/arv/crafting/smelting.hpp
 )
 
 add_library(arv_crafting STATIC
   ${ARV_CRAFTING_HEADERS}
   src/crafting.cpp
+  src/smelting.cpp
 )
 target_include_directories(arv_crafting PUBLIC include)
 target_link_libraries(arv_crafting

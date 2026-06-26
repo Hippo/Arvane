@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -256,6 +257,21 @@ decode_fluid_cells(std::span<const u8> bytes) {
   return Expected<bool, PersistenceError>::success(value.value()->as_bool_or(false));
 }
 
+[[nodiscard]] Expected<f64, PersistenceError> number_field(
+    const io::DataValue& object,
+    std::string_view key,
+    std::string_view parent_path) {
+  auto value = required_field(object, key, parent_path);
+  if (!value) {
+    return Expected<f64, PersistenceError>::failure(value.error());
+  }
+  if (!io::is_number_value(*value.value())) {
+    return Expected<f64, PersistenceError>::failure(
+        make_error(field_path(parent_path, key) + " must be a number"));
+  }
+  return Expected<f64, PersistenceError>::success(value.value()->as_f64_or(0.0));
+}
+
 [[nodiscard]] Expected<std::string, PersistenceError> string_field(
     const io::DataValue& object,
     std::string_view key,
@@ -361,6 +377,89 @@ decode_fluid_cells(std::span<const u8> bytes) {
   return Expected<player::ItemStack, PersistenceError>::success(std::move(stack));
 }
 
+[[nodiscard]] io::DataValue encode_furnace_state(const world::FurnaceState& furnace) {
+  io::DataValue value = io::DataValue::object();
+  if (!furnace.active_cycle.has_value()) {
+    return value;
+  }
+  const world::FurnaceCycleState& cycle = furnace.active_cycle.value();
+  io::DataValue active = io::DataValue::object();
+  active.set("input", io::DataValue{static_cast<u64>(cycle.input.value)});
+  active.set("input_count", io::DataValue{static_cast<u64>(cycle.input_count)});
+  active.set("output", io::DataValue{static_cast<u64>(cycle.output.value)});
+  active.set("output_count", io::DataValue{static_cast<u64>(cycle.output_count)});
+  active.set("duration_secs", io::DataValue{static_cast<f64>(cycle.duration_secs)});
+  active.set("start_at", io::DataValue{static_cast<f64>(cycle.start_at)});
+  value.set("active_cycle", std::move(active));
+  return value;
+}
+
+[[nodiscard]] Expected<world::FurnaceState, PersistenceError> decode_furnace_state(
+    const io::DataValue& value,
+    std::string_view path) {
+  if (value.kind() != io::DataKind::Object) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(
+        make_error(std::string{path} + " must be an object"));
+  }
+  world::FurnaceState furnace;
+  const io::DataValue* active = value.get("active_cycle");
+  if (active == nullptr || active->kind() == io::DataKind::Null) {
+    return Expected<world::FurnaceState, PersistenceError>::success(std::move(furnace));
+  }
+  if (active->kind() != io::DataKind::Object) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(
+        make_error(field_path(path, "active_cycle") + " must be an object"));
+  }
+
+  const std::string active_path = field_path(path, "active_cycle");
+  auto input = u32_field(*active, "input", active_path);
+  auto input_count = u32_field(*active, "input_count", active_path);
+  auto output = u32_field(*active, "output", active_path);
+  auto output_count = u32_field(*active, "output_count", active_path);
+  auto duration_secs = number_field(*active, "duration_secs", active_path);
+  auto start_at = number_field(*active, "start_at", active_path);
+  if (!input) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(input.error());
+  }
+  if (!input_count) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(input_count.error());
+  }
+  if (!output) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(output.error());
+  }
+  if (!output_count) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(output_count.error());
+  }
+  if (!duration_secs) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(duration_secs.error());
+  }
+  if (!start_at) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(start_at.error());
+  }
+  if (input_count.value() == 0U ||
+      input_count.value() > static_cast<u32>(std::numeric_limits<u16>::max()) ||
+      output_count.value() == 0U ||
+      output_count.value() > static_cast<u32>(std::numeric_limits<u16>::max()) ||
+      !std::isfinite(duration_secs.value()) ||
+      duration_secs.value() <= 0.0 ||
+      duration_secs.value() > static_cast<f64>(std::numeric_limits<Seconds>::max()) ||
+      !std::isfinite(start_at.value()) ||
+      start_at.value() < 0.0 ||
+      start_at.value() > static_cast<f64>(std::numeric_limits<Seconds>::max())) {
+    return Expected<world::FurnaceState, PersistenceError>::failure(
+        make_error(active_path + " has invalid furnace cycle values"));
+  }
+
+  furnace.active_cycle = world::FurnaceCycleState{
+      player::ItemID{input.value()},
+      static_cast<u16>(input_count.value()),
+      player::ItemID{output.value()},
+      static_cast<u16>(output_count.value()),
+      static_cast<Seconds>(duration_secs.value()),
+      static_cast<Seconds>(start_at.value())};
+  return Expected<world::FurnaceState, PersistenceError>::success(std::move(furnace));
+}
+
 [[nodiscard]] io::DataValue encode_block_containers(
     std::span<const world::SavedBlockContainer> containers) {
   io::DataValue values = io::DataValue::array();
@@ -380,6 +479,9 @@ decode_fluid_cells(std::span<const u8> bytes) {
       slots.push(std::move(slot_node));
     }
     node.set("slots", std::move(slots));
+    if (container.furnace.active_cycle.has_value()) {
+      node.set("furnace", encode_furnace_state(container.furnace));
+    }
     values.push(std::move(node));
   }
   return values;
@@ -439,6 +541,16 @@ decode_block_containers(
     container.local = {{x.value(), y.value(), z.value()}};
     container.container_type = std::move(container_type.value());
     container.slot_count = slot_count.value();
+    if (const io::DataValue* furnace = node.get("furnace"); furnace != nullptr) {
+      auto furnace_state = decode_furnace_state(
+          *furnace,
+          field_path(container_path, "furnace"));
+      if (!furnace_state) {
+        return Expected<std::vector<world::SavedBlockContainer>, PersistenceError>::failure(
+            furnace_state.error());
+      }
+      container.furnace = std::move(furnace_state.value());
+    }
     container.slots.reserve(slots.value()->size());
     for (usize slot_index = 0; slot_index < slots.value()->size(); ++slot_index) {
       const io::DataValue& slot_node = (*slots.value())[slot_index];

@@ -96,6 +96,8 @@ TEST(RegionFileTests, BlockContainerSerializationRoundTripsOccupiedSlots) {
       arv::testsupport::make_test_item_registry(block_registry);
   const arv::voxel::BlockVariantID stone =
       block_registry.find_variant("arvane:stone").value();
+  const arv::player::ItemID stone_item =
+      item_registry.find_item("arvane:stone").value();
   const arv::player::ItemID dirt_item =
       item_registry.find_item("arvane:dirt").value();
 
@@ -103,9 +105,16 @@ TEST(RegionFileTests, BlockContainerSerializationRoundTripsOccupiedSlots) {
       make_saved_chunk({{0, 0, 0}}, stone, true);
   arv::world::SavedBlockContainer container;
   container.local = {{2, 3, 4}};
-  container.container_type = "arvane:chest";
-  container.slot_count = 27;
-  container.slots.push_back({5, arv::player::ItemStack{dirt_item, 12}});
+  container.container_type = "arvane:furnace";
+  container.slot_count = 3;
+  container.slots.push_back({2, arv::player::ItemStack{dirt_item, 12}});
+  container.furnace.active_cycle = arv::world::FurnaceCycleState{
+      stone_item,
+      3U,
+      dirt_item,
+      1U,
+      20.0F,
+      42.5F};
   chunk.block_containers.push_back(std::move(container));
 
   const std::vector<arv::persistence::SavedChunkSection> chunks{std::move(chunk)};
@@ -119,12 +128,19 @@ TEST(RegionFileTests, BlockContainerSerializationRoundTripsOccupiedSlots) {
   const arv::world::SavedBlockContainer& loaded =
       decoded.value().chunks[0].block_containers[0];
   EXPECT_EQ(loaded.local, (arv::SectionLocalPos{{2, 3, 4}}));
-  EXPECT_EQ(loaded.container_type, "arvane:chest");
-  EXPECT_EQ(loaded.slot_count, 27U);
+  EXPECT_EQ(loaded.container_type, "arvane:furnace");
+  EXPECT_EQ(loaded.slot_count, 3U);
   ASSERT_EQ(loaded.slots.size(), 1U);
-  EXPECT_EQ(loaded.slots[0].slot, 5U);
+  EXPECT_EQ(loaded.slots[0].slot, 2U);
   EXPECT_EQ(loaded.slots[0].stack.item, dirt_item);
   EXPECT_EQ(loaded.slots[0].stack.count, 12U);
+  ASSERT_TRUE(loaded.furnace.active_cycle.has_value());
+  EXPECT_EQ(loaded.furnace.active_cycle->input, stone_item);
+  EXPECT_EQ(loaded.furnace.active_cycle->input_count, 3U);
+  EXPECT_EQ(loaded.furnace.active_cycle->output, dirt_item);
+  EXPECT_EQ(loaded.furnace.active_cycle->output_count, 1U);
+  EXPECT_FLOAT_EQ(loaded.furnace.active_cycle->duration_secs, 20.0F);
+  EXPECT_FLOAT_EQ(loaded.furnace.active_cycle->start_at, 42.5F);
 }
 
 TEST(RegionFileTests, ChunkSerializationAllowsMoreThanU8SectionsPerColumn) {

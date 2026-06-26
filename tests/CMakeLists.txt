@@ -99,6 +99,7 @@ add_executable(arv_tests
   player/inventory_tests.cpp
   player/permission_tests.cpp
   player/selection_tests.cpp
+  player/smelting_tests.cpp
   plugin/plugin_system_tests.cpp
   plugin/arv_perms_tests.cpp
   render/entity_model_tests.cpp

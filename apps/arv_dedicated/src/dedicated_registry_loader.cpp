@@ -6,6 +6,7 @@
 #include "arv/base/base_module.hpp"
 #include "arv/core/log.hpp"
 #include "arv/crafting/crafting.hpp"
+#include "arv/crafting/smelting.hpp"
 #include "arv/crypto/hash.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/persistence/save.hpp"
@@ -423,12 +424,20 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
     core::warn("dedicated", diagnostic.describe());
   }
   registries.crafting_registry = std::move(crafting_result.value().registry);
+  auto smelting_result =
+      crafting::load_smelting_rule_registry_from_packs(packs, registries.item_registry);
+  if (!smelting_result) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("smelting", smelting_result.error().message));
+  }
+  registries.smelting_registry = std::move(smelting_result.value());
   core::info(
       "dedicated",
-      "loaded item registry: items={} hash={} recipes={}",
+      "loaded item registry: items={} hash={} recipes={} smelting_rules={}",
       registries.item_registry.item_count(),
       registries.item_registry_hash,
-      registries.crafting_registry.recipes().size());
+      registries.crafting_registry.recipes().size(),
+      registries.smelting_registry.rules().size());
 
   auto entity_definition_text = packs.load_merged_json_array_text("entities", "entities");
   if (!entity_definition_text) {

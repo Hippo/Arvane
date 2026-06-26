@@ -1,6 +1,13 @@
 {
   "container_types": [
     {
+      "name": "arvane:furnace",
+      "id": "arvane:furnace",
+      "slot_count": 3,
+      "title": "Furnace",
+      "ui_layout": "arvane:furnace"
+    },
+    {
       "name": "arvane:chest",
       "id": "arvane:chest",
       "slot_count": 27,

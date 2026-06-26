@@ -723,6 +723,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
   crafting_registry_ = start_info.crafting_registry;
+  smelting_registry_ = start_info.smelting_registry;
   container_types_ = start_info.container_types;
   container_layouts_ = start_info.container_layouts;
   entity_registry_ = start_info.entity_registry;
