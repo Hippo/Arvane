@@ -104,6 +104,35 @@ struct SaveAllCommandResult {
   u32 saved_entities{};
 };
 
+struct WorldCommandInfo {
+  WorldID id{};
+  std::string name{};
+  std::string path{};
+  bool loaded{};
+  bool is_default{};
+  bool load_on_start{};
+  u32 player_count{};
+  u64 seed{};
+  bool seed_visible{true};
+  std::string generator_id{};
+  std::string world_type{};
+  std::optional<Location> spawn{};
+  std::string created_at{};
+};
+
+struct WorldCreateCommandRequest {
+  std::string name{};
+  std::optional<u64> seed{};
+  std::optional<std::string> generator_id{};
+  std::optional<std::string> world_type{};
+};
+
+struct WorldOperationCommandResult {
+  bool success{};
+  std::string message{};
+  std::optional<WorldCommandInfo> world{};
+};
+
 struct ExplosionCommandRequest {
   WorldID world_id{};
   Vec3f origin{};
@@ -194,6 +223,18 @@ using ClearStatusEffectsFn =
 using ListStatusEffectsFn =
     FunctionRef<std::vector<StatusEffectCommandState>(EntityID)>;
 using SaveAllFn = FunctionRef<SaveAllCommandResult(bool)>;
+using WorldListFn = FunctionRef<std::vector<WorldCommandInfo>()>;
+using WorldInfoFn = FunctionRef<std::optional<WorldCommandInfo>(std::string_view)>;
+using WorldDefaultFn = FunctionRef<std::optional<std::string>()>;
+using WorldCreateFn = FunctionRef<WorldOperationCommandResult(const WorldCreateCommandRequest&)>;
+using WorldLoadFn = FunctionRef<WorldOperationCommandResult(std::string_view)>;
+using WorldUnloadFn = FunctionRef<WorldOperationCommandResult(std::string_view, bool)>;
+using WorldDeleteFn = FunctionRef<WorldOperationCommandResult(std::string_view)>;
+using WorldRenameFn = FunctionRef<WorldOperationCommandResult(std::string_view, std::string_view)>;
+using WorldSetDefaultFn = FunctionRef<WorldOperationCommandResult(std::string_view)>;
+using WorldSetSpawnFn = FunctionRef<WorldOperationCommandResult(std::string_view, Location)>;
+using TeleportPlayerToWorldSpawnFn =
+    FunctionRef<WorldOperationCommandResult(PlayerID, std::string_view)>;
 using CreateExplosionFn =
     FunctionRef<ExplosionCommandResult(const ExplosionCommandRequest&)>;
 using BroadcastSystemMessageFn = FunctionRef<bool(std::string_view)>;
@@ -246,6 +287,17 @@ struct ServerCommandServices {
   ClearStatusEffectsFn clear_status_effects{};
   ListStatusEffectsFn list_status_effects{};
   SaveAllFn save_all{};
+  WorldListFn list_worlds{};
+  WorldInfoFn world_info{};
+  WorldDefaultFn default_world_name{};
+  WorldCreateFn create_world{};
+  WorldLoadFn load_world{};
+  WorldUnloadFn unload_world{};
+  WorldDeleteFn delete_world{};
+  WorldRenameFn rename_world{};
+  WorldSetDefaultFn set_default_world{};
+  WorldSetSpawnFn set_world_spawn{};
+  TeleportPlayerToWorldSpawnFn teleport_player_to_world_spawn{};
   CreateExplosionFn create_explosion{};
   BroadcastSystemMessageFn broadcast_system_message{};
   SendPrivateMessageFn send_private_message{};

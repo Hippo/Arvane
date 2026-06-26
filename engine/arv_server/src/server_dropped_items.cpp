@@ -76,15 +76,19 @@ namespace {
 
 std::vector<DroppedItemStack> ServerRuntimeImpl::dropped_item_stacks() const {
   std::vector<DroppedItemStack> drops;
-  const std::vector<entity::DroppedItemEntitySnapshot> snapshots =
-      default_world_.collect_dropped_item_snapshots();
-  drops.reserve(snapshots.size());
-  for (const entity::DroppedItemEntitySnapshot& snapshot : snapshots) {
-    drops.push_back({snapshot.net_id,
-                     snapshot.world_id,
-                     snapshot.position,
-                     snapshot.velocity,
-                     snapshot.stack});
+  for (const world::WorldRuntime* runtime : loaded_worlds()) {
+    if (runtime == nullptr) {
+      continue;
+    }
+    const std::vector<entity::DroppedItemEntitySnapshot> snapshots =
+        runtime->collect_dropped_item_snapshots();
+    for (const entity::DroppedItemEntitySnapshot& snapshot : snapshots) {
+      drops.push_back({snapshot.net_id,
+                       snapshot.world_id,
+                       snapshot.position,
+                       snapshot.velocity,
+                       snapshot.stack});
+    }
   }
   return drops;
 }
@@ -106,10 +110,11 @@ bool ServerRuntimeImpl::spawn_dropped_item_stack(
       item_registry_->item(stack.item) == nullptr) {
     return false;
   }
-  if (world_id != default_world_.id()) {
+  world::WorldRuntime* runtime = world_by_id(world_id);
+  if (runtime == nullptr) {
     return false;
   }
-  const EntityID entity_id = default_world_.create_dropped_item(
+  const EntityID entity_id = runtime->create_dropped_item(
       stack,
       position,
       velocity,
@@ -130,8 +135,12 @@ bool ServerRuntimeImpl::spawn_player_thrown_item_stack(
       Vec3f{0.0F, -0.28F, 0.0F};
   Vec3f position = fallback_position;
   if (block_registry_ != nullptr) {
+    const world::WorldRuntime* runtime = world_by_id(player_state.world_id);
+    if (runtime == nullptr) {
+      return false;
+    }
     const std::optional<Vec3f> clear_position = thrown_item_spawn_position(
-        default_world_,
+        *runtime,
         *block_registry_,
         player_state,
         player_tuning_,
@@ -163,68 +172,77 @@ void ServerRuntimeImpl::tick_dropped_item_pickups(Seconds tick_seconds) {
   }
 
   const f32 radius_sq = dropped_items_.pickup_radius * dropped_items_.pickup_radius;
-  const std::vector<entity::DroppedItemEntitySnapshot> drops =
-      default_world_.collect_dropped_item_snapshots();
-  for (const entity::DroppedItemEntitySnapshot& drop : drops) {
-    if (drop.pickup_delay_seconds > 0.0F || drop.stack.count == 0U) {
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    if (runtime == nullptr) {
       continue;
     }
-
-    entity::DroppedItem* live_drop = default_world_.find_dropped_item(drop.entity_id);
-    if (live_drop == nullptr || live_drop->stack.count == 0U ||
-        live_drop->pickup_delay_seconds > 0.0F) {
-      continue;
-    }
-
-    for (const PlayerID player_id : default_world_.player_ids()) {
-      player::PlayerState* player_state = default_world_.find_player(player_id);
-      if (player_state == nullptr || player_state->world_id != drop.world_id) {
+    const std::vector<entity::DroppedItemEntitySnapshot> drops =
+        runtime->collect_dropped_item_snapshots();
+    for (const entity::DroppedItemEntitySnapshot& drop : drops) {
+      if (drop.pickup_delay_seconds > 0.0F || drop.stack.count == 0U) {
         continue;
       }
 
-      const Vec3f delta = player_state->position - drop.position;
-      if (dot(delta, delta) > radius_sq) {
+      entity::DroppedItem* live_drop = runtime->find_dropped_item(drop.entity_id);
+      if (live_drop == nullptr || live_drop->stack.count == 0U ||
+          live_drop->pickup_delay_seconds > 0.0F) {
         continue;
       }
 
-      const player::InventoryInsertResult insert_result =
-          player_state->inventory.insert_stack(live_drop->stack, *item_registry_);
-      const u16 leftover_count =
-          insert_result.leftover.has_value() ? insert_result.leftover->count : 0U;
-      if (leftover_count == live_drop->stack.count) {
-        continue;
-      }
-      const u16 inserted_count =
-          static_cast<u16>(live_drop->stack.count - leftover_count);
-      for (const SessionID session_id : sessions_.session_ids()) {
-        const ServerSession* session = sessions_.find(session_id);
-        if (session != nullptr && session->player_id == player_id) {
-          publish_recipe_unlocks_for_collected_stack(
-              *session,
-              *player_state,
-              player::item_stack_with_count(live_drop->stack, inserted_count));
-          break;
+      for (const PlayerID player_id : runtime->player_ids()) {
+        player::PlayerState* player_state = runtime->find_player(player_id);
+        if (player_state == nullptr || player_state->world_id != drop.world_id) {
+          continue;
         }
-      }
 
-      if (insert_result.complete()) {
-        (void)default_world_.destroy_entity(drop.entity_id, world::EntityDespawnReason::Removed);
-      } else {
-        live_drop->stack = insert_result.leftover.value();
+        const Vec3f delta = player_state->position - drop.position;
+        if (dot(delta, delta) > radius_sq) {
+          continue;
+        }
+
+        const player::InventoryInsertResult insert_result =
+            player_state->inventory.insert_stack(live_drop->stack, *item_registry_);
+        const u16 leftover_count =
+            insert_result.leftover.has_value() ? insert_result.leftover->count : 0U;
+        if (leftover_count == live_drop->stack.count) {
+          continue;
+        }
+        const u16 inserted_count =
+            static_cast<u16>(live_drop->stack.count - leftover_count);
+        for (const SessionID session_id : sessions_.session_ids()) {
+          const ServerSession* session = sessions_.find(session_id);
+          if (session != nullptr && session->player_id == player_id) {
+            publish_recipe_unlocks_for_collected_stack(
+                *session,
+                *player_state,
+                player::item_stack_with_count(live_drop->stack, inserted_count));
+            break;
+          }
+        }
+
+        if (insert_result.complete()) {
+          (void)runtime->destroy_entity(
+              drop.entity_id,
+              world::EntityDespawnReason::Removed);
+        } else {
+          live_drop->stack = insert_result.leftover.value();
+        }
+        break;
       }
-      break;
     }
   }
 }
 
 void ServerRuntimeImpl::send_dropped_item_replication() {
-  const std::vector<entity::DroppedItemEntitySnapshot> drops =
-      default_world_.collect_dropped_item_snapshots();
   for (const SessionID session_id : sessions_.session_ids()) {
     const ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr || session->world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime =
+        session == nullptr ? nullptr : world_for_session(*session);
+    if (session == nullptr || runtime == nullptr) {
       continue;
     }
+    const std::vector<entity::DroppedItemEntitySnapshot> drops =
+        runtime->collect_dropped_item_snapshots();
 
     EntityReplicationState& state = entity_replication_[session_id];
     HashSet<EntityNetID> relevant_now;

@@ -359,51 +359,22 @@ void ServerRuntimeImpl::broadcast_pending_ride_ended_events() {
 }
 
 void ServerRuntimeImpl::send_block_updates() {
-  std::vector<world::ReplicatedBlockUpdate> updates =
-      default_world_.drain_replicated_block_updates();
-  if (updates.empty()) {
-    return;
-  }
-
-  for (const SessionID session_id : sessions_.session_ids()) {
-    const ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr || session->world_id != default_world_.id()) {
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    std::vector<world::ReplicatedBlockUpdate> updates =
+        runtime->drain_replicated_block_updates();
+    if (updates.empty()) {
       continue;
     }
 
-    protocol::ClientboundBlockUpdateBatch batch;
-    batch.world_id = session->world_id;
-    batch.server_tick = tick_index_;
-    for (const world::ReplicatedBlockUpdate& update : updates) {
-      if (!chunk_streamer_.session_has_sent_chunk(
-              session_id,
-              session->world_id,
-              block_to_chunk(update.pos))) {
+    for (const SessionID session_id : sessions_.session_ids()) {
+      const ServerSession* session = sessions_.find(session_id);
+      if (session == nullptr || session->world_id != runtime->id()) {
         continue;
       }
-      protocol::BlockUpdate packet_update;
-      packet_update.pos = update.pos;
-      packet_update.new_state = update.new_state;
-      packet_update.update_flags = 0U;
-      packet_update.server_tick = update.server_tick;
-      if (update.new_fluid.has_value()) {
-        packet_update.has_fluid = true;
-        packet_update.new_fluid = update.new_fluid.value();
-      }
-      batch.updates.push_back(packet_update);
-    }
-    if (batch.updates.empty()) {
-      continue;
-    }
 
-    const net::NetworkResult send_result = send_protocol_message(
-        *transport_,
-        session->connection_id,
-        protocol::MessageType::ClientboundBlockUpdateBatch,
-        protocol::ReliabilityClass::ReliableOrdered,
-        protocol::NetworkLane::Gameplay,
-        protocol::serialize_clientbound_block_update_batch(batch));
-    if (send_result) {
+      protocol::ClientboundBlockUpdateBatch batch;
+      batch.world_id = session->world_id;
+      batch.server_tick = tick_index_;
       for (const world::ReplicatedBlockUpdate& update : updates) {
         if (!chunk_streamer_.session_has_sent_chunk(
                 session_id,
@@ -411,27 +382,58 @@ void ServerRuntimeImpl::send_block_updates() {
                 block_to_chunk(update.pos))) {
           continue;
         }
-        const ChunkSectionCoord coord = block_to_chunk(update.pos);
-        if (const voxel::ChunkSection* chunk = default_world_.find_chunk(coord);
-            chunk != nullptr) {
-          (void)chunk_streamer_.mark_sent_block_version(
-              session_id,
-              session->world_id,
-              coord,
-              chunk->block_version());
+        protocol::BlockUpdate packet_update;
+        packet_update.pos = update.pos;
+        packet_update.new_state = update.new_state;
+        packet_update.update_flags = 0U;
+        packet_update.server_tick = update.server_tick;
+        if (update.new_fluid.has_value()) {
+          packet_update.has_fluid = true;
+          packet_update.new_fluid = update.new_fluid.value();
         }
-        if (block_registry_ != nullptr &&
-            update.new_state == voxel::AirBlockVariantID &&
-            update.old_state != voxel::AirBlockVariantID) {
-          const protocol::ClientboundSpawnParticles particles =
-              make_block_break_particles(session->world_id, update, *block_registry_);
-          (void)send_protocol_message(
-              *transport_,
-              session->connection_id,
-              protocol::MessageType::ClientboundSpawnParticles,
-              protocol::ReliabilityClass::UnreliableEvent,
-              protocol::NetworkLane::Gameplay,
-              protocol::serialize_clientbound_spawn_particles(particles));
+        batch.updates.push_back(packet_update);
+      }
+      if (batch.updates.empty()) {
+        continue;
+      }
+
+      const net::NetworkResult send_result = send_protocol_message(
+          *transport_,
+          session->connection_id,
+          protocol::MessageType::ClientboundBlockUpdateBatch,
+          protocol::ReliabilityClass::ReliableOrdered,
+          protocol::NetworkLane::Gameplay,
+          protocol::serialize_clientbound_block_update_batch(batch));
+      if (send_result) {
+        for (const world::ReplicatedBlockUpdate& update : updates) {
+          if (!chunk_streamer_.session_has_sent_chunk(
+                  session_id,
+                  session->world_id,
+                  block_to_chunk(update.pos))) {
+            continue;
+          }
+          const ChunkSectionCoord coord = block_to_chunk(update.pos);
+          if (const voxel::ChunkSection* chunk = runtime->find_chunk(coord);
+              chunk != nullptr) {
+            (void)chunk_streamer_.mark_sent_block_version(
+                session_id,
+                session->world_id,
+                coord,
+                chunk->block_version());
+          }
+          if (block_registry_ != nullptr &&
+              update.new_state == voxel::AirBlockVariantID &&
+              update.old_state != voxel::AirBlockVariantID) {
+            const protocol::ClientboundSpawnParticles particles =
+                make_block_break_particles(session->world_id, update, *block_registry_);
+            (void)send_protocol_message(
+                *transport_,
+                session->connection_id,
+                protocol::MessageType::ClientboundSpawnParticles,
+                protocol::ReliabilityClass::UnreliableEvent,
+                protocol::NetworkLane::Gameplay,
+                protocol::serialize_clientbound_spawn_particles(particles));
+          }
         }
       }
     }
@@ -441,11 +443,13 @@ void ServerRuntimeImpl::send_block_updates() {
 void ServerRuntimeImpl::send_player_block_break_progress() {
   for (const SessionID session_id : sessions_.session_ids()) {
     const ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr || session->world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime =
+        session == nullptr ? nullptr : world_for_session(*session);
+    if (session == nullptr || runtime == nullptr) {
       continue;
     }
 
-    const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    const player::PlayerState* player_state = runtime->find_player(session->player_id);
     if (player_state == nullptr) {
       continue;
     }
@@ -491,16 +495,17 @@ void ServerRuntimeImpl::send_player_block_break_progress() {
 }
 
 void ServerRuntimeImpl::send_entity_replication() {
-  const std::vector<entity::EntitySnapshotEntry> snapshots =
-      default_world_.collect_entity_snapshots();
-
   for (const SessionID session_id : sessions_.session_ids()) {
     const ServerSession* session = sessions_.find(session_id);
+    const world::WorldRuntime* runtime =
+        session == nullptr ? nullptr : world_for_session(*session);
     if (session == nullptr || !session->authenticated || session->closing ||
         session->connection_state != net::ConnectionState::InGame ||
-        session->world_id != default_world_.id()) {
+        runtime == nullptr) {
       continue;
     }
+    const std::vector<entity::EntitySnapshotEntry> snapshots =
+        runtime->collect_entity_snapshots();
 
     EntityReplicationState& state = entity_replication_[session_id];
     HashSet<EntityNetID> relevant_now;

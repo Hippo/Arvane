@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -319,7 +320,9 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
 }
 
 void ServerRuntimeImpl::begin_authenticated_session_join(ServerSession& session) {
-  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  const world::WorldRuntime* runtime = world_for_session(session);
+  const player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session.player_id);
   if (player_state == nullptr) {
     return;
   }
@@ -335,7 +338,9 @@ void ServerRuntimeImpl::begin_authenticated_session_join(ServerSession& session)
 }
 
 void ServerRuntimeImpl::finish_authenticated_session_join(ServerSession& session) {
-  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  const world::WorldRuntime* runtime = world_for_session(session);
+  const player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session.player_id);
   if (player_state == nullptr) {
     return;
   }
@@ -556,16 +561,21 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
     }
     skin_transfers_.erase(session->session_id);
     chat_rate_limits_.erase(session->session_id);
+    world::WorldRuntime* runtime = world_for_session(*session);
     if (const player::PlayerState* player_state =
-            default_world_.find_player(session->player_id);
+            runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
         player_state != nullptr) {
       record_player_save_state(*session, *player_state);
     }
-    if (const std::optional<EntityID> entity_id =
-            default_world_.entity_for_player(session->player_id);
-        entity_id.has_value()) {
-      (void)default_world_.destroy_entity(entity_id.value(), world::EntityDespawnReason::Removed);
-      default_world_.flush_entity_despawns();
+    if (runtime != nullptr) {
+      if (const std::optional<EntityID> entity_id =
+              runtime->entity_for_player(session->player_id);
+          entity_id.has_value()) {
+        (void)runtime->destroy_entity(
+            entity_id.value(),
+            world::EntityDespawnReason::Removed);
+        runtime->flush_entity_despawns();
+      }
     }
   }
   sessions_.remove_by_connection(connection_id);
@@ -632,11 +642,14 @@ void ServerRuntimeImpl::send_world_join_result(
   result.initial_tick = tick_index_;
   result.tick_rate = base_tps_;
   result.effective_view_distance = max_view_distance_;
-  if (const std::optional<EntityID> entity_id =
-          default_world_.entity_for_player(session.player_id);
-      entity_id.has_value()) {
-    result.local_entity_id =
-        default_world_.network_id_for_entity(entity_id.value()).value_or(EntityNetID{});
+  const world::WorldRuntime* runtime = world_for_session(session);
+  if (runtime != nullptr) {
+    const std::optional<EntityID> entity_id =
+        runtime->entity_for_player(session.player_id);
+    if (entity_id.has_value()) {
+      result.local_entity_id =
+          runtime->network_id_for_entity(entity_id.value()).value_or(EntityNetID{});
+    }
   }
 
   const net::NetworkResult send_result = send_protocol_message(
@@ -655,11 +668,12 @@ void ServerRuntimeImpl::send_world_join_result(
     send_recipe_book_snapshot(session);
   }
   if (send_result && mode_ == ServerMode::Dedicated) {
+    const WorldRecord* record = worlds_.find(session.world_id);
     core::info(
         "dedicated",
         "client '{}' joined world '{}': session={} player={} spawn=({}, {}, {}) tick={} view_limit={}",
         session.profile_name,
-        world_name_,
+        record == nullptr ? std::to_string(session.world_id.value) : record->name,
         session.session_id.value,
         session.player_id.value,
         player_state.position.x,
@@ -671,11 +685,12 @@ void ServerRuntimeImpl::send_world_join_result(
 }
 
 void ServerRuntimeImpl::send_world_time(const ServerSession& session) {
-  if (session.world_id != default_world_.id()) {
+  const world::WorldRuntime* runtime = world_for_session(session);
+  if (runtime == nullptr) {
     return;
   }
   const protocol::ClientboundWorldTime packet =
-      world_time_packet(session.world_id, default_world_.clock());
+      world_time_packet(session.world_id, runtime->clock());
   const net::NetworkResult send_result = send_protocol_message(
       *transport_,
       session.connection_id,
@@ -687,7 +702,7 @@ void ServerRuntimeImpl::send_world_time(const ServerSession& session) {
 }
 
 void ServerRuntimeImpl::broadcast_world_time(WorldID world_id) {
-  if (world_id != default_world_.id()) {
+  if (world_by_id(world_id) == nullptr) {
     return;
   }
   for (const SessionID session_id : sessions_.session_ids()) {

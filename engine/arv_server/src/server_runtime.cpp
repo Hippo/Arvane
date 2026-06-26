@@ -7,7 +7,6 @@
 #include "arv/crypto/random.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
-#include "arv/persistence/save.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
 #include "arv/text/language.hpp"
@@ -111,84 +110,6 @@ namespace {
     return distance_squared(lhs.position, anchor.value()) <
            distance_squared(rhs.position, anchor.value());
   });
-}
-
-[[nodiscard]] persistence::PlayerSaveData to_persistence_player_save(
-    const ServerPlayerSaveState& player) {
-  persistence::PlayerSaveData save;
-  save.profile_id = player.profile_id;
-  save.profile_name = player.profile_name;
-  save.display_name = player.display_name;
-  save.world_name = player.world_name;
-  save.position = player.position;
-  save.velocity = player.velocity;
-  save.yaw_radians = player.yaw_radians;
-  save.pitch_radians = player.pitch_radians;
-  save.grounded = player.grounded;
-  save.movement_mode = player.movement_mode;
-  save.game_mode_id = player.game_mode_id;
-  save.selected_skin_hash = player.selected_skin_hash;
-  save.selected_skin_slim_model = player.selected_skin_slim_model;
-  save.respawn_location = player.respawn_location;
-  save.selected_hotbar_slot = player.selected_hotbar_slot;
-  save.inventory = player.inventory;
-  save.unlocked_recipe_ids = player.unlocked_recipe_ids;
-  return save;
-}
-
-[[nodiscard]] persistence::PlayerSaveData to_persistence_player_save(
-    const ServerSession& session,
-    const player::PlayerState& player_state,
-    std::string_view world_name) {
-  persistence::PlayerSaveData save;
-  save.profile_id = session.profile_id;
-  save.profile_name = session.profile_name;
-  save.display_name = session.display_name;
-  save.world_name = std::string{world_name};
-  save.position = player_state.position;
-  save.velocity = player_state.velocity;
-  save.yaw_radians = player_state.yaw_radians;
-  save.pitch_radians = player_state.pitch_radians;
-  save.grounded = player_state.grounded;
-  save.movement_mode = player_state.movement_mode;
-  save.game_mode_id = player_state.game_mode_id;
-  save.respawn_location = player_state.respawn_location;
-  save.selected_hotbar_slot = player_state.selected_hotbar_slot;
-  save.inventory = player_state.inventory;
-  save.unlocked_recipe_ids = player_state.unlocked_recipe_ids;
-  return save;
-}
-
-[[nodiscard]] std::vector<persistence::SavedChunkSection> capture_saved_chunks(
-    const world::WorldRuntime& world) {
-  std::vector<ChunkSectionCoord> coords = world.loaded_chunk_coords();
-  std::sort(coords.begin(), coords.end(), [](const auto& lhs, const auto& rhs) {
-    if (lhs.value.x != rhs.value.x) {
-      return lhs.value.x < rhs.value.x;
-    }
-    if (lhs.value.z != rhs.value.z) {
-      return lhs.value.z < rhs.value.z;
-    }
-    return lhs.value.y < rhs.value.y;
-  });
-
-  std::vector<persistence::SavedChunkSection> chunks;
-  chunks.reserve(coords.size());
-  for (const ChunkSectionCoord coord : coords) {
-    const voxel::ChunkSection* chunk = world.find_chunk(coord);
-    if (chunk == nullptr) {
-      continue;
-    }
-    persistence::SavedChunkSection saved;
-    saved.coord = coord;
-    saved.blocks = chunk->blocks();
-    saved.lights = chunk->lights();
-    saved.fluids = chunk->fluids();
-    saved.lighting_valid = !chunk->is_dirty(voxel::ChunkDirtyFlags::Lighting);
-    saved.block_containers = world.saved_block_containers(coord);
-    chunks.push_back(std::move(saved));
-  }
-  return chunks;
 }
 
 [[nodiscard]] std::string format_game_rule_type(world::GameRuleValueType type) {
@@ -757,6 +678,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   next_chat_message_id_ = 1U;
   next_container_session_id_ = 1U;
   online_profile_sessions_.clear();
+  loaded_worlds_.clear();
   active_skin_uploads_global_ = 0U;
   skin_storage_bytes_ = current_skin_storage_bytes(server_save_root_);
   fluid_definition_ = start_info.fluid_definition;
@@ -793,6 +715,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   world_jobs_.configure(start_info);
   world::WorldTickPolicy tick_policy = start_info.world_tick_policy;
   tick_policy.fluid_budget = 0U;
+  world_tick_policy_ = tick_policy;
   default_world_.set_spawn_point(start_info.world_spawn);
   default_world_.configure_clock(
       world::DefaultDayLengthSeconds,
@@ -800,7 +723,19 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       base_tps_);
   default_world_.set_tick_index(tick_index_);
   default_world_.set_tick_policy(tick_policy);
-  worlds_.ensure_default_world();
+  initialize_world_registry(start_info);
+  const std::vector<WorldRecord> startup_worlds = worlds_.records();
+  for (const WorldRecord& record : startup_worlds) {
+    if (!record.load_on_start || record.id == DefaultWorldID ||
+        record.state == WorldRuntimeState::Running) {
+      continue;
+    }
+    command::WorldOperationCommandResult loaded =
+        load_world_from_command(record.name);
+    if (!loaded.success) {
+      core::warn("worlds", "failed to load world '{}': {}", record.name, loaded.message);
+    }
+  }
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated
           ? arv::text::text_or_fallback(language_, "server.name.dedicated", "Arvane Dedicated Server")
@@ -959,11 +894,16 @@ void ServerRuntimeImpl::tick() {
   const bool integrated_frame_pump =
       mode_ == ServerMode::Integrated &&
       chunk_streaming_config_.integrated_frame_pump_enabled;
+  const std::vector<world::WorldRuntime*> active_worlds = loaded_worlds();
   if (!integrated_frame_pump) {
-    world_jobs_.drain_generation_jobs(default_world_, false);
+    for (world::WorldRuntime* runtime : active_worlds) {
+      world_jobs_.drain_generation_jobs(*runtime, false);
+    }
   }
-  world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, false);
-  world_jobs_.drain_lighting_jobs(default_world_, false);
+  for (world::WorldRuntime* runtime : active_worlds) {
+    world_jobs_.drain_fluid_jobs(*runtime, fluid_definition_, false);
+    world_jobs_.drain_lighting_jobs(*runtime, false);
+  }
   inbound_events_ = network_thread_enabled_
                         ? network_thread_.drain_events()
                         : transport_->poll_events();
@@ -1029,34 +969,45 @@ void ServerRuntimeImpl::tick() {
     });
     plugins_->tick(tick_index_);
   }
-  default_world_.tick_dropped_items(tick_seconds, block_registry_, item_registry_);
+  for (world::WorldRuntime* runtime : active_worlds) {
+    runtime->tick_dropped_items(tick_seconds, block_registry_, item_registry_);
+  }
   tick_dropped_item_pickups(tick_seconds);
   update_world_simulation_activity();
   if (entity_registry_ != nullptr) {
-    world_jobs_.drain_natural_spawn_jobs(
-        default_world_,
-        natural_spawns_,
-        block_registry_,
-        entity_registry_,
-        vehicle_registry_,
-        tick_index_,
-        false);
-    world_jobs_.schedule_natural_spawn_jobs(
-        default_world_,
-        natural_spawns_,
-        tick_index_);
+    for (world::WorldRuntime* runtime : active_worlds) {
+      world_jobs_.drain_natural_spawn_jobs(
+          *runtime,
+          natural_spawns_,
+          block_registry_,
+          entity_registry_,
+          vehicle_registry_,
+          tick_index_,
+          false);
+      world_jobs_.schedule_natural_spawn_jobs(
+          *runtime,
+          natural_spawns_,
+          tick_index_);
+    }
   }
-  (void)default_world_.tick(
-      *block_registry_,
-      fluid_definition_,
-      entity_goals_,
-      vehicle_registry_);
+  for (world::WorldRuntime* runtime : active_worlds) {
+    runtime->set_tick_index(tick_index_);
+    (void)runtime->tick(
+        *block_registry_,
+        fluid_definition_,
+        entity_goals_,
+        vehicle_registry_);
+  }
   process_pending_entity_attacks();
   tick_vehicle_damage_effects();
-  default_world_.flush_entity_despawns();
+  for (world::WorldRuntime* runtime : active_worlds) {
+    runtime->flush_entity_despawns();
+  }
   broadcast_pending_ride_ended_events();
-  world_jobs_.schedule_fluid_jobs(default_world_, block_registry_, fluid_definition_);
-  world_jobs_.schedule_lighting_jobs(default_world_, block_registry_);
+  for (world::WorldRuntime* runtime : active_worlds) {
+    world_jobs_.schedule_fluid_jobs(*runtime, block_registry_, fluid_definition_);
+    world_jobs_.schedule_lighting_jobs(*runtime, block_registry_);
+  }
   if (integrated_frame_pump) {
     tick_chunk_streaming_maintenance();
   } else {
@@ -1064,7 +1015,9 @@ void ServerRuntimeImpl::tick() {
   }
   tick_container_sessions();
   if (!integrated_frame_pump) {
-    world_jobs_.schedule_generation_jobs(default_world_, chunk_streamer_, chunk_generation_);
+    for (world::WorldRuntime* runtime : active_worlds) {
+      world_jobs_.schedule_generation_jobs(*runtime, chunk_streamer_, chunk_generation_);
+    }
   }
   send_player_block_break_progress();
   send_block_updates();
@@ -1115,9 +1068,11 @@ void ServerRuntimeImpl::shutdown() {
     }
   }
   world_jobs_.wait_for_all();
-  world_jobs_.drain_generation_jobs(default_world_, true);
-  world_jobs_.drain_fluid_jobs(default_world_, fluid_definition_, true);
-  world_jobs_.drain_lighting_jobs(default_world_, true);
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    world_jobs_.drain_generation_jobs(*runtime, true);
+    world_jobs_.drain_fluid_jobs(*runtime, fluid_definition_, true);
+    world_jobs_.drain_lighting_jobs(*runtime, true);
+  }
   if (transport_) {
     if (network_thread_enabled_) {
       network_thread_.request_stop();
@@ -1233,6 +1188,64 @@ world::WorldRuntime& ServerRuntimeImpl::voxel_world() noexcept {
   return default_world_;
 }
 
+const world::WorldRuntime* ServerRuntimeImpl::world_by_id(WorldID world_id) const noexcept {
+  if (world_id == default_world_.id()) {
+    return &default_world_;
+  }
+  const auto found = loaded_worlds_.find(world_id);
+  return found == loaded_worlds_.end() ? nullptr : found->second.get();
+}
+
+world::WorldRuntime* ServerRuntimeImpl::world_by_id(WorldID world_id) noexcept {
+  if (world_id == default_world_.id()) {
+    return &default_world_;
+  }
+  const auto found = loaded_worlds_.find(world_id);
+  return found == loaded_worlds_.end() ? nullptr : found->second.get();
+}
+
+const world::WorldRuntime* ServerRuntimeImpl::world_for_session(
+    const ServerSession& session) const noexcept {
+  return world_by_id(session.world_id);
+}
+
+world::WorldRuntime* ServerRuntimeImpl::world_for_session(
+    const ServerSession& session) noexcept {
+  return world_by_id(session.world_id);
+}
+
+std::vector<world::WorldRuntime*> ServerRuntimeImpl::loaded_worlds() noexcept {
+  std::vector<world::WorldRuntime*> out;
+  out.reserve(loaded_worlds_.size() + 1U);
+  out.push_back(&default_world_);
+  for (auto& [id, world] : loaded_worlds_) {
+    (void)id;
+    if (world != nullptr) {
+      out.push_back(world.get());
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const world::WorldRuntime* lhs, const world::WorldRuntime* rhs) {
+    return lhs->id().value < rhs->id().value;
+  });
+  return out;
+}
+
+std::vector<const world::WorldRuntime*> ServerRuntimeImpl::loaded_worlds() const noexcept {
+  std::vector<const world::WorldRuntime*> out;
+  out.reserve(loaded_worlds_.size() + 1U);
+  out.push_back(&default_world_);
+  for (const auto& [id, world] : loaded_worlds_) {
+    (void)id;
+    if (world != nullptr) {
+      out.push_back(world.get());
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const world::WorldRuntime* lhs, const world::WorldRuntime* rhs) {
+    return lhs->id().value < rhs->id().value;
+  });
+  return out;
+}
+
 const entity::EntityRegistry* ServerRuntimeImpl::entity_registry() const noexcept {
   return entity_registry_;
 }
@@ -1304,16 +1317,46 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     command::CommandSender sender,
     std::string_view command_text) {
   auto find_player_by_id = [this](PlayerID player_id) {
-    return online_player_by_id(sessions_, default_world_, player_id);
+    for (const world::WorldRuntime* runtime : loaded_worlds()) {
+      if (auto player = online_player_by_id(sessions_, *runtime, player_id);
+          player.has_value()) {
+        return player;
+      }
+    }
+    return std::optional<command::OnlinePlayerCommandTarget>{};
   };
   auto find_player_by_name = [this](std::string_view display_name) {
-    return online_player_by_name(sessions_, default_world_, display_name);
+    std::optional<command::OnlinePlayerCommandTarget> match;
+    for (const world::WorldRuntime* runtime : loaded_worlds()) {
+      if (auto player = online_player_by_name(sessions_, *runtime, display_name);
+          player.has_value()) {
+        if (match.has_value()) {
+          return std::optional<command::OnlinePlayerCommandTarget>{};
+        }
+        match = player;
+      }
+    }
+    return match;
   };
   auto move_player = [this](PlayerID player_id, Vec3f position) {
-    return teleport_player(default_world_, player_id, position);
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      if (teleport_player(*runtime, player_id, position)) {
+        return true;
+      }
+    }
+    return false;
   };
   auto move_player_location = [this](PlayerID player_id, Location location) {
-    return teleport_player_location(default_world_, player_id, location);
+    if (location.world.has_value()) {
+      world::WorldRuntime* runtime = world_by_id(location.world.value());
+      return runtime != nullptr && teleport_player_location(*runtime, player_id, location);
+    }
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      if (teleport_player_location(*runtime, player_id, location)) {
+        return true;
+      }
+    }
+    return false;
   };
   auto set_game_mode = [this](PlayerID player_id, std::string_view mode_id) {
     return set_player_game_mode(player_id, mode_id);
@@ -1328,32 +1371,38 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     return movement_.max_fly_speed_blocks_per_second;
   };
   auto get_selection = [this](PlayerID player_id) -> std::optional<command::PlayerBlockSelection> {
-    player::PlayerState* player_state = default_world_.find_player(player_id);
-    if (player_state == nullptr) {
-      return std::nullopt;
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      player::PlayerState* player_state = runtime->find_player(player_id);
+      if (player_state != nullptr) {
+        return command_selection_from_player(player_state->selection);
+      }
     }
-    return command_selection_from_player(player_state->selection);
+    return std::nullopt;
   };
   auto set_selection = [this](PlayerID player_id, const command::PlayerBlockSelection& selection) {
-    player::PlayerState* player_state = default_world_.find_player(player_id);
-    if (player_state == nullptr) {
-      return false;
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      player::PlayerState* player_state = runtime->find_player(player_id);
+      if (player_state != nullptr) {
+        player_state->selection = player_selection_from_command(selection);
+        return true;
+      }
     }
-    player_state->selection = player_selection_from_command(selection);
-    return true;
+    return false;
   };
   auto read_block = [this](WorldID world_id, BlockPos pos) -> std::optional<u32> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    return default_world_.get_block(pos).value;
+    return runtime->get_block(pos).value;
   };
   auto write_block = [this](WorldID world_id, BlockPos pos, u32 block_variant) {
-    if (world_id != default_world_.id() || block_registry_ == nullptr ||
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr || block_registry_ == nullptr ||
         block_registry_->variant(voxel::BlockVariantID{block_variant}) == nullptr) {
       return false;
     }
-    return default_world_.set_block(pos, voxel::BlockVariantID{block_variant});
+    return runtime->set_block(pos, voxel::BlockVariantID{block_variant});
   };
   auto block_variant_name = [this](u32 block_variant) -> std::optional<std::string> {
     if (block_registry_ == nullptr) {
@@ -1403,55 +1452,82 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         return save_blueprint_file(server_save_root_, world_name_, name, text);
       };
   auto read_world_spawn = [this](WorldID world_id) -> std::optional<Location> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    return default_world_.spawn_point();
+    return runtime->spawn_point();
   };
   auto write_world_spawn = [this](WorldID world_id, Location location) {
-    if (world_id != default_world_.id()) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return false;
     }
     if (location.world.has_value() && location.world.value() != world_id) {
       return false;
     }
     location.world = world_id;
-    default_world_.set_spawn_point(location);
+    runtime->set_spawn_point(location);
     return true;
   };
   auto list_online_players = [this]() {
-    return online_players(sessions_, default_world_);
+    std::vector<command::OnlinePlayerCommandTarget> players;
+    for (const world::WorldRuntime* runtime : loaded_worlds()) {
+      std::vector<command::OnlinePlayerCommandTarget> world_players =
+          online_players(sessions_, *runtime);
+      players.insert(players.end(), world_players.begin(), world_players.end());
+    }
+    std::sort(players.begin(), players.end(), [](const auto& lhs, const auto& rhs) {
+      return lhs.display_name < rhs.display_name;
+    });
+    return players;
   };
   auto resolve_player_targets =
       [this](const command::CommandSender& sender, std::string_view selector) {
         std::vector<command::OnlinePlayerCommandTarget> matches;
+        auto all_players = [this]() {
+          std::vector<command::OnlinePlayerCommandTarget> players;
+          for (const world::WorldRuntime* runtime : loaded_worlds()) {
+            std::vector<command::OnlinePlayerCommandTarget> world_players =
+                online_players(sessions_, *runtime);
+            players.insert(players.end(), world_players.begin(), world_players.end());
+          }
+          std::sort(players.begin(), players.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.display_name < rhs.display_name;
+          });
+          return players;
+        };
         if (selector == "@s") {
           if (sender.player_id.has_value()) {
-            if (auto target = online_player_by_id(
-                    sessions_,
-                    default_world_,
-                    sender.player_id.value());
-                target.has_value()) {
-              matches.push_back(target.value());
+            for (const world::WorldRuntime* runtime : loaded_worlds()) {
+              if (auto target = online_player_by_id(
+                      sessions_,
+                      *runtime,
+                      sender.player_id.value());
+                  target.has_value()) {
+                matches.push_back(target.value());
+                break;
+              }
             }
           }
           return matches;
         }
         if (selector == "@a") {
-          return online_players(sessions_, default_world_);
+          return all_players();
         }
         if (selector == "@p") {
-          if (auto target = nearest_player(
-                  online_players(sessions_, default_world_),
-                  sender.position);
+          if (auto target = nearest_player(all_players(), sender.position);
               target.has_value()) {
             matches.push_back(target.value());
           }
           return matches;
         }
-        if (auto target = online_player_by_name(sessions_, default_world_, selector);
-            target.has_value()) {
-          matches.push_back(target.value());
+        for (const world::WorldRuntime* runtime : loaded_worlds()) {
+          if (auto target = online_player_by_name(sessions_, *runtime, selector);
+              target.has_value()) {
+            matches.push_back(target.value());
+            break;
+          }
         }
         return matches;
       };
@@ -1459,61 +1535,83 @@ command::CommandResult ServerRuntimeImpl::execute_command(
       [this](const command::CommandSender& sender, std::string_view selector) {
         std::vector<command::EntityCommandTarget> matches;
         auto add_player_entity = [&](const command::OnlinePlayerCommandTarget& player) {
+          const world::WorldRuntime* runtime = world_by_id(player.world_id);
+          if (runtime == nullptr) {
+            return;
+          }
           if (const std::optional<EntityID> entity_id =
-                  default_world_.entity_for_player(player.player_id);
+                  runtime->entity_for_player(player.player_id);
               entity_id.has_value()) {
-            matches.push_back(entity_command_target(default_world_, entity_id.value(), sessions_));
+            matches.push_back(entity_command_target(*runtime, entity_id.value(), sessions_));
           }
         };
 
         if (selector == "@s") {
+          const world::WorldRuntime* sender_world =
+              sender.world_id.has_value() ? world_by_id(sender.world_id.value())
+                                          : &default_world_;
           if (sender.entity_id.has_value() &&
-              default_world_.entity_exists(sender.entity_id.value())) {
+              sender_world != nullptr &&
+              sender_world->entity_exists(sender.entity_id.value())) {
             matches.push_back(
-                entity_command_target(default_world_, sender.entity_id.value(), sessions_));
+                entity_command_target(*sender_world, sender.entity_id.value(), sessions_));
           } else if (sender.player_id.has_value()) {
-            if (const std::optional<EntityID> entity_id =
-                    default_world_.entity_for_player(sender.player_id.value());
-                entity_id.has_value()) {
-              matches.push_back(
-                  entity_command_target(default_world_, entity_id.value(), sessions_));
+            for (const world::WorldRuntime* runtime : loaded_worlds()) {
+              if (const std::optional<EntityID> entity_id =
+                      runtime->entity_for_player(sender.player_id.value());
+                  entity_id.has_value()) {
+                matches.push_back(
+                    entity_command_target(*runtime, entity_id.value(), sessions_));
+                break;
+              }
             }
           }
           return matches;
         }
         if (selector == "@a") {
-          for (const command::OnlinePlayerCommandTarget& player :
-               online_players(sessions_, default_world_)) {
-            add_player_entity(player);
+          for (const world::WorldRuntime* runtime : loaded_worlds()) {
+            for (const command::OnlinePlayerCommandTarget& player :
+                 online_players(sessions_, *runtime)) {
+              add_player_entity(player);
+            }
           }
           return matches;
         }
         if (selector == "@p") {
-          if (auto player = nearest_player(
-                  online_players(sessions_, default_world_),
-                  sender.position);
-              player.has_value()) {
+          std::vector<command::OnlinePlayerCommandTarget> players;
+          for (const world::WorldRuntime* runtime : loaded_worlds()) {
+            std::vector<command::OnlinePlayerCommandTarget> world_players =
+                online_players(sessions_, *runtime);
+            players.insert(players.end(), world_players.begin(), world_players.end());
+          }
+          if (auto player = nearest_player(players, sender.position); player.has_value()) {
             add_player_entity(player.value());
           }
           return matches;
         }
         if (selector == "@e") {
-          for (const EntityID entity_id : default_world_.entity_ids()) {
-            matches.push_back(entity_command_target(default_world_, entity_id, sessions_));
+          for (const world::WorldRuntime* runtime : loaded_worlds()) {
+            for (const EntityID entity_id : runtime->entity_ids()) {
+              matches.push_back(entity_command_target(*runtime, entity_id, sessions_));
+            }
           }
           return matches;
         }
-        if (auto player = online_player_by_name(sessions_, default_world_, selector);
-            player.has_value()) {
-          add_player_entity(player.value());
+        for (const world::WorldRuntime* runtime : loaded_worlds()) {
+          if (auto player = online_player_by_name(sessions_, *runtime, selector);
+              player.has_value()) {
+            add_player_entity(player.value());
+            break;
+          }
         }
         return matches;
       };
   auto query_world_time = [this](WorldID world_id) -> std::optional<command::WorldTimeCommandState> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    const world::WorldClock& clock = default_world_.clock();
+    const world::WorldClock& clock = runtime->clock();
     return command::WorldTimeCommandState{
         clock.world_tick,
         clock.day_time_tick,
@@ -1521,41 +1619,47 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         clock.daylight_cycle};
   };
   auto set_world_time = [this](WorldID world_id, u32 tick) {
-    if (world_id != default_world_.id()) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return false;
     }
-    default_world_.set_day_time_tick(tick);
+    runtime->set_day_time_tick(tick);
     broadcast_world_time(world_id);
     return true;
   };
   auto add_world_time = [this](WorldID world_id, u32 ticks) {
-    if (world_id != default_world_.id()) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return false;
     }
-    default_world_.add_day_time_ticks(ticks);
+    runtime->add_day_time_ticks(ticks);
     broadcast_world_time(world_id);
     return true;
   };
   auto query_weather = [this](WorldID world_id) -> std::optional<std::string> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    return default_world_.weather_id();
+    return runtime->weather_id();
   };
   auto set_weather = [this](WorldID world_id, std::string_view weather) {
-    if (world_id != default_world_.id() || weather.empty()) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr || weather.empty()) {
       return false;
     }
-    return default_world_.set_weather_id(std::string{weather});
+    return runtime->set_weather_id(std::string{weather});
   };
   auto query_difficulty = [this](WorldID world_id) -> std::optional<std::string> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    return std::string{world::world_difficulty_name(default_world_.difficulty())};
+    return std::string{world::world_difficulty_name(runtime->difficulty())};
   };
   auto set_difficulty = [this](WorldID world_id, std::string_view difficulty) {
-    if (world_id != default_world_.id()) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return false;
     }
     const std::optional<world::WorldDifficulty> parsed =
@@ -1563,25 +1667,27 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     if (!parsed.has_value()) {
       return false;
     }
-    default_world_.set_difficulty(parsed.value());
+    runtime->set_difficulty(parsed.value());
     return true;
   };
   auto list_rules = [this](WorldID world_id) {
     std::vector<command::GameRuleCommandEntry> rules;
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return rules;
     }
-    for (const world::GameRuleState& rule : default_world_.game_rules()) {
+    for (const world::GameRuleState& rule : runtime->game_rules()) {
       rules.push_back(command_rule_from_world(rule));
     }
     return rules;
   };
   auto get_rule = [this](WorldID world_id, std::string_view name)
       -> std::optional<command::GameRuleCommandEntry> {
-    if (world_id != default_world_.id()) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
       return std::nullopt;
     }
-    const world::GameRuleState* rule = default_world_.game_rule(name);
+    const world::GameRuleState* rule = runtime->game_rule(name);
     return rule == nullptr ? std::nullopt
                            : std::optional<command::GameRuleCommandEntry>{
                                  command_rule_from_world(*rule)};
@@ -1589,11 +1695,12 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto set_rule =
       [this](WorldID world_id, std::string_view name, std::string_view value) {
         command::GameRuleSetCommandResult result;
-        if (world_id != default_world_.id()) {
+        world::WorldRuntime* runtime = world_by_id(world_id);
+        if (runtime == nullptr) {
           result.message = "Unknown world.";
           return result;
         }
-        const world::GameRuleState* rule = default_world_.game_rule(name);
+        const world::GameRuleState* rule = runtime->game_rule(name);
         if (rule == nullptr) {
           result.message = "Unknown game rule: " + std::string{name} + ".";
           return result;
@@ -1611,7 +1718,7 @@ command::CommandResult ServerRuntimeImpl::execute_command(
               return result;
             }
             const bool bool_value = parsed_true;
-            if (!default_world_.set_game_rule_bool(name, bool_value)) {
+            if (!runtime->set_game_rule_bool(name, bool_value)) {
               result.message = "Unable to update game rule: " + std::string{name} + ".";
               return result;
             }
@@ -1630,20 +1737,20 @@ command::CommandResult ServerRuntimeImpl::execute_command(
               result.message = "Game rule " + std::string{name} + " expects an integer value.";
               return result;
             }
-            if (!default_world_.set_game_rule_integer(name, static_cast<i64>(parsed))) {
+            if (!runtime->set_game_rule_integer(name, static_cast<i64>(parsed))) {
               result.message = "Unable to update game rule: " + std::string{name} + ".";
               return result;
             }
             break;
           }
           case world::GameRuleValueType::String:
-            if (!default_world_.set_game_rule_string(name, std::string{value})) {
+            if (!runtime->set_game_rule_string(name, std::string{value})) {
               result.message = "Unable to update game rule: " + std::string{name} + ".";
               return result;
             }
             break;
         }
-        const world::GameRuleState* updated = default_world_.game_rule(name);
+        const world::GameRuleState* updated = runtime->game_rule(name);
         result.new_value =
             updated == nullptr ? std::string{value} : world::game_rule_value_to_string(*updated);
         result.success = true;
@@ -1671,7 +1778,8 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto spawn_entity =
       [this](WorldID world_id, std::string_view type_name, Vec3f position)
       -> std::optional<command::EntityCommandTarget> {
-        if (world_id != default_world_.id() || entity_registry_ == nullptr) {
+        world::WorldRuntime* runtime = world_by_id(world_id);
+        if (runtime == nullptr || entity_registry_ == nullptr) {
           return std::nullopt;
         }
         const std::optional<EntityTypeID> type_id = entity_registry_->find_type(type_name);
@@ -1690,33 +1798,40 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         info.replicated = record->replicated_by_default;
         info.authored_components = record->components;
         info.vehicle_definitions = vehicle_registry_;
-        const EntityID entity_id = default_world_.create_entity(std::move(info));
+        const EntityID entity_id = runtime->create_entity(std::move(info));
         if (entity_id.value == 0U) {
           return std::nullopt;
         }
-        return entity_command_target(default_world_, entity_id, sessions_);
+        return entity_command_target(*runtime, entity_id, sessions_);
       };
   auto kill_entity = [this](EntityID entity_id) {
-    if (!default_world_.entity_exists(entity_id)) {
+    world::WorldRuntime* runtime = nullptr;
+    for (world::WorldRuntime* candidate : loaded_worlds()) {
+      if (candidate->entity_exists(entity_id)) {
+        runtime = candidate;
+        break;
+      }
+    }
+    if (runtime == nullptr) {
       return false;
     }
     bool affected = false;
-    if (default_world_.find_entity_health(entity_id) != nullptr) {
-      const world::DamageResult damage = default_world_.apply_damage({
+    if (runtime->find_entity_health(entity_id) != nullptr) {
+      const world::DamageResult damage = runtime->apply_damage({
           {},
           entity_id,
           std::numeric_limits<f32>::max(),
           world::DamageCause::Generic,
           true});
       affected = damage.applied || damage.killed;
-      if (damage.killed && default_world_.player_for_entity(entity_id).has_value()) {
+      if (damage.killed && runtime->player_for_entity(entity_id).has_value()) {
         return true;
       }
     }
-    if (!default_world_.player_for_entity(entity_id).has_value()) {
-      affected = default_world_.destroy_entity(entity_id, world::EntityDespawnReason::Removed) ||
+    if (!runtime->player_for_entity(entity_id).has_value()) {
+      affected = runtime->destroy_entity(entity_id, world::EntityDespawnReason::Removed) ||
                  affected;
-      default_world_.flush_entity_despawns();
+      runtime->flush_entity_despawns();
       broadcast_pending_ride_ended_events();
     }
     return affected;
@@ -1783,7 +1898,13 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   auto clear_player_inventory =
       [this](PlayerID player_id, std::optional<u32> item_id) {
         command::InventoryClearCommandResult out;
-        player::PlayerState* player_state = default_world_.find_player(player_id);
+        player::PlayerState* player_state = nullptr;
+        for (world::WorldRuntime* runtime : loaded_worlds()) {
+          player_state = runtime->find_player(player_id);
+          if (player_state != nullptr) {
+            break;
+          }
+        }
         if (player_state == nullptr) {
           out.success = false;
           out.message = "Player is not online.";
@@ -1830,89 +1951,43 @@ command::CommandResult ServerRuntimeImpl::execute_command(
     return out;
   };
   auto save_all = [this](bool flush) {
-    command::SaveAllCommandResult out;
-    out.flushed = flush;
-    if (server_save_root_.empty()) {
-      out.message = "Server save root is not configured.";
-      return out;
-    }
-    if (block_registry_ == nullptr || item_registry_ == nullptr) {
-      out.message = "Cannot save without block and item registries.";
-      return out;
-    }
-    const std::vector<persistence::SavedChunkSection> chunks =
-        capture_saved_chunks(default_world_);
-    std::vector<persistence::PlayerSaveData> players;
-    players.reserve(player_saves_.states().size() + sessions_.size());
-    for (const ServerPlayerSaveState& saved : player_saves_.states()) {
-      persistence::upsert_player_save(players, to_persistence_player_save(saved));
-    }
-    for (const SessionID session_id : sessions_.session_ids()) {
-      const ServerSession* session = sessions_.find(session_id);
-      if (session == nullptr) {
-        continue;
-      }
-      const player::PlayerState* player_state =
-          default_world_.find_player(session->player_id);
-      if (player_state == nullptr) {
-        continue;
-      }
-      persistence::upsert_player_save(
-          players,
-          to_persistence_player_save(*session, *player_state, world_name_));
-    }
-    std::sort(players.begin(), players.end(), [](const auto& lhs, const auto& rhs) {
-      if (lhs.world_name != rhs.world_name) {
-        return lhs.world_name < rhs.world_name;
-      }
-      if (lhs.profile_id != rhs.profile_id) {
-        return lhs.profile_id < rhs.profile_id;
-      }
-      return lhs.profile_name < rhs.profile_name;
-    });
-    const std::vector<entity::PersistentEntityRecord> entities =
-        default_world_.persistent_entity_records();
-    const world::WorldGenerationConfig* active_generation =
-        default_world_.generation_config();
-    const world::WorldHeightSettings height = default_world_.height_settings();
-    persistence::SaveMetadata save_metadata{
-        persistence::CurrentSaveFormatVersion,
-        std::string{persistence::CurrentGameVersion},
-        persistence::hash_block_registry(*block_registry_),
-        persistence::hash_item_registry(*item_registry_),
-        server_save_root_.filename().string()};
-    persistence::WorldMetadata world_metadata{
-        world_name_,
-        chunk_generation_.has_value() ? chunk_generation_->seed : 0U,
-        default_world_.tick_index(),
-        active_generation == nullptr ? world::WorldGenerationConfig{} : *active_generation,
-        height.min_chunk_y,
-        height.max_chunk_y,
-        persistence::hash_block_registry(*block_registry_),
-        persistence::hash_item_registry(*item_registry_),
-        default_world_.clock(),
-        {},
-        true,
-        default_world_.spawn_point()};
-    auto saved = persistence::save_server_root(
-        server_save_root_,
-        save_metadata,
-        world_metadata,
-        chunks,
-        players,
-        entities,
-        *block_registry_,
-        *item_registry_);
-    if (!saved) {
-      out.message = saved.error().message;
-      return out;
-    }
-    out.success = true;
-    out.saved_chunks = static_cast<u32>(chunks.size());
-    out.saved_players = static_cast<u32>(players.size());
-    out.saved_entities = static_cast<u32>(entities.size());
-    return out;
+    return save_all_worlds_from_command(flush);
   };
+  auto list_worlds = [this]() {
+    return list_worlds_for_command();
+  };
+  auto world_info = [this](std::string_view name) {
+    return world_info_for_command(name);
+  };
+  auto default_world_name = [this]() {
+    return default_world_name_for_command();
+  };
+  auto create_world =
+      [this](const command::WorldCreateCommandRequest& request) {
+        return create_world_from_command(request);
+      };
+  auto load_world = [this](std::string_view name) {
+    return load_world_from_command(name);
+  };
+  auto unload_world = [this](std::string_view name, bool force) {
+    return unload_world_from_command(name, force);
+  };
+  auto delete_world = [this](std::string_view name) {
+    return delete_world_from_command(name);
+  };
+  auto rename_world = [this](std::string_view old_name, std::string_view new_name) {
+    return rename_world_from_command(old_name, new_name);
+  };
+  auto set_default_world = [this](std::string_view name) {
+    return set_default_world_from_command(name);
+  };
+  auto set_world_spawn = [this](std::string_view name, Location spawn) {
+    return set_world_spawn_from_command(name, spawn);
+  };
+  auto teleport_player_to_world_spawn =
+      [this](PlayerID player_id, std::string_view name) {
+        return teleport_player_to_world_spawn_from_command(player_id, name);
+      };
   auto create_explosion =
       [this](const command::ExplosionCommandRequest& request) {
         return create_explosion_from_command(request);
@@ -1998,6 +2073,18 @@ command::CommandResult ServerRuntimeImpl::execute_command(
   domain_services.list_status_effects =
       command::ListStatusEffectsFn{list_status_effects};
   domain_services.save_all = command::SaveAllFn{save_all};
+  domain_services.list_worlds = command::WorldListFn{list_worlds};
+  domain_services.world_info = command::WorldInfoFn{world_info};
+  domain_services.default_world_name = command::WorldDefaultFn{default_world_name};
+  domain_services.create_world = command::WorldCreateFn{create_world};
+  domain_services.load_world = command::WorldLoadFn{load_world};
+  domain_services.unload_world = command::WorldUnloadFn{unload_world};
+  domain_services.delete_world = command::WorldDeleteFn{delete_world};
+  domain_services.rename_world = command::WorldRenameFn{rename_world};
+  domain_services.set_default_world = command::WorldSetDefaultFn{set_default_world};
+  domain_services.set_world_spawn = command::WorldSetSpawnFn{set_world_spawn};
+  domain_services.teleport_player_to_world_spawn =
+      command::TeleportPlayerToWorldSpawnFn{teleport_player_to_world_spawn};
   domain_services.create_explosion =
       command::CreateExplosionFn{create_explosion};
   domain_services.broadcast_system_message =
@@ -2053,14 +2140,18 @@ std::optional<command::CommandSender> ServerRuntimeImpl::command_sender_for_sess
   sender.world_id = session->world_id;
   sender.display_name = session->display_name;
 
-  if (const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  const world::WorldRuntime* runtime = world_for_session(*session);
+  if (const player::PlayerState* player_state =
+          runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
       player_state != nullptr) {
     sender.position = player_state->position;
   }
-  if (const std::optional<EntityID> entity_id =
-          default_world_.entity_for_player(session->player_id);
-      entity_id.has_value()) {
-    sender.entity_id = entity_id.value();
+  if (runtime != nullptr) {
+    if (const std::optional<EntityID> entity_id =
+            runtime->entity_for_player(session->player_id);
+        entity_id.has_value()) {
+      sender.entity_id = entity_id.value();
+    }
   }
 
   return sender;
@@ -2081,7 +2172,10 @@ command::CommandPermissionResult ServerRuntimeImpl::check_command_permission(
                                                                               "Permission denied: missing player context."));
   }
 
-  player::PlayerState* player_state = default_world_.find_player(sender.player_id.value());
+  const WorldID world_id = sender.world_id.value_or(default_world_.id());
+  world::WorldRuntime* runtime = world_by_id(world_id);
+  player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(sender.player_id.value());
   if (player_state == nullptr) {
     return command::CommandPermissionResult::deny(arv::text::text_or_fallback(language_,
                                                                               "command.dispatcher.permission_player_not_online",

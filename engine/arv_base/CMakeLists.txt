@@ -76,6 +76,7 @@ add_library(arv_base STATIC
   src/spawn_command.cpp
   src/gamemodes/gamemode_registration.cpp
   src/tp_command.cpp
+  src/world_command.cpp
 )
 target_include_directories(arv_base PUBLIC include)
 target_link_libraries(arv_base PUBLIC arv_blueprint arv_command arv_core arv_entity arv_player arv_render arv_server arv_voxel arv_world)

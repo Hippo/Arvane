@@ -54,6 +54,10 @@ u32 publish_staged_generation_sections(
   u32 published = 0U;
   for (usize index = 0; index < pending_chunks.size() && published < max_sections;) {
     PendingGeneratedChunk& pending = pending_chunks[index];
+    if (pending.chunk.world_id != world.id()) {
+      ++index;
+      continue;
+    }
     while (pending.next_section_index < pending.chunk.sections.size() &&
            published < max_sections) {
       world::GeneratedChunkSection section =
@@ -223,6 +227,10 @@ void ServerWorldJobRuntime::drain_generation_jobs(
   for (usize index = 0;
        index < pending_generation_jobs_.size() && drained < max_results;) {
     PendingGenerationJob& pending = pending_generation_jobs_[index];
+    if (pending.world_id != world.id()) {
+      ++index;
+      continue;
+    }
     if (!pending.job.is_complete()) {
       ++index;
       continue;
@@ -294,8 +302,8 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
     const bool already_pending = std::any_of(
         pending_generation_jobs_.begin(),
         pending_generation_jobs_.end(),
-        [coord](const PendingGenerationJob& pending) {
-          return pending.coord == coord;
+        [world_id = world.id(), coord](const PendingGenerationJob& pending) {
+          return pending.world_id == world_id && pending.coord == coord;
         });
     if (already_pending) {
       continue;
@@ -310,7 +318,7 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
 
     world::ChunkGenerationRequest request;
     request.world_id = world.id();
-    request.seed = chunk_generation->seed;
+    request.seed = world.generation_seed();
     request.coord = coord;
     request.min_chunk_y = height.min_chunk_y;
     request.max_chunk_y = height.max_chunk_y;
@@ -349,7 +357,7 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
       }
       continue;
     }
-    pending_generation_jobs_.emplace_back(coord, std::move(job));
+    pending_generation_jobs_.push_back({world.id(), coord, std::move(job)});
     chunk_streamer.mark_generation_request_scheduled(world.id(), coord);
     ++scheduled;
   }
@@ -362,6 +370,10 @@ void ServerWorldJobRuntime::drain_lighting_jobs(world::WorldRuntime& world, bool
        index < pending_lighting_jobs_.size() &&
        (drain_all || drained < max_lighting_results_per_tick_);) {
     PendingLightingJob& pending = pending_lighting_jobs_[index];
+    if (pending.world_id != world.id()) {
+      ++index;
+      continue;
+    }
     if (!pending.job.is_complete()) {
       ++index;
       continue;
@@ -384,6 +396,10 @@ void ServerWorldJobRuntime::drain_fluid_jobs(
        index < pending_fluid_jobs_.size() &&
        (drain_all || drained < max_fluid_results_per_tick_);) {
     PendingFluidJob& pending = pending_fluid_jobs_[index];
+    if (pending.world_id != world.id()) {
+      ++index;
+      continue;
+    }
     if (!pending.job.is_complete()) {
       ++index;
       continue;
@@ -436,7 +452,7 @@ void ServerWorldJobRuntime::schedule_fluid_jobs(
   if (!job.valid()) {
     return;
   }
-  pending_fluid_jobs_.emplace_back(std::move(job));
+  pending_fluid_jobs_.push_back({world.id(), std::move(job)});
 }
 
 void ServerWorldJobRuntime::drain_natural_spawn_jobs(
@@ -459,6 +475,10 @@ void ServerWorldJobRuntime::drain_natural_spawn_jobs(
        index < pending_natural_spawn_jobs_.size() &&
        (drain_all || drained < max_natural_spawn_results_per_tick_);) {
     PendingNaturalSpawnJob& pending = pending_natural_spawn_jobs_[index];
+    if (pending.world_id != world.id()) {
+      ++index;
+      continue;
+    }
     if (!pending.job.is_complete()) {
       ++index;
       continue;
@@ -526,7 +546,7 @@ void ServerWorldJobRuntime::schedule_natural_spawn_jobs(
     return;
   }
 
-  pending_natural_spawn_jobs_.push_back({source_tick, std::move(job)});
+  pending_natural_spawn_jobs_.push_back({world.id(), source_tick, std::move(job)});
   natural_spawns.record_job_submitted(
       static_cast<u32>(pending_natural_spawn_jobs_.size()));
 }
@@ -546,8 +566,9 @@ void ServerWorldJobRuntime::schedule_lighting_jobs(
   const bool revision_in_flight = std::any_of(
       pending_lighting_jobs_.begin(),
       pending_lighting_jobs_.end(),
-      [revision = current_revision](const PendingLightingJob& pending) {
-        return pending.source_revision == revision;
+      [world_id = world.id(), revision = current_revision](
+          const PendingLightingJob& pending) {
+        return pending.world_id == world_id && pending.source_revision == revision;
       });
   if (revision_in_flight) {
     return;
@@ -575,7 +596,7 @@ void ServerWorldJobRuntime::schedule_lighting_jobs(
   if (!job.valid()) {
     return;
   }
-  pending_lighting_jobs_.emplace_back(source_revision, std::move(job));
+  pending_lighting_jobs_.push_back({world.id(), source_revision, std::move(job)});
 }
 
 } // namespace arv::server::detail

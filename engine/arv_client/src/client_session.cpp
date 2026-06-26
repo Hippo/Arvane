@@ -92,6 +92,9 @@ namespace {
       return state == net::ConnectionState::RegistrySync;
     case protocol::MessageType::ClientboundWorldJoinResult:
       return state == net::ConnectionState::WorldJoin;
+    case protocol::MessageType::ClientboundWorldLeave:
+      return state == net::ConnectionState::InGame ||
+             state == net::ConnectionState::WorldJoin;
     case protocol::MessageType::ClientboundChunkSectionData:
     case protocol::MessageType::ClientboundChunkSectionUnload:
     case protocol::MessageType::ClientboundBlockUpdateBatch:
@@ -825,6 +828,30 @@ void ClientSession::handle_message(std::span<const u8> payload) {
           floor_div(static_cast<i32>(std::floor(join.value().spawn_position.z)), ChunkSize),
       }};
       send_chunk_interest(center, join.value().effective_view_distance);
+      return;
+    }
+    case protocol::MessageType::ClientboundWorldLeave: {
+      auto leave = protocol::deserialize_clientbound_world_leave(
+          decoded.value().payload);
+      if (!leave) {
+        disconnect("invalid world leave");
+        return;
+      }
+      if (world_join_.has_value() && leave.value().world_id != world_join_->world_id) {
+        return;
+      }
+      world_join_.reset();
+      chunk_sections_.clear();
+      entity_mirrors_.clear();
+      dropped_items_.clear();
+      inventory_ = player::Inventory{player::DefaultPlayerInventorySlotCount};
+      inventory_cursor_stack_.reset();
+      inventory_revision_ = 0;
+      has_authoritative_inventory_ = false;
+      block_break_progress_ = {};
+      previous_chunk_interest_center_.reset();
+      next_chunk_interest_sequence_ = 1;
+      connection_state_ = net::ConnectionState::WorldJoin;
       return;
     }
     case protocol::MessageType::ClientboundChunkSectionData: {

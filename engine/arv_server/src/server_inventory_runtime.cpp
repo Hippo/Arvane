@@ -68,6 +68,18 @@ namespace {
       source_stack};
 }
 
+[[nodiscard]] player::PlayerState* find_player_state(
+    ServerRuntimeImpl& runtime,
+    PlayerID player_id) {
+  for (world::WorldRuntime* world : runtime.loaded_worlds()) {
+    if (player::PlayerState* player = world->find_player(player_id);
+        player != nullptr) {
+      return player;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 player::InventoryInsertResult ServerRuntimeImpl::insert_player_inventory_stack(
@@ -76,7 +88,7 @@ player::InventoryInsertResult ServerRuntimeImpl::insert_player_inventory_stack(
     std::optional<usize> preferred_slot,
     bool replace_preferred_slot) {
   player::InventoryInsertResult result;
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || item_registry_ == nullptr || stack.count == 0U ||
       item_registry_->item(stack.item) == nullptr) {
     result.leftover = stack;
@@ -140,7 +152,7 @@ player::InventoryOperationResult ServerRuntimeImpl::apply_player_inventory_click
     PlayerID player_id,
     usize slot_index,
     player::InventoryClickButton button) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || item_registry_ == nullptr) {
     return {player::InventoryOperationResultKind::RejectedInvalidSlot};
   }
@@ -154,7 +166,7 @@ player::InventoryOperationResult ServerRuntimeImpl::apply_player_inventory_click
 }
 
 std::optional<player::ItemStack> ServerRuntimeImpl::drop_player_inventory_cursor(PlayerID player_id) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || !player_state->inventory_cursor_stack.has_value()) {
     return std::nullopt;
   }
@@ -169,7 +181,7 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_player_inventory_cursor
 
 std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_inventory_cursor(
     PlayerID player_id) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || !player_state->inventory_cursor_stack.has_value() ||
       player_state->inventory_cursor_stack->count == 0U) {
     return std::nullopt;
@@ -191,7 +203,7 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_invento
 std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_inventory_slot(
     PlayerID player_id,
     usize slot_index) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr ||
       slot_index >= player::DefaultHotbarSlotCount ||
       !player_state->inventory.is_valid_slot(slot_index)) {
@@ -214,7 +226,7 @@ std::optional<player::ItemStack> ServerRuntimeImpl::drop_one_from_player_invento
 player::InventoryOperationResult ServerRuntimeImpl::shift_transfer_player_inventory_slot(
     PlayerID player_id,
     usize slot_index) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || item_registry_ == nullptr ||
       !player_state->inventory.is_valid_slot(slot_index)) {
     return {player::InventoryOperationResultKind::RejectedInvalidSlot};
@@ -241,7 +253,7 @@ player::InventoryOperationResult ServerRuntimeImpl::shift_transfer_player_invent
 }
 
 player::InventoryOperationResult ServerRuntimeImpl::close_player_inventory_menu(PlayerID player_id) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = find_player_state(*this, player_id);
   if (player_state == nullptr || item_registry_ == nullptr) {
     return {player::InventoryOperationResultKind::RejectedInvalidSlot};
   }
@@ -284,7 +296,9 @@ void ServerRuntimeImpl::send_inventory_updates() {
     if (session == nullptr) {
       continue;
     }
-    const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    const world::WorldRuntime* runtime = world_for_session(*session);
+    const player::PlayerState* player_state =
+        runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
     if (player_state == nullptr) {
       continue;
     }

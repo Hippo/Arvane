@@ -9,18 +9,22 @@ namespace arv::server::detail {
 
 void ServerRuntimeImpl::tick_chunk_streaming() {
   queued_chunk_stream_messages_.clear();
-  chunk_streamer_.tick_streaming_budget(
-      default_world_,
-      queued_chunk_stream_messages_);
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    chunk_streamer_.tick_streaming_budget(
+        *runtime,
+        queued_chunk_stream_messages_);
+  }
   send_queued_chunk_stream_messages();
 }
 
 void ServerRuntimeImpl::tick_chunk_streaming_maintenance() {
   queued_chunk_stream_messages_.clear();
-  chunk_streamer_.tick_streaming_maintenance(
-      default_world_,
-      queued_chunk_stream_messages_,
-      chunk_streaming_config_.max_missing_columns_requested_per_player_tick);
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    chunk_streamer_.tick_streaming_maintenance(
+        *runtime,
+        queued_chunk_stream_messages_,
+        chunk_streaming_config_.max_missing_columns_requested_per_player_tick);
+  }
   send_queued_chunk_stream_messages();
 }
 
@@ -33,24 +37,28 @@ void ServerRuntimeImpl::pump_chunk_streaming_frame(bool send_ready_chunks) {
   }
 
   ARV_PROFILE_ZONE("Integrated chunk streaming frame pump");
-  world_jobs_.drain_generation_jobs(
-      default_world_,
-      chunk_streaming_config_.max_generation_results_per_frame,
-      chunk_streaming_config_.max_generation_sections_published_per_frame);
-  world_jobs_.schedule_generation_jobs(
-      default_world_,
-      chunk_streamer_,
-      chunk_generation_,
-      chunk_streaming_config_.max_generation_schedules_per_frame,
-      true);
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    world_jobs_.drain_generation_jobs(
+        *runtime,
+        chunk_streaming_config_.max_generation_results_per_frame,
+        chunk_streaming_config_.max_generation_sections_published_per_frame);
+    world_jobs_.schedule_generation_jobs(
+        *runtime,
+        chunk_streamer_,
+        chunk_generation_,
+        chunk_streaming_config_.max_generation_schedules_per_frame,
+        true);
+  }
   if (!send_ready_chunks) {
     return;
   }
   queued_chunk_stream_messages_.clear();
-  chunk_streamer_.tick_ready_chunk_budget(
-      default_world_,
-      queued_chunk_stream_messages_,
-      chunk_streaming_config_.max_ready_chunks_sent_per_player_frame);
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    chunk_streamer_.tick_ready_chunk_budget(
+        *runtime,
+        queued_chunk_stream_messages_,
+        chunk_streaming_config_.max_ready_chunks_sent_per_player_frame);
+  }
   send_queued_chunk_stream_messages();
 }
 

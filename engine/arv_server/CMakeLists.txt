@@ -35,6 +35,7 @@ add_library(arv_server STATIC
   src/server_replication.cpp
   src/server_runtime.cpp
   src/server_session_lifecycle.cpp
+  src/server_world_manager.cpp
   src/session_registry.cpp
   src/skin_runtime.cpp
   src/vehicle_movement_validation.cpp

@@ -1858,14 +1858,16 @@ void ServerRuntimeImpl::handle_player_move(
     return;
   }
 
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  world::WorldRuntime* runtime = world_for_session(*session);
+  player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
   if (player_state == nullptr || block_registry_ == nullptr) {
     return;
   }
   if (const std::optional<EntityID> entity_id =
-          default_world_.entity_for_player(session->player_id);
+          runtime->entity_for_player(session->player_id);
       entity_id.has_value() &&
-      default_world_.find_entity_attachment(entity_id.value()) != nullptr) {
+      runtime->find_entity_attachment(entity_id.value()) != nullptr) {
     return;
   }
 
@@ -1898,7 +1900,7 @@ void ServerRuntimeImpl::handle_player_move(
   }
 
   const MovementValidationContext context = make_movement_validation_context(
-      default_world_,
+      *runtime,
       *block_registry_,
       *player_state,
       move,
@@ -3452,7 +3454,9 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
   if (session == nullptr || !session->authenticated) {
     return;
   }
-  const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  const world::WorldRuntime* runtime = world_for_session(*session);
+  const player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
   if (player_state == nullptr) {
     return;
   }
@@ -3461,7 +3465,7 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
   chunk_streamer_.update_player_interest(
       *session,
       authoritative_center,
-      default_world_.height_settings(),
+      runtime->height_settings(),
       interest);
   if (mode_ == ServerMode::Dedicated &&
       logged_chunk_interest_sessions_.insert(session->session_id).second) {

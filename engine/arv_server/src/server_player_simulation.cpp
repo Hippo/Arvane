@@ -220,7 +220,13 @@ Vec3f player_eye_position(
 }
 
 bool ServerRuntimeImpl::set_player_game_mode(PlayerID player_id, std::string_view mode_id) {
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = nullptr;
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    player_state = runtime->find_player(player_id);
+    if (player_state != nullptr) {
+      break;
+    }
+  }
   if (player_state == nullptr || game_modes_.find(mode_id) == nullptr) {
     return false;
   }
@@ -244,7 +250,13 @@ bool ServerRuntimeImpl::set_player_fly_speed(PlayerID player_id, f32 fly_speed) 
     return false;
   }
 
-  player::PlayerState* player_state = default_world_.find_player(player_id);
+  player::PlayerState* player_state = nullptr;
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    player_state = runtime->find_player(player_id);
+    if (player_state != nullptr) {
+      break;
+    }
+  }
   if (player_state == nullptr) {
     return false;
   }
@@ -267,7 +279,9 @@ void ServerRuntimeImpl::tick_players() {
       continue;
     }
 
-    player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    world::WorldRuntime* runtime = world_for_session(*session);
+    player::PlayerState* player_state =
+        runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
     if (player_state == nullptr) {
       continue;
     }
@@ -290,34 +304,40 @@ void ServerRuntimeImpl::tick_players() {
 }
 
 void ServerRuntimeImpl::update_world_simulation_activity() {
-  std::vector<ChunkSectionCoord> centers;
-  centers.reserve(sessions_.size());
-  for (const SessionID session_id : sessions_.session_ids()) {
-    const ServerSession* session = sessions_.find(session_id);
-    if (session == nullptr || session->world_id != default_world_.id()) {
-      continue;
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    std::vector<ChunkSectionCoord> centers;
+    centers.reserve(sessions_.size());
+    for (const SessionID session_id : sessions_.session_ids()) {
+      const ServerSession* session = sessions_.find(session_id);
+      if (session == nullptr || session->world_id != runtime->id()) {
+        continue;
+      }
+
+      const player::PlayerState* player_state =
+          runtime->find_player(session->player_id);
+      if (player_state == nullptr) {
+        continue;
+      }
+
+      centers.emplace_back(player_chunk_coord(*player_state));
     }
 
-    const player::PlayerState* player_state =
-        default_world_.find_player(session->player_id);
-    if (player_state == nullptr) {
-      continue;
-    }
-
-    centers.emplace_back(player_chunk_coord(*player_state));
+    runtime->update_simulation_radii(centers, simulation_radius_);
   }
-
-  default_world_.update_simulation_radii(centers, simulation_radius_);
 }
 
 void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_state) {
+  world::WorldRuntime* runtime = world_by_id(player_state.world_id);
+  if (runtime == nullptr) {
+    return;
+  }
   PlayerPermissionCache& cache = permission_caches_[player_state.player_id];
   const u64 source_fingerprint = permission_source_fingerprint(player_state);
-  const u64 region_revision = default_world_.regions().revision();
+  const u64 region_revision = runtime->regions().revision();
   const bool fallback_permissions_active = !arv_perms_initialized(plugins_);
   bool region_layer_changed = false;
 
-  if (default_world_.regions().empty()) {
+  if (runtime->regions().empty()) {
     const bool had_region_permissions =
         !cache.active_regions.empty() ||
         cache.region_layer.core != player::CorePermissionSet{} ||
@@ -337,10 +357,10 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
         cache.region_registry_revision != region_revision;
     if (query_changed) {
       const world::RegionQuery query{player_state.world_id, player_state.position};
-      (void)default_world_.update_player_region_state(player_state.player_id, query);
+      (void)runtime->update_player_region_state(player_state.player_id, query);
       std::vector<world::RegionID> active_regions;
       if (const world::PlayerRegionState* region_state =
-              default_world_.player_region_state(player_state.player_id);
+              runtime->player_region_state(player_state.player_id);
           region_state != nullptr) {
         active_regions = region_state->active_regions;
       }
@@ -349,7 +369,7 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
           cache.region_registry_revision != region_revision ||
           cache.active_regions != active_regions) {
         cache.region_layer =
-            default_world_.regions().permission_layer_for_regions(active_regions);
+            runtime->regions().permission_layer_for_regions(active_regions);
         cache.active_regions = std::move(active_regions);
         region_layer_changed = true;
       }
@@ -396,6 +416,10 @@ void ServerRuntimeImpl::refresh_player_permissions(player::PlayerState& player_s
 void ServerRuntimeImpl::apply_player_action_command(
     player::PlayerState& player_state,
     const player::PlayerCommand& command) {
+  world::WorldRuntime* runtime = world_by_id(player_state.world_id);
+  if (runtime == nullptr || block_registry_ == nullptr) {
+    return;
+  }
   refresh_player_permissions(player_state);
 
   player_state.selected_hotbar_slot =
@@ -409,12 +433,12 @@ void ServerRuntimeImpl::apply_player_action_command(
 
   if (command.primary_pressed) {
     restart_player_entity_animation(
-        default_world_,
+        *runtime,
         player_state.player_id,
         player_hit_animation_name(selected_player_action_hand(player_state)));
   }
 
-  (void)default_world_.set_player_visual_pose(
+  (void)runtime->set_player_visual_pose(
       player_state.player_id,
       player_state.yaw_radians,
       player_state.pitch_radians,
@@ -422,7 +446,7 @@ void ServerRuntimeImpl::apply_player_action_command(
 
   refresh_player_permissions(player_state);
 
-  world::WorldCollisionQuery interaction_query(default_world_, *block_registry_, false);
+  world::WorldCollisionQuery interaction_query(*runtime, *block_registry_, false);
   const Vec3f eye_position = player_eye_position(player_state, player_tuning_);
   const Vec3f look_direction = player_look_direction(player_state);
   apply_player_interaction_command(

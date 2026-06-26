@@ -117,15 +117,18 @@ struct SkinTransferSessionState {
 };
 
 struct PendingLightingJob {
+  WorldID world_id{};
   u64 source_revision{};
   sched::JobFuture<world::LightingResult> job;
 };
 
 struct PendingFluidJob {
+  WorldID world_id{};
   sched::JobFuture<world::FluidSimulationResult> job;
 };
 
 struct PendingGenerationJob {
+  WorldID world_id{};
   ChunkCoord coord{};
   sched::JobFuture<world::GeneratedChunkResult> job;
 };
@@ -136,6 +139,7 @@ struct PendingGeneratedChunk {
 };
 
 struct PendingNaturalSpawnJob {
+  WorldID world_id{};
   TickIndex source_tick{};
   sched::JobFuture<world::NaturalSpawnJobResult> job;
 };
@@ -330,6 +334,14 @@ struct ServerRuntimeImpl {
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& saved_player_states() const noexcept;
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept;
   [[nodiscard]] world::WorldRuntime& voxel_world() noexcept;
+  [[nodiscard]] const world::WorldRuntime* world_by_id(WorldID world_id) const noexcept;
+  [[nodiscard]] world::WorldRuntime* world_by_id(WorldID world_id) noexcept;
+  [[nodiscard]] const world::WorldRuntime* world_for_session(
+      const ServerSession& session) const noexcept;
+  [[nodiscard]] world::WorldRuntime* world_for_session(
+      const ServerSession& session) noexcept;
+  [[nodiscard]] std::vector<world::WorldRuntime*> loaded_worlds() noexcept;
+  [[nodiscard]] std::vector<const world::WorldRuntime*> loaded_worlds() const noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
   [[nodiscard]] const entity::VehicleDefinitionRegistry* vehicle_registry() const noexcept;
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept;
@@ -376,6 +388,32 @@ struct ServerRuntimeImpl {
   [[nodiscard]] command::CommandPermissionResult check_command_permission(
       const command::CommandSender& sender,
       const command::Command& command_def);
+  void initialize_world_registry(const ServerStartInfo& start_info);
+  [[nodiscard]] std::vector<command::WorldCommandInfo> list_worlds_for_command() const;
+  [[nodiscard]] std::optional<command::WorldCommandInfo> world_info_for_command(
+      std::string_view name) const;
+  [[nodiscard]] std::optional<std::string> default_world_name_for_command() const;
+  [[nodiscard]] command::SaveAllCommandResult save_all_worlds_from_command(bool flush);
+  [[nodiscard]] command::WorldOperationCommandResult create_world_from_command(
+      const command::WorldCreateCommandRequest& request);
+  [[nodiscard]] command::WorldOperationCommandResult load_world_from_command(
+      std::string_view name);
+  [[nodiscard]] command::WorldOperationCommandResult unload_world_from_command(
+      std::string_view name,
+      bool force);
+  [[nodiscard]] command::WorldOperationCommandResult delete_world_from_command(
+      std::string_view name);
+  [[nodiscard]] command::WorldOperationCommandResult rename_world_from_command(
+      std::string_view old_name,
+      std::string_view new_name);
+  [[nodiscard]] command::WorldOperationCommandResult set_default_world_from_command(
+      std::string_view name);
+  [[nodiscard]] command::WorldOperationCommandResult set_world_spawn_from_command(
+      std::string_view name,
+      Location spawn);
+  [[nodiscard]] command::WorldOperationCommandResult teleport_player_to_world_spawn_from_command(
+      PlayerID player_id,
+      std::string_view name);
   [[nodiscard]] command::ExplosionCommandResult create_explosion_from_command(
       const command::ExplosionCommandRequest& request);
   [[nodiscard]] std::optional<world::ExplosionResult> execute_explosion_request(
@@ -667,7 +705,9 @@ struct ServerRuntimeImpl {
   PlayerProfileStore profiles_;
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
+  StableHashMap<WorldID, std::unique_ptr<world::WorldRuntime>> loaded_worlds_;
   world::NaturalSpawnSystem natural_spawns_{};
+  world::WorldTickPolicy world_tick_policy_{};
   std::vector<net::NetworkEvent> inbound_events_;
   const voxel::BlockRegistry* block_registry_{};
   const player::ItemRegistry* item_registry_{};

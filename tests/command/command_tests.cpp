@@ -629,6 +629,241 @@ TEST(CommandTests, CoreAdminCommandsProduceFeedback) {
   EXPECT_TRUE(result_contains(result, "Kicked local_player"));
 }
 
+TEST(CommandTests, WorldCommandCreatesListsInspectsPersistsAndDeletesWorlds) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world help");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "World commands page 1/"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/wm create test_world --seed 12345");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created world 'test_world'."));
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      harness.temp.path / "save" / "worlds" / "test_world" / "world.json"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/worlds list");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "test_world"));
+  EXPECT_TRUE(result_contains(result, "seed=12345"));
+  EXPECT_TRUE(result_contains(result, "unloaded"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world info test_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "World: test_world"));
+  EXPECT_TRUE(result_contains(result, "Status: unloaded"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp test_world local_player");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Failure);
+  EXPECT_TRUE(result_contains(result, "World 'test_world' is not loaded"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world delete test_world");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Failure);
+  EXPECT_TRUE(result_contains(result, "Run /world delete test_world --confirm"));
+  EXPECT_TRUE(std::filesystem::exists(
+      harness.temp.path / "save" / "worlds" / "test_world"));
+
+  const std::filesystem::path save_root = harness.temp.path / "save";
+  harness.server.shutdown();
+
+  arv::net::InProcessTransportPair transports =
+      arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime restarted(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &harness.block_registry;
+  start_info.item_registry = &harness.item_registry;
+  start_info.entity_registry = &harness.entity_registry;
+  start_info.game_modes = &harness.game_modes;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = save_root;
+  ASSERT_TRUE(restarted.start(start_info));
+
+  result = restarted.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world info test_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "World: test_world"));
+
+  result = restarted.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world delete default --confirm");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Failure);
+  EXPECT_TRUE(result_contains(result, "Cannot delete the default world"));
+
+  result = restarted.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world delete test_world --confirm");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Deleted world 'test_world'."));
+  EXPECT_FALSE(std::filesystem::exists(save_root / "worlds" / "test_world"));
+}
+
+TEST(CommandTests, WorldCommandLoadsTeleportsUnloadsAndDeletesLiveWorldRuntime) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create runtime_world --seed 6789");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load runtime_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Loaded world 'runtime_world'."));
+
+  const arv::server::WorldRecord* runtime_record =
+      harness.server.worlds().find("runtime_world");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+  EXPECT_EQ(runtime_record->state, arv::server::WorldRuntimeState::Running);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp runtime_world local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Teleported local_player to world 'runtime_world'."));
+
+  for (int i = 0; i < 3; ++i) {
+    harness.client.fixed_tick(harness.server.tick_index());
+  }
+  EXPECT_EQ(harness.client.camera().world_id(), runtime_world_id);
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, runtime_world_id);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world unload runtime_world");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Failure);
+  EXPECT_TRUE(result_contains(result, "contains players"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world unload runtime_world --force");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Unloaded world 'runtime_world'."));
+  for (int i = 0; i < 3; ++i) {
+    harness.client.fixed_tick(harness.server.tick_index());
+  }
+  EXPECT_EQ(harness.client.camera().world_id(), arv::server::DefaultWorldID);
+  session = harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, arv::server::DefaultWorldID);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load runtime_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world unload runtime_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world delete runtime_world");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Failure);
+  EXPECT_TRUE(result_contains(result, "Run /world delete runtime_world --confirm"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world delete runtime_world --confirm");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_FALSE(std::filesystem::exists(
+      harness.temp.path / "save" / "worlds" / "runtime_world"));
+}
+
+TEST(CommandTests, WorldCommandValidatesNamesAndPermissions) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+
+  arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/world list");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+  EXPECT_TRUE(result_contains(
+      result,
+      "You do not have permission to use this world command."));
+
+  player.permission_overrides.custom_overrides["arv.command.world"] =
+      arv::player::TriState::Allow;
+  result = harness.server.execute_command(sender.value(), "/world list");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Worlds"));
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/world create player_world");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::PermissionDenied);
+
+  player.permission_overrides.custom_overrides["arv.command.world.create"] =
+      arv::player::TriState::Allow;
+  result = harness.server.execute_command(
+      sender.value(),
+      "/world create BadName");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_TRUE(result_contains(result, "lowercase"));
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/world create ../escape");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::UsageError);
+  EXPECT_TRUE(result_contains(result, "path traversal"));
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/world create player_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created world 'player_world'."));
+}
+
+TEST(CommandTests, WorldSetspawnUpdatesDefaultWorldSpawn) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  player.position = {-6.5F, 72.0F, 11.25F};
+  player.yaw_radians = 0.5F;
+  player.pitch_radians = -0.25F;
+  player.permission_overrides.custom_overrides["arv.command.world.setspawn"] =
+      arv::player::TriState::Allow;
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  const arv::command::CommandResult result =
+      harness.server.execute_command(sender.value(), "/world setspawn");
+
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  const arv::Location spawn = harness.server.voxel_world().spawn_point();
+  EXPECT_EQ(arv::location_position(spawn), (arv::Vec3f{-6.5F, 72.0F, 11.25F}));
+  EXPECT_FLOAT_EQ(spawn.yaw_radians, 0.5F);
+  EXPECT_FLOAT_EQ(spawn.pitch_radians, -0.25F);
+  EXPECT_TRUE(std::filesystem::is_regular_file(
+      harness.temp.path / "save" / "worlds" / "default" / "world.json"));
+}
+
 TEST(CommandTests, TimeSubcommandsRequireSubactionPermission) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);

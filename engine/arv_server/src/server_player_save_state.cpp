@@ -6,6 +6,19 @@
 #include <utility>
 
 namespace arv::server::detail {
+namespace {
+
+[[nodiscard]] std::string_view save_world_name_for_session(
+    const WorldRegistry& worlds,
+    const ServerSession& session,
+    std::string_view fallback) {
+  const WorldRecord* record = worlds.find(session.world_id);
+  return record == nullptr || record->name.empty()
+             ? fallback
+             : std::string_view{record->name};
+}
+
+} // namespace
 
 void ServerPlayerSaveCache::load(std::span<const ServerPlayerSaveState> saves) {
   states_.assign(saves.begin(), saves.end());
@@ -164,23 +177,33 @@ void ServerPlayerSaveCache::set_selected_skin_for(
 bool ServerRuntimeImpl::apply_saved_player_state(
     const ServerSession& session,
     player::PlayerState& player_state) {
-  return player_saves_.apply_to_player(world_name_, session, player_state);
+  return player_saves_.apply_to_player(
+      save_world_name_for_session(worlds_, session, world_name_),
+      session,
+      player_state);
 }
 
 void ServerRuntimeImpl::record_player_save_state(
     const ServerSession& session,
     const player::PlayerState& player_state) {
-  player_saves_.record(world_name_, session, player_state);
+  player_saves_.record(
+      save_world_name_for_session(worlds_, session, world_name_),
+      session,
+      player_state);
 }
 
 std::string ServerRuntimeImpl::selected_skin_hash_for_session(
     const ServerSession& session) const {
-  return player_saves_.selected_skin_hash_for(world_name_, session);
+  return player_saves_.selected_skin_hash_for(
+      save_world_name_for_session(worlds_, session, world_name_),
+      session);
 }
 
 bool ServerRuntimeImpl::selected_skin_slim_model_for_session(
     const ServerSession& session) const {
-  return player_saves_.selected_skin_slim_model_for(world_name_, session);
+  return player_saves_.selected_skin_slim_model_for(
+      save_world_name_for_session(worlds_, session, world_name_),
+      session);
 }
 
 void ServerRuntimeImpl::set_selected_skin_for_session(
@@ -188,7 +211,7 @@ void ServerRuntimeImpl::set_selected_skin_for_session(
     std::string skin_hash,
     bool slim_model) {
   player_saves_.set_selected_skin_for(
-      world_name_,
+      save_world_name_for_session(worlds_, session, world_name_),
       session,
       std::move(skin_hash),
       slim_model);
