@@ -162,6 +162,12 @@ void ServerWorldJobRuntime::wait_for_all() {
   }
 }
 
+void ServerWorldJobRuntime::join_pending_jobs() {
+  if (job_system_) {
+    job_system_->join();
+  }
+}
+
 sched::JobSystem* ServerWorldJobRuntime::job_system() noexcept {
   return job_system_.get();
 }

@@ -4,7 +4,7 @@ gravity_scale: 0.0
 has_atmosphere: false
 has_oxygen: false
 sky: space
-ambient_light: 0.02
+ambient_light: 0.15
 fog: none
 reentry:
   enabled: false

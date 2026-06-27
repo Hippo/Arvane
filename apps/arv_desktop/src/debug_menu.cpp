@@ -24,9 +24,54 @@
 namespace arv::desktop {
 namespace {
 
-[[nodiscard]] player::PlayerState* local_player_state(server::ServerRuntime& server) noexcept {
+[[nodiscard]] world::WorldRuntime* active_session_world(
+    server::ServerRuntime& server) noexcept {
   const server::ServerSession* session = server.sessions().first();
-  return session == nullptr ? nullptr : server.voxel_world().find_player(session->player_id);
+  if (session != nullptr) {
+    if (world::WorldRuntime* runtime = server.world_runtime(session->world_id);
+        runtime != nullptr) {
+      return runtime;
+    }
+  }
+  return &server.voxel_world();
+}
+
+[[nodiscard]] const world::WorldRuntime* active_session_world(
+    const server::ServerRuntime& server) noexcept {
+  const server::ServerSession* session = server.sessions().first();
+  if (session != nullptr) {
+    if (const world::WorldRuntime* runtime = server.world_runtime(session->world_id);
+        runtime != nullptr) {
+      return runtime;
+    }
+  }
+  return &server.voxel_world();
+}
+
+struct LocalPlayerDebugContext {
+  const server::ServerSession* session{};
+  world::WorldRuntime* world{};
+  player::PlayerState* player{};
+};
+
+[[nodiscard]] LocalPlayerDebugContext local_player_context(
+    server::ServerRuntime& server) noexcept {
+  LocalPlayerDebugContext context;
+  context.session = server.sessions().first();
+  if (context.session == nullptr) {
+    return context;
+  }
+  context.world = server.world_runtime(context.session->world_id);
+  if (context.world == nullptr) {
+    return context;
+  }
+  context.player = context.world->find_player(context.session->player_id);
+  return context;
+}
+
+[[nodiscard]] player::PlayerState* local_player_state(
+    server::ServerRuntime& server) noexcept {
+  return local_player_context(server).player;
 }
 
 [[nodiscard]] std::string biome_display_label(
@@ -1074,22 +1119,26 @@ void render_player_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
     client::ClientRuntime& client) {
-  player::PlayerState* player = local_player_state(server);
+  LocalPlayerDebugContext player_context = local_player_context(server);
+  player::PlayerState* player = player_context.player;
   if (player == nullptr) {
     ImGui::TextUnformatted("No local player session.");
     return;
   }
+  world::WorldRuntime& player_world = *player_context.world;
 
   ImGui::Text("Player ID: %u", player->player_id.value);
+  ImGui::Text("World: #%u", player_world.id().value);
   ImGui::Text(
       "Position: %.2f, %.2f, %.2f",
       static_cast<double>(player->position.x),
       static_cast<double>(player->position.y),
       static_cast<double>(player->position.z));
-  const std::string& biome_label = current_biome_label(state, server.voxel_world(), player->position);
+  const std::string& biome_label =
+      current_biome_label(state, player_world, player->position);
   ImGui::Text("Biome: %s", biome_label.c_str());
   const world::WorldGenerationConfig* generation_config =
-      server.voxel_world().generation_config();
+      player_world.generation_config();
   const i32 biome_chunk_x =
       floor_div(static_cast<i32>(std::floor(player->position.x)), ChunkSize);
   const i32 biome_chunk_z =
@@ -1100,10 +1149,10 @@ void render_player_tab(
       state.nearest_biome_label_valid &&
       state.nearest_biome_chunk_x == biome_chunk_x &&
       state.nearest_biome_chunk_z == biome_chunk_z &&
-      state.nearest_biome_seed == server.voxel_world().generation_seed() &&
+      state.nearest_biome_seed == player_world.generation_seed() &&
       state.nearest_biome_dimension == biome_dimension;
   if (ImGui::Button("Locate nearest different biome")) {
-    (void)nearest_different_biome_label(state, server.voxel_world(), player->position);
+    (void)nearest_different_biome_label(state, player_world, player->position);
     nearest_biome_cache_current = true;
   }
   ImGui::Text(
@@ -1407,7 +1456,7 @@ void render_entities_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
     const entity::EntityRegistry& entity_registry) {
-  world::WorldRuntime& world = server.voxel_world();
+  world::WorldRuntime& world = *active_session_world(server);
   const std::vector<EntityID> entity_ids = world.entity_ids();
   ImGui::Text("Runtime entities: %zu", entity_ids.size());
   ImGui::Text("Dropped item stacks: %zu", server.dropped_item_stacks().size());
@@ -1642,7 +1691,7 @@ void render_entities_tab(
 void render_world_tab(
     const DebugMenuFrameInfo& frame_info,
     server::ServerRuntime& server) {
-  world::WorldRuntime& world_runtime = server.voxel_world();
+  world::WorldRuntime& world_runtime = *active_session_world(server);
   const world::WorldClock& clock = world_runtime.clock();
   const world::CelestialState celestial = world::build_celestial_state(clock);
   const world::ClockTime24 time_24 = world::to_clock_time_24(celestial.day_fraction);
@@ -1944,7 +1993,7 @@ void render_chunk_workload(
     render::RenderCommandQueue& renderer,
     const ChunkViewState& chunk_view) {
   const world::ChunkWorkloadSnapshot workload =
-      server.voxel_world().chunk_workload_snapshot();
+      active_session_world(server)->chunk_workload_snapshot();
   ImGui::SeparatorText("Chunk Workload");
   if (ImGui::BeginTable(
           "ChunkWorkload",

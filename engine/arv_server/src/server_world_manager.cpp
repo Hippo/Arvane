@@ -12,6 +12,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <span>
@@ -375,7 +376,7 @@ void apply_runtime_world_type_defaults(
   environment.has_atmosphere = false;
   environment.has_oxygen = false;
   environment.sky = "space";
-  environment.ambient_light = 0.02F;
+  environment.ambient_light = 0.15F;
   environment.fog = "none";
   runtime.set_environment(std::move(environment));
   (void)runtime.set_weather_id("clear");
@@ -1098,6 +1099,37 @@ command::SaveAllCommandResult ServerRuntimeImpl::save_all_worlds_from_command(bo
     return out;
   }
 
+  if (flush) {
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      if (runtime == nullptr) {
+        continue;
+      }
+      world_jobs_.schedule_generation_jobs(
+          *runtime,
+          chunk_streamer_,
+          chunk_generation_,
+          std::numeric_limits<u32>::max(),
+          false);
+    }
+    world_jobs_.join_pending_jobs();
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      if (runtime == nullptr) {
+        continue;
+      }
+      world_jobs_.drain_generation_jobs(*runtime, true);
+      world_jobs_.schedule_fluid_jobs(*runtime, block_registry_, fluid_definition_);
+      world_jobs_.schedule_lighting_jobs(*runtime, block_registry_);
+    }
+    world_jobs_.join_pending_jobs();
+    for (world::WorldRuntime* runtime : loaded_worlds()) {
+      if (runtime == nullptr) {
+        continue;
+      }
+      world_jobs_.drain_fluid_jobs(*runtime, fluid_definition_, true);
+      world_jobs_.drain_lighting_jobs(*runtime, true);
+    }
+  }
+
   const std::vector<persistence::PlayerSaveData> players =
       collect_player_saves(
           player_saves_,
@@ -1416,7 +1448,7 @@ command::WorldOperationCommandResult ServerRuntimeImpl::unload_world_from_comman
       }
     }
   }
-  command::SaveAllCommandResult saved = save_all_worlds_from_command(false);
+  command::SaveAllCommandResult saved = save_all_worlds_from_command(true);
   if (!saved.success) {
     return op_failure("Failed to save world '" + record->name + "' before unload: " + saved.message);
   }
@@ -2492,6 +2524,15 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
     close_container_sessions_for_player_session(
         session.session_id,
         protocol::ContainerCloseReason::ChunkUnloaded);
+    protocol::ServerboundChunkInterestUpdate initial_interest;
+    initial_interest.world_id = session.world_id;
+    initial_interest.center_chunk = player_chunk_coord(*target_state);
+    initial_interest.client_view_distance = max_view_distance_;
+    chunk_streamer_.update_player_interest(
+        session,
+        initial_interest.center_chunk,
+        target_world->height_settings(),
+        initial_interest);
     accepted_player_movement_[session.player_id] = {
         target_state->position,
         target_state->velocity,

@@ -150,7 +150,7 @@ using arv::testsupport::connected_player;
   deep_space.has_atmosphere = false;
   deep_space.has_oxygen = false;
   deep_space.sky = "space";
-  deep_space.ambient_light = 0.02F;
+  deep_space.ambient_light = 0.15F;
   deep_space.fog = "none";
   registry.environments.emplace(deep_space.id, std::move(deep_space));
 
@@ -170,7 +170,7 @@ using arv::testsupport::connected_player;
   luna_env.has_atmosphere = false;
   luna_env.has_oxygen = false;
   luna_env.sky = "space";
-  luna_env.ambient_light = 0.08F;
+  luna_env.ambient_light = 0.15F;
   luna_env.fog = "none";
   registry.environments.emplace(luna_env.id, std::move(luna_env));
 
@@ -317,6 +317,21 @@ std::optional<arv::command::CommandSender> connected_player_sender(
       [&](const arv::command::CommandMessage& message) {
         return message.text.find(needle) != std::string::npos;
       });
+}
+
+[[nodiscard]] std::size_t count_region_files(
+    const std::filesystem::path& directory) {
+  if (!std::filesystem::exists(directory)) {
+    return 0U;
+  }
+  std::size_t count = 0U;
+  for (const std::filesystem::directory_entry& entry :
+       std::filesystem::directory_iterator(directory)) {
+    if (entry.is_regular_file() && entry.path().extension() == ".arvr") {
+      ++count;
+    }
+  }
+  return count;
 }
 
 void submit_chat_text(arv::client::ClientRuntime& client, std::string_view text) {
@@ -1792,6 +1807,14 @@ TEST(CommandTests, PlanetEntryRequiresSpaceCapableVehicleTag) {
 
 TEST(CommandTests, PlanetEntryReconnectsInTargetWorldAfterRestart) {
   RunningServerHarness harness;
+  const auto body =
+      harness.space_definitions.space_bodies.find("arvane:space_body/luna");
+  ASSERT_NE(body, harness.space_definitions.space_bodies.end());
+  EXPECT_EQ(body->second.target_world, "arvane:world/luna");
+  const arv::world::WorldDefinition* target_definition =
+      harness.space_definitions.find_world(body->second.target_world);
+  ASSERT_NE(target_definition, nullptr);
+  EXPECT_EQ(target_definition->kind, arv::world::WorldDefinitionKind::Planet);
 
   const arv::server::WorldRecord* space_record =
       create_and_load_command_test_space_world(harness);
@@ -1838,6 +1861,17 @@ TEST(CommandTests, PlanetEntryReconnectsInTargetWorldAfterRestart) {
   const arv::command::SaveAllCommandResult saved =
       harness.server.save_all_worlds(true);
   ASSERT_TRUE(saved.success) << saved.message;
+  EXPECT_GT(saved.saved_chunks, 0U);
+  const std::filesystem::path luna_regions =
+      save_root / "worlds" / "luna" / "regions";
+  EXPECT_GT(count_region_files(luna_regions), 0U);
+  auto loaded_luna = arv::persistence::load_server_root(
+      save_root,
+      "luna",
+      harness.block_registry,
+      harness.item_registry);
+  ASSERT_TRUE(loaded_luna) << loaded_luna.error().message;
+  EXPECT_FALSE(loaded_luna.value().chunks.empty());
   harness.server.shutdown();
 
   arv::net::InProcessTransportPair transports =

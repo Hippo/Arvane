@@ -234,6 +234,7 @@ public:
 
   void configure(const ServerStartInfo& start_info);
   void wait_for_all();
+  void join_pending_jobs();
 
   void drain_generation_jobs(world::WorldRuntime& world, bool drain_all);
   void drain_generation_jobs(world::WorldRuntime& world, u32 max_results);

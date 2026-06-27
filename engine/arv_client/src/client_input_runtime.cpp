@@ -682,7 +682,12 @@ void ClientInputRuntime::send_fixed_tick_input(
       clear_vehicle_debug_telemetry();
       return;
     }
-    dismount_request_sent_ = false;
+    if (dismount_request_sent_) {
+      predicted_vehicle_id_.reset();
+      clear_vehicle_impact_memory();
+      clear_vehicle_debug_telemetry();
+      return;
+    }
     if (!player_controller.mounted_controls_vehicle()) {
       predicted_vehicle_id_.reset();
       clear_vehicle_impact_memory();
@@ -1361,6 +1366,7 @@ void ClientInputRuntime::clear_vehicle_prediction() noexcept {
   predicted_vehicle_velocity_ = {};
   predicted_vehicle_rotation_ = {};
   predicted_vehicle_yaw_ = 0.0F;
+  dismount_request_sent_ = false;
   clear_vehicle_impact_memory();
   clear_vehicle_debug_telemetry();
   predicted_vehicle_animation_name_.clear();

@@ -1453,6 +1453,51 @@ TEST(ClientRuntimeTests, MountActionRequestsDismountWhenMounted) {
   EXPECT_EQ(requests.front().rideable_id, (arv::EntityNetID{10}));
 }
 
+TEST(ClientRuntimeTests, PendingDismountSuppressesVehicleMovementUntilRideEnds) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_buggy_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 1.0F, 0.0F});
+  spawn_and_mount_test_buggy(client, *server_transport, connection_id.value());
+
+  client.submit_input(arv::client::InputFrame{.mount_pressed = true});
+  client.fixed_tick(3);
+  std::vector<arv::net::NetworkEvent> events = server_transport->poll_events();
+  ASSERT_EQ(serverbound_dismount_requests(events).size(), 1U);
+  EXPECT_TRUE(serverbound_vehicle_moves(events).empty());
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(4);
+  events = server_transport->poll_events();
+  EXPECT_TRUE(serverbound_dismount_requests(events).empty());
+  EXPECT_TRUE(serverbound_vehicle_moves(events).empty());
+  EXPECT_EQ(player_move_count(events), 0U);
+
+  arv::protocol::ClientboundRideEnded ride_ended;
+  ride_ended.passenger_id = arv::EntityNetID{1};
+  ride_ended.rideable_id = arv::EntityNetID{10};
+  ride_ended.position = {2.0F, 1.0F, 0.0F};
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundRideEnded,
+      arv::protocol::serialize_clientbound_ride_ended(ride_ended));
+  client.fixed_tick(5);
+  (void)server_transport->poll_events();
+
+  client.submit_input(arv::client::InputFrame{.move_forward = true});
+  client.fixed_tick(6);
+  events = server_transport->poll_events();
+  EXPECT_TRUE(serverbound_vehicle_moves(events).empty());
+  EXPECT_GT(player_move_count(events), 0U);
+}
+
 TEST(ClientRuntimeTests, GroundVehiclePredictionClampsAgainstWallAndMovesSeatAnchor) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);

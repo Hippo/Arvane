@@ -35,18 +35,18 @@ void configure_frame_sky(
 void configure_frame_space_sky(render::FramePacket& frame) noexcept {
   frame.sky.enabled = true;
   frame.sky.sun_direction = {0.0F, 1.0F, 0.0F};
-  frame.sky.daylight_strength = 0.05F;
+  frame.sky.daylight_strength = 1.0F;
   frame.sky.moon_direction = {0.0F, -1.0F, 0.0F};
   frame.sky.moonlight_strength = 0.0F;
-  frame.sky.daylight_color = {0.60F, 0.72F, 1.0F};
+  frame.sky.daylight_color = {1.0F, 0.96F, 0.88F};
   frame.sky.star_visibility = 2.4F;
-  frame.sky.ambient_color = {0.02F, 0.025F, 0.04F};
+  frame.sky.ambient_color = {0.20F, 0.24F, 0.30F};
   frame.sky.day_fraction = 0.5F;
   frame.sky.fog_color = {0.0F, 0.0F, 0.0F};
   frame.sky.cirrus_amount = 0.0F;
   frame.sky.cumulus_amount = 0.0F;
   frame.sky.cloud_intensity = 0.0F;
-  frame.sky.exposure = 1.35F;
+  frame.sky.exposure = 1.15F;
   frame.clear_color = {0.003F, 0.004F, 0.010F, 1.0F};
 }
 

@@ -112,7 +112,7 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
   }
 
   const arv::command::SaveAllCommandResult save_result =
-      session->integrated_server->save_all_worlds(false);
+      session->integrated_server->save_all_worlds(true);
   if (!save_result.success) {
     core::error(
         "save",

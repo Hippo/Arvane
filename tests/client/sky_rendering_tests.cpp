@@ -27,11 +27,13 @@ TEST(SkyRenderingTests, ConfiguresFrameSkyFromClockAndRenderSettings) {
   EXPECT_FLOAT_EQ(frame.sky.cloud_time_seconds, expected.cloud_time_seconds);
 }
 
-TEST(SkyRenderingTests, ConfiguresSpaceSkyAsDarkStarField) {
+TEST(SkyRenderingTests, ConfiguresSpaceSkyAsSunlitStarField) {
   arv::render::FramePacket frame;
   arv::client::configure_frame_space_sky(frame);
 
   EXPECT_TRUE(frame.sky.enabled);
+  EXPECT_FLOAT_EQ(frame.sky.daylight_strength, 1.0F);
+  EXPECT_GT(frame.sky.ambient_color.x, 0.15F);
   EXPECT_GT(frame.sky.star_visibility, 2.0F);
   EXPECT_FLOAT_EQ(frame.sky.cloud_intensity, 0.0F);
   EXPECT_FLOAT_EQ(frame.sky.cirrus_amount, 0.0F);
