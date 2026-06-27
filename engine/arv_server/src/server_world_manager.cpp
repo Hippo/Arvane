@@ -568,11 +568,25 @@ void apply_definition_environment(
   return coord;
 }
 
+[[nodiscard]] Vec3f clamp_planet_entry_position_to_world_height(
+    const world::WorldRuntime& runtime,
+    Vec3f position) noexcept {
+  const world::WorldHeightSettings height = runtime.height_settings();
+  const f32 min_y = static_cast<f32>(height.min_chunk_y * ChunkSize) + 1.0F;
+  f32 max_y = static_cast<f32>(height.max_chunk_y * ChunkSize) - 4.0F;
+  if (max_y < min_y) {
+    max_y = min_y;
+  }
+  position.y = std::clamp(position.y, min_y, max_y);
+  return position;
+}
+
 struct EntityTransferSnapshot {
   EntityID source_entity{};
   std::optional<EntityNetID> source_net_id{};
   world::EntityCreateInfo create_info{};
   std::optional<entity::VehiclePhysicsComponent> vehicle_physics{};
+  std::optional<entity::VehicleCargoComponent> vehicle_cargo{};
 };
 
 struct PlayerTransitionMember {
@@ -757,6 +771,11 @@ void ensure_launch_vehicle_fuel_state(
         entity::AuthoredVehiclePhysicsComponent{vehicle_physics->definition};
     snapshot.vehicle_physics = *vehicle_physics;
     has_components = true;
+  }
+  if (const entity::VehicleCargoComponent* vehicle_cargo =
+          source_world.find_entity_vehicle_cargo(entity_id);
+      vehicle_cargo != nullptr) {
+    snapshot.vehicle_cargo = *vehicle_cargo;
   }
   if (const entity::DroppedItem* dropped = source_world.find_dropped_item(entity_id);
       dropped != nullptr) {
@@ -2031,8 +2050,9 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
           target_record =
               find_world_record_for_definition_id(worlds_, target_definition->id);
         }
-        if (target_record == nullptr ||
-            world_by_id(target_record->id) == nullptr) {
+        world::WorldRuntime* target_runtime =
+            target_record == nullptr ? nullptr : world_by_id(target_record->id);
+        if (target_record == nullptr || target_runtime == nullptr) {
           core::warn(
               "planet_entry",
               "rejected planet entry from world '{}' through body '{}' to '{}': target world failed to load",
@@ -2047,13 +2067,26 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
           continue;
         }
 
+        const Vec3f target_position =
+            clamp_planet_entry_position_to_world_height(
+                *target_runtime,
+                body->entry.spawn_position);
+        if (distance_squared(target_position, body->entry.spawn_position) > 0.0001F) {
+          core::warn(
+              "planet_entry",
+              "clamped entry spawn for body '{}' from y={} to y={} to fit target world '{}'",
+              body->id,
+              body->entry.spawn_position.y,
+              target_position.y,
+              target_definition->id);
+        }
         const Vec3f spawn_rotation_degrees =
             body->entry.spawn_rotation_degrees;
         WorldTransitionRequest request;
         request.root_entity = entity;
         request.source_world = runtime->id();
         request.target_world = target_record->id;
-        request.target_position = body->entry.spawn_position;
+        request.target_position = target_position;
         request.target_velocity = body->entry.spawn_velocity;
         request.target_rotation = euler_degrees_rotation(spawn_rotation_degrees);
         request.target_yaw_radians =
@@ -2297,12 +2330,19 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
       *physics = group.vehicle->vehicle_physics.value();
       physics->linear_velocity = request.target_velocity;
     }
+    if (group.vehicle->vehicle_cargo.has_value()) {
+      (void)target_world->set_entity_vehicle_cargo(
+          target_vehicle,
+          group.vehicle->vehicle_cargo.value());
+    }
   }
 
   struct TargetPlayerState {
     PlayerTransitionMember* source{};
     player::PlayerState state{};
     EntityID target_entity{};
+    std::optional<std::string> target_seat_id{};
+    bool target_controls_vehicle{};
   };
   std::vector<TargetPlayerState> target_players;
   target_players.reserve(group.players.size());
@@ -2388,10 +2428,24 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
           !target_player.source->seat_id.has_value()) {
         continue;
       }
-      (void)target_world->mount_entity(
-          target_vehicle,
-          target_player.target_entity,
-          target_player.source->seat_id.value());
+      if (!target_world->mount_entity(
+              target_vehicle,
+              target_player.target_entity,
+              target_player.source->seat_id.value())) {
+        continue;
+      }
+      target_player.target_seat_id = target_player.source->seat_id;
+      if (const entity::RideableComponent* rideable =
+              target_world->find_entity_rideable(target_vehicle);
+          rideable != nullptr) {
+        for (const entity::Seat& seat : rideable->seats) {
+          if (seat.occupant == target_player.target_entity) {
+            target_player.target_seat_id = seat.id;
+            target_player.target_controls_vehicle = seat.controls_vehicle;
+            break;
+          }
+        }
+      }
     }
     (void)target_world->update_passenger_attachment_transforms();
     for (TargetPlayerState& target_player : target_players) {
@@ -2451,6 +2505,23 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
 
     send_world_join_result(session, *target_state);
     session.connection_state = net::ConnectionState::InGame;
+    if (target_vehicle.value != 0U &&
+        target_player.target_entity.value != 0U &&
+        target_player.target_seat_id.has_value()) {
+      send_ride_started_to_session(
+          session,
+          *target_world,
+          target_player.target_entity,
+          target_vehicle,
+          target_player.target_seat_id.value(),
+          target_player.target_controls_vehicle,
+          protocol::NetworkLane::Session);
+      send_entity_passengers_to_session(
+          session,
+          *target_world,
+          target_vehicle,
+          protocol::NetworkLane::Session);
+    }
     sessions_.for_each_session([&](const ServerSession& subject) {
       if (subject.authenticated && subject.world_id == session.world_id) {
         send_player_profile_info_to(session, subject);
@@ -2458,6 +2529,10 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
     });
     broadcast_player_profile_info(session);
     moved_players.push_back(session.player_id);
+  }
+
+  if (target_vehicle.value != 0U) {
+    broadcast_entity_passengers(*target_world, target_vehicle);
   }
 
   return transition_success(

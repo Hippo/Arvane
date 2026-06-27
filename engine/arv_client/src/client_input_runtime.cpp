@@ -637,6 +637,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
     bool space_environment,
+    bool void_space_world,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
   u32 drop_requests = 0U;
@@ -1276,7 +1277,11 @@ void ClientInputRuntime::send_fixed_tick_input(
   clear_vehicle_impact_memory();
   clear_vehicle_debug_telemetry();
   dismount_request_sent_ = false;
-  player_controller.update_local_movement(command, collision_query, tick_seconds);
+  player_controller.update_local_movement(
+      command,
+      collision_query,
+      tick_seconds,
+      void_space_world);
 
   movement_send_accumulator_seconds_ += tick_seconds;
   const Seconds send_interval =

@@ -60,6 +60,7 @@ struct ClientRuntime::Impl {
         world_time_update,
         world_environment_sky,
         space_environment,
+        void_space_world,
         space_bodies,
         world_transition_status,
         world_transition_fade_remaining_seconds,
@@ -100,6 +101,7 @@ struct ClientRuntime::Impl {
           entities,
           vehicle_registry,
           space_environment,
+          void_space_world,
           collision_query,
           tick_seconds);
     }
@@ -138,6 +140,7 @@ struct ClientRuntime::Impl {
     world_time_update.reset();
     world_environment_sky.clear();
     space_environment = false;
+    void_space_world = false;
     space_bodies.clear();
     world_transition_status = {};
     world_transition_fade_remaining_seconds = 0.0;
@@ -190,6 +193,7 @@ struct ClientRuntime::Impl {
   std::optional<protocol::ClientboundWorldTime> world_time_update{};
   std::string world_environment_sky{};
   bool space_environment{};
+  bool void_space_world{};
   std::vector<protocol::ClientboundSpaceBodyView> space_bodies{};
   ClientWorldTransitionStatus world_transition_status{};
   Seconds world_transition_fade_remaining_seconds{};
@@ -792,6 +796,18 @@ net::NetworkResult ClientRuntime::send_vehicle_move(
 
 std::optional<VehicleDebugTelemetry> ClientRuntime::vehicle_debug_telemetry() const {
   return impl_->input.vehicle_debug_telemetry();
+}
+
+std::optional<EntityNetID> ClientRuntime::mounted_vehicle_id() const noexcept {
+  return impl_->player_controller.mounted_vehicle_id();
+}
+
+std::string_view ClientRuntime::mounted_seat_id() const noexcept {
+  return impl_->player_controller.mounted_seat_id();
+}
+
+bool ClientRuntime::mounted_controls_vehicle() const noexcept {
+  return impl_->player_controller.mounted_controls_vehicle();
 }
 
 std::vector<ClientAttackFeedback> ClientRuntime::drain_attack_feedback() {

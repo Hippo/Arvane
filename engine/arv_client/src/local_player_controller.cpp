@@ -121,22 +121,28 @@ player::PlayerCommand LocalPlayerController::consume_command(TickIndex tick_inde
 void LocalPlayerController::update_local_movement(
     const player::PlayerCommand& command,
     const physics::ICollisionQuery* collision_query,
-    Seconds tick_seconds) {
+    Seconds tick_seconds,
+    bool void_space_world) {
   if (!player_id_.has_value()) {
     return;
   }
 
   const Vec3f incoming_velocity = movement_state_.velocity;
+  const physics::ICollisionQuery* movement_collision_query =
+      void_space_world ? nullptr : collision_query;
   const physics::PlayerMovementStep movement_step =
       physics::simulate_player_movement_tick(
-          collision_query,
+          movement_collision_query,
           movement_state_,
           command,
           tuning_,
-          movement_authority(),
+          movement_authority(void_space_world),
           tick_seconds);
   movement_state_ = movement_step.state;
-  apply_knockback_control_suppression(incoming_velocity, collision_query, tick_seconds);
+  apply_knockback_control_suppression(
+      incoming_velocity,
+      movement_collision_query,
+      tick_seconds);
   body_position_ = movement_state_.position;
   update_target_eye_height();
   camera_.set_rotation(movement_state_.yaw_radians, movement_state_.pitch_radians);
@@ -512,10 +518,11 @@ protocol::PlayerActionFlags action_flags_from_player_command(
   return flags;
 }
 
-physics::PlayerMovementAuthority LocalPlayerController::movement_authority() const noexcept {
+physics::PlayerMovementAuthority LocalPlayerController::movement_authority(
+    bool void_space_world) const noexcept {
   return {
-      resolved_permissions_.core.can_fly,
-      resolved_permissions_.core.has_collision};
+      resolved_permissions_.core.can_fly || void_space_world,
+      void_space_world ? false : resolved_permissions_.core.has_collision};
 }
 
 protocol::PlayerMoveFlags LocalPlayerController::movement_flags() const noexcept {

@@ -145,6 +145,11 @@ void apply_authored_components(
       registry.emplace_or_replace<entity::VehiclePhysicsComponent>(
           handle,
           std::move(physics));
+      if (definition->cargo.has_value()) {
+        registry.emplace_or_replace<entity::VehicleCargoComponent>(
+            handle,
+            player::Inventory{definition->cargo->slots});
+      }
     }
   }
 }

@@ -95,8 +95,6 @@ entity:
       display_name: Plane
     rocket:
       display_name: Rocket
-      basic:
-        display_name: Basic Rocket
     submarine:
       display_name: Submarine
 

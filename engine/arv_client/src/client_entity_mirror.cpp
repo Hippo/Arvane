@@ -75,6 +75,114 @@ void snap_entity_render_transform(ReplicatedEntityMirror& mirror) noexcept {
   return current_world.value == 0U || packet_world == current_world;
 }
 
+using EntityMirrorMap = HashMap<EntityNetID, ReplicatedEntityMirror>;
+
+[[nodiscard]] bool has_entity(
+    const EntityMirrorMap& entities,
+    EntityNetID entity_id) {
+  return entities.find(entity_id) != entities.end();
+}
+
+[[nodiscard]] bool ride_started_ready(
+    const EntityMirrorMap& entities,
+    const protocol::ClientboundRideStarted& event) {
+  return has_entity(entities, event.passenger_id) &&
+         has_entity(entities, event.rideable_id);
+}
+
+void apply_ride_started_to_existing(
+    EntityMirrorMap& entities,
+    const protocol::ClientboundRideStarted& event) {
+  auto passenger = entities.find(event.passenger_id);
+  if (passenger != entities.end()) {
+    passenger->second.parent_rideable = event.rideable_id;
+    passenger->second.parent_seat_id = event.seat_id;
+    passenger->second.controls_parent_vehicle = event.controls_vehicle;
+  }
+  auto rideable = entities.find(event.rideable_id);
+  if (rideable == entities.end()) {
+    return;
+  }
+  for (ReplicatedPassengerMirror& existing : rideable->second.passengers) {
+    if (existing.passenger_id == event.passenger_id) {
+      existing.seat_id = event.seat_id;
+      existing.controls_vehicle = event.controls_vehicle;
+      return;
+    }
+  }
+  rideable->second.passengers.push_back(
+      {event.passenger_id, event.seat_id, event.controls_vehicle});
+}
+
+[[nodiscard]] bool passengers_set_ready(
+    const EntityMirrorMap& entities,
+    const protocol::ClientboundEntityPassengersSet& event) {
+  if (!has_entity(entities, event.rideable_id)) {
+    return false;
+  }
+  return std::all_of(
+      event.passengers.begin(),
+      event.passengers.end(),
+      [&](const protocol::VehiclePassengerEntry& passenger) {
+        return has_entity(entities, passenger.passenger_id);
+      });
+}
+
+void apply_passengers_set_to_existing(
+    EntityMirrorMap& entities,
+    const protocol::ClientboundEntityPassengersSet& event) {
+  auto rideable = entities.find(event.rideable_id);
+  if (rideable != entities.end()) {
+    rideable->second.passengers.clear();
+    rideable->second.passengers.reserve(event.passengers.size());
+  }
+  for (auto& [entity_id, mirror] : entities) {
+    if (mirror.parent_rideable.has_value() &&
+        mirror.parent_rideable.value() == event.rideable_id) {
+      mirror.parent_rideable.reset();
+      mirror.parent_seat_id.clear();
+      mirror.controls_parent_vehicle = false;
+    }
+    (void)entity_id;
+  }
+  for (const protocol::VehiclePassengerEntry& passenger : event.passengers) {
+    if (rideable != entities.end()) {
+      rideable->second.passengers.push_back(
+          {passenger.passenger_id, passenger.seat_id, passenger.controls_vehicle});
+    }
+    auto passenger_mirror = entities.find(passenger.passenger_id);
+    if (passenger_mirror == entities.end()) {
+      continue;
+    }
+    passenger_mirror->second.parent_rideable = event.rideable_id;
+    passenger_mirror->second.parent_seat_id = passenger.seat_id;
+    passenger_mirror->second.controls_parent_vehicle =
+        passenger.controls_vehicle;
+  }
+}
+
+void upsert_pending_ride_start(
+    std::vector<protocol::ClientboundRideStarted>& pending,
+    const protocol::ClientboundRideStarted& event) {
+  std::erase_if(
+      pending,
+      [&](const protocol::ClientboundRideStarted& existing) {
+        return existing.passenger_id == event.passenger_id;
+      });
+  pending.push_back(event);
+}
+
+void upsert_pending_passengers_set(
+    std::vector<protocol::ClientboundEntityPassengersSet>& pending,
+    const protocol::ClientboundEntityPassengersSet& event) {
+  std::erase_if(
+      pending,
+      [&](const protocol::ClientboundEntityPassengersSet& existing) {
+        return existing.rideable_id == event.rideable_id;
+      });
+  pending.push_back(event);
+}
+
 } // namespace
 
 void ClientEntityMirrorStore::apply_spawn(
@@ -112,6 +220,7 @@ void ClientEntityMirrorStore::apply_spawn(
   mirror.parent_seat_id.clear();
   mirror.controls_parent_vehicle = false;
   mirror.passengers.clear();
+  apply_pending_relationships();
 }
 
 void ClientEntityMirrorStore::apply_despawn(
@@ -135,6 +244,25 @@ void ClientEntityMirrorStore::apply_despawn(
         });
   }
   entities_.erase(despawn.entity_id);
+  std::erase_if(
+      pending_ride_starts_,
+      [&](const protocol::ClientboundRideStarted& event) {
+        return event.passenger_id == despawn.entity_id ||
+               event.rideable_id == despawn.entity_id;
+      });
+  std::erase_if(
+      pending_passenger_sets_,
+      [&](protocol::ClientboundEntityPassengersSet& event) {
+        if (event.rideable_id == despawn.entity_id) {
+          return true;
+        }
+        std::erase_if(
+            event.passengers,
+            [&](const protocol::VehiclePassengerEntry& passenger) {
+              return passenger.passenger_id == despawn.entity_id;
+            });
+        return false;
+      });
 }
 
 void ClientEntityMirrorStore::apply_snapshot(
@@ -278,29 +406,33 @@ void ClientEntityMirrorStore::apply_local_vehicle_prediction(
 
 void ClientEntityMirrorStore::apply_ride_started(
     const protocol::ClientboundRideStarted& event) {
-  auto passenger = entities_.find(event.passenger_id);
-  if (passenger != entities_.end()) {
-    passenger->second.parent_rideable = event.rideable_id;
-    passenger->second.parent_seat_id = event.seat_id;
-    passenger->second.controls_parent_vehicle = event.controls_vehicle;
+  apply_ride_started_to_existing(entities_, event);
+  if (ride_started_ready(entities_, event)) {
+    std::erase_if(
+        pending_ride_starts_,
+        [&](const protocol::ClientboundRideStarted& existing) {
+          return existing.passenger_id == event.passenger_id;
+        });
+  } else {
+    upsert_pending_ride_start(pending_ride_starts_, event);
   }
-  auto rideable = entities_.find(event.rideable_id);
-  if (rideable == entities_.end()) {
-    return;
-  }
-  for (ReplicatedPassengerMirror& existing : rideable->second.passengers) {
-    if (existing.passenger_id == event.passenger_id) {
-      existing.seat_id = event.seat_id;
-      existing.controls_vehicle = event.controls_vehicle;
-      return;
-    }
-  }
-  rideable->second.passengers.push_back(
-      {event.passenger_id, event.seat_id, event.controls_vehicle});
 }
 
 void ClientEntityMirrorStore::apply_ride_ended(
     const protocol::ClientboundRideEnded& event) {
+  std::erase_if(
+      pending_ride_starts_,
+      [&](const protocol::ClientboundRideStarted& existing) {
+        return existing.passenger_id == event.passenger_id;
+      });
+  for (protocol::ClientboundEntityPassengersSet& pending :
+       pending_passenger_sets_) {
+    std::erase_if(
+        pending.passengers,
+        [&](const protocol::VehiclePassengerEntry& passenger) {
+          return passenger.passenger_id == event.passenger_id;
+        });
+  }
   auto passenger = entities_.find(event.passenger_id);
   if (passenger != entities_.end()) {
     passenger->second.parent_rideable.reset();
@@ -327,32 +459,15 @@ void ClientEntityMirrorStore::apply_ride_ended(
 
 void ClientEntityMirrorStore::apply_passengers_set(
     const protocol::ClientboundEntityPassengersSet& event) {
-  auto rideable = entities_.find(event.rideable_id);
-  if (rideable != entities_.end()) {
-    rideable->second.passengers.clear();
-    rideable->second.passengers.reserve(event.passengers.size());
-  }
-  for (auto& [entity_id, mirror] : entities_) {
-    if (mirror.parent_rideable.has_value() &&
-        mirror.parent_rideable.value() == event.rideable_id) {
-      mirror.parent_rideable.reset();
-      mirror.parent_seat_id.clear();
-      mirror.controls_parent_vehicle = false;
-    }
-    (void)entity_id;
-  }
-  for (const protocol::VehiclePassengerEntry& passenger : event.passengers) {
-    if (rideable != entities_.end()) {
-      rideable->second.passengers.push_back(
-          {passenger.passenger_id, passenger.seat_id, passenger.controls_vehicle});
-    }
-    auto passenger_mirror = entities_.find(passenger.passenger_id);
-    if (passenger_mirror == entities_.end()) {
-      continue;
-    }
-    passenger_mirror->second.parent_rideable = event.rideable_id;
-    passenger_mirror->second.parent_seat_id = passenger.seat_id;
-    passenger_mirror->second.controls_parent_vehicle = passenger.controls_vehicle;
+  apply_passengers_set_to_existing(entities_, event);
+  if (passengers_set_ready(entities_, event)) {
+    std::erase_if(
+        pending_passenger_sets_,
+        [&](const protocol::ClientboundEntityPassengersSet& existing) {
+          return existing.rideable_id == event.rideable_id;
+        });
+  } else {
+    upsert_pending_passengers_set(pending_passenger_sets_, event);
   }
 }
 
@@ -416,10 +531,45 @@ void ClientEntityMirrorStore::prune_except_world(WorldID world_id) {
       [&](const auto& entry) {
         return entry.second.world_id != world_id;
       });
+  pending_ride_starts_.clear();
+  pending_passenger_sets_.clear();
 }
 
 void ClientEntityMirrorStore::clear() noexcept {
   entities_.clear();
+  pending_ride_starts_.clear();
+  pending_passenger_sets_.clear();
+}
+
+void ClientEntityMirrorStore::apply_pending_relationships() {
+  bool applied = true;
+  while (applied) {
+    applied = false;
+    for (auto it = pending_ride_starts_.begin();
+         it != pending_ride_starts_.end();) {
+      if (!ride_started_ready(entities_, *it)) {
+        ++it;
+        continue;
+      }
+      apply_ride_started_to_existing(entities_, *it);
+      it = pending_ride_starts_.erase(it);
+      applied = true;
+    }
+    for (auto it = pending_passenger_sets_.begin();
+         it != pending_passenger_sets_.end();) {
+      if (!has_entity(entities_, it->rideable_id)) {
+        ++it;
+        continue;
+      }
+      apply_passengers_set_to_existing(entities_, *it);
+      if (!passengers_set_ready(entities_, *it)) {
+        ++it;
+        continue;
+      }
+      it = pending_passenger_sets_.erase(it);
+      applied = true;
+    }
+  }
 }
 
 } // namespace arv::client

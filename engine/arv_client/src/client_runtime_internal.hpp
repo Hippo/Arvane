@@ -119,6 +119,7 @@ struct ClientRuntimeContext {
   std::optional<protocol::ClientboundWorldTime>& world_time_update;
   std::string& world_environment_sky;
   bool& space_environment;
+  bool& void_space_world;
   std::vector<protocol::ClientboundSpaceBodyView>& space_bodies;
   ClientWorldTransitionStatus& world_transition_status;
   Seconds& world_transition_fade_remaining_seconds;

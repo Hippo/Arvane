@@ -660,7 +660,8 @@ void ServerRuntimeImpl::send_world_join_result(
   const world::WorldRuntime* runtime = world_for_session(session);
   if (runtime != nullptr) {
     result.environment_sky = runtime->environment().sky;
-    result.space_environment = result.environment_sky == "space";
+    const WorldRecord* record = worlds_.find(session.world_id);
+    result.space_environment = record != nullptr && record->world_type == "space";
     const std::optional<EntityID> entity_id =
         runtime->entity_for_player(session.player_id);
     if (entity_id.has_value()) {

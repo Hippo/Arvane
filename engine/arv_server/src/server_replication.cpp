@@ -90,6 +90,58 @@ static_assert(
   return particles;
 }
 
+[[nodiscard]] std::optional<protocol::ClientboundEntityPassengersSet>
+make_entity_passengers_packet(
+    world::WorldRuntime& runtime,
+    EntityID rideable_id) {
+  const entity::RideableComponent* rideable =
+      runtime.find_entity_rideable(rideable_id);
+  const std::optional<EntityNetID> rideable_net =
+      runtime.network_id_for_entity(rideable_id);
+  if (rideable == nullptr || !rideable_net.has_value()) {
+    return std::nullopt;
+  }
+
+  protocol::ClientboundEntityPassengersSet packet;
+  packet.rideable_id = rideable_net.value();
+  for (const entity::Seat& seat : rideable->seats) {
+    if (seat.occupant.value == 0U) {
+      continue;
+    }
+    const std::optional<EntityNetID> passenger_net =
+        runtime.network_id_for_entity(seat.occupant);
+    if (!passenger_net.has_value()) {
+      continue;
+    }
+    packet.passengers.push_back(
+        {passenger_net.value(), seat.id, seat.controls_vehicle});
+  }
+  return packet;
+}
+
+[[nodiscard]] std::optional<protocol::ClientboundRideStarted>
+make_ride_started_packet(
+    world::WorldRuntime& runtime,
+    EntityID passenger_id,
+    EntityID rideable_id,
+    std::string_view seat_id,
+    bool controls_vehicle) {
+  const std::optional<EntityNetID> passenger_net =
+      runtime.network_id_for_entity(passenger_id);
+  const std::optional<EntityNetID> rideable_net =
+      runtime.network_id_for_entity(rideable_id);
+  if (!passenger_net.has_value() || !rideable_net.has_value()) {
+    return std::nullopt;
+  }
+
+  protocol::ClientboundRideStarted packet;
+  packet.passenger_id = passenger_net.value();
+  packet.rideable_id = rideable_net.value();
+  packet.seat_id = std::string{seat_id};
+  packet.controls_vehicle = controls_vehicle;
+  return packet;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::send_player_move_correction(
@@ -234,30 +286,13 @@ void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
 void ServerRuntimeImpl::broadcast_entity_passengers(
     world::WorldRuntime& runtime,
     EntityID rideable_id) {
-  const entity::RideableComponent* rideable =
-      runtime.find_entity_rideable(rideable_id);
-  const std::optional<EntityNetID> rideable_net =
-      runtime.network_id_for_entity(rideable_id);
-  if (rideable == nullptr || !rideable_net.has_value()) {
+  const std::optional<protocol::ClientboundEntityPassengersSet> packet =
+      make_entity_passengers_packet(runtime, rideable_id);
+  if (!packet.has_value() || transport_ == nullptr) {
     return;
   }
-
-  protocol::ClientboundEntityPassengersSet packet;
-  packet.rideable_id = rideable_net.value();
-  for (const entity::Seat& seat : rideable->seats) {
-    if (seat.occupant.value == 0U) {
-      continue;
-    }
-    const std::optional<EntityNetID> passenger_net =
-        runtime.network_id_for_entity(seat.occupant);
-    if (!passenger_net.has_value()) {
-      continue;
-    }
-    packet.passengers.push_back(
-        {passenger_net.value(), seat.id, seat.controls_vehicle});
-  }
   const std::vector<u8> payload =
-      protocol::serialize_clientbound_entity_passengers_set(packet);
+      protocol::serialize_clientbound_entity_passengers_set(packet.value());
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
         session.world_id != runtime.id()) {
@@ -273,25 +308,76 @@ void ServerRuntimeImpl::broadcast_entity_passengers(
   });
 }
 
+void ServerRuntimeImpl::send_entity_passengers_to_session(
+    const ServerSession& session,
+    world::WorldRuntime& runtime,
+    EntityID rideable_id,
+    protocol::NetworkLane lane) {
+  const std::optional<protocol::ClientboundEntityPassengersSet> packet =
+      make_entity_passengers_packet(runtime, rideable_id);
+  if (!packet.has_value() || transport_ == nullptr || !session.authenticated ||
+      session.closing || session.world_id != runtime.id()) {
+    return;
+  }
+
+  const net::NetworkResult result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundEntityPassengersSet,
+      protocol::ReliabilityClass::ReliableOrdered,
+      lane,
+      protocol::serialize_clientbound_entity_passengers_set(packet.value()));
+  log_send_failure_if_dedicated(mode_, session.connection_id, result);
+}
+
+void ServerRuntimeImpl::send_ride_started_to_session(
+    const ServerSession& session,
+    world::WorldRuntime& runtime,
+    EntityID passenger_id,
+    EntityID rideable_id,
+    std::string_view seat_id,
+    bool controls_vehicle,
+    protocol::NetworkLane lane) {
+  const std::optional<protocol::ClientboundRideStarted> packet =
+      make_ride_started_packet(
+          runtime,
+          passenger_id,
+          rideable_id,
+          seat_id,
+          controls_vehicle);
+  if (!packet.has_value() || transport_ == nullptr || !session.authenticated ||
+      session.closing || session.world_id != runtime.id()) {
+    return;
+  }
+
+  const net::NetworkResult result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundRideStarted,
+      protocol::ReliabilityClass::ReliableOrdered,
+      lane,
+      protocol::serialize_clientbound_ride_started(packet.value()));
+  log_send_failure_if_dedicated(mode_, session.connection_id, result);
+}
+
 void ServerRuntimeImpl::broadcast_ride_started(
     world::WorldRuntime& runtime,
     EntityID passenger_id,
     EntityID rideable_id,
     std::string_view seat_id,
     bool controls_vehicle) {
-  const std::optional<EntityNetID> passenger_net =
-      runtime.network_id_for_entity(passenger_id);
-  const std::optional<EntityNetID> rideable_net =
-      runtime.network_id_for_entity(rideable_id);
-  if (!passenger_net.has_value() || !rideable_net.has_value()) {
+  const std::optional<protocol::ClientboundRideStarted> packet =
+      make_ride_started_packet(
+          runtime,
+          passenger_id,
+          rideable_id,
+          seat_id,
+          controls_vehicle);
+  if (!packet.has_value() || transport_ == nullptr) {
     return;
   }
-  protocol::ClientboundRideStarted packet;
-  packet.passenger_id = passenger_net.value();
-  packet.rideable_id = rideable_net.value();
-  packet.seat_id = std::string{seat_id};
-  packet.controls_vehicle = controls_vehicle;
-  const std::vector<u8> payload = protocol::serialize_clientbound_ride_started(packet);
+  const std::vector<u8> payload =
+      protocol::serialize_clientbound_ride_started(packet.value());
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
         session.world_id != runtime.id()) {
@@ -527,16 +613,30 @@ void ServerRuntimeImpl::send_entity_replication() {
     EntityReplicationState& state = entity_replication_[session_id];
     HashSet<EntityNetID> relevant_now;
     std::vector<protocol::EntitySnapshotEntry> snapshot_entries;
+    const std::optional<EntityID> session_player_entity =
+        runtime->entity_for_player(session->player_id);
+    const std::optional<EntityID> session_mounted_vehicle =
+        session_player_entity.has_value()
+            ? runtime->mounted_rideable(session_player_entity.value())
+            : std::nullopt;
 
     for (const entity::EntitySnapshotEntry& snapshot : snapshots) {
       const bool owns_entity =
           snapshot.owning_player.has_value() &&
           snapshot.owning_player.value() == session->player_id;
+      const std::optional<EntityID> snapshot_mounted_vehicle =
+          session_mounted_vehicle.has_value()
+              ? runtime->mounted_rideable(snapshot.entity_id)
+              : std::nullopt;
+      const bool mounted_group_entity =
+          session_mounted_vehicle.has_value() &&
+          (snapshot.entity_id == session_mounted_vehicle.value() ||
+           snapshot_mounted_vehicle == session_mounted_vehicle);
       const bool chunk_visible = chunk_streamer_.session_has_sent_chunk(
           session_id,
           session->world_id,
           snapshot.chunk);
-      if (!owns_entity && !chunk_visible) {
+      if (!owns_entity && !mounted_group_entity && !chunk_visible) {
         continue;
       }
 

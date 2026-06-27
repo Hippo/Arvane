@@ -35,6 +35,7 @@ struct VehicleMovementValidationContext {
   bool previous_velocity_sweep_hit_solid{};
   bool target_chunk_loaded{true};
   bool swept_path_chunks_loaded{true};
+  bool void_space_movement{};
   bool has_collision_resolved_state{};
   AcceptedVehicleMovementState collision_resolved_state{};
   bool has_collision_contact{};

@@ -6,6 +6,7 @@
 #include "arv/core/math.hpp"
 #include "arv/core/time.hpp"
 #include "arv/core/types.hpp"
+#include "arv/player/inventory.hpp"
 #include "arv/player/item.hpp"
 
 #include <functional>
@@ -30,6 +31,7 @@ inline constexpr std::string_view BrainComponentID = "arvane:brain";
 inline constexpr std::string_view AnimationComponentID = "arvane:animation";
 inline constexpr std::string_view RideableComponentID = "arvane:rideable";
 inline constexpr std::string_view VehiclePhysicsComponentID = "arvane:vehicle_physics";
+inline constexpr u16 MaxVehicleCargoSlots = 256U;
 
 struct EntityRegistryError {
   std::string message{};
@@ -301,6 +303,10 @@ struct VehicleFuelDefinition {
   f32 min_fuel_for_launch_seconds{};
 };
 
+struct VehicleCargoDefinition {
+  u16 slots{};
+};
+
 struct SubmersibleMovementDefinition {
   f32 max_forward_speed{};
   f32 max_reverse_speed{};
@@ -332,6 +338,7 @@ struct VehicleDefinition {
   std::optional<AircraftMovementDefinition> space_aircraft{};
   SubmersibleMovementDefinition submersible{};
   std::optional<VehicleFuelDefinition> fuel{};
+  std::optional<VehicleCargoDefinition> cargo{};
   VehicleAuthorityDefinition authority{};
   VehicleCrashDefinition crash{};
 };
@@ -425,6 +432,10 @@ struct VehiclePhysicsComponent {
   bool submerged{};
   f32 ground_contact_time{};
   f32 air_time{};
+};
+
+struct VehicleCargoComponent {
+  player::Inventory inventory{};
 };
 
 struct EntityHealth {
@@ -577,6 +588,9 @@ struct PersistentEntityRecord {
   f32 vehicle_fuel_seconds{};
   f32 vehicle_fuel_capacity_seconds{};
   f32 vehicle_fuel_burn_per_second{};
+  bool has_vehicle_cargo{};
+  u16 vehicle_cargo_slot_count{};
+  std::vector<std::optional<player::ItemStack>> vehicle_cargo_slots{};
 };
 
 struct DroppedItemEntitySnapshot {

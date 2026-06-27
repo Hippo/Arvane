@@ -294,6 +294,9 @@ public:
   [[nodiscard]] const entity::AttachedToComponent* find_attachment(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::VehiclePhysicsComponent* find_vehicle_physics(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::VehiclePhysicsComponent* find_vehicle_physics(EntityID entity_id) const noexcept;
+  [[nodiscard]] entity::VehicleCargoComponent* find_vehicle_cargo(EntityID entity_id) noexcept;
+  [[nodiscard]] const entity::VehicleCargoComponent* find_vehicle_cargo(EntityID entity_id) const noexcept;
+  bool set_vehicle_cargo(EntityID entity_id, entity::VehicleCargoComponent cargo) noexcept;
   [[nodiscard]] entity::EntityHealth* find_health(EntityID entity_id) noexcept;
   [[nodiscard]] const entity::EntityHealth* find_health(EntityID entity_id) const noexcept;
   [[nodiscard]] entity::KnockbackResistanceComponent* find_knockback_resistance(EntityID entity_id) noexcept;

@@ -149,6 +149,28 @@ TEST(MovementValidationTests, RejectsMovementIntoUnloadedChunkWhenConfigured) {
   EXPECT_EQ(result.reason, arv::protocol::PlayerMoveCorrectionReason::UnloadedChunk);
 }
 
+TEST(MovementValidationTests, AllowsVoidSpaceMovementWithoutLoadedChunks) {
+  arv::io::MovementValidationConfig config;
+  config.reject_unloaded_chunk_movement = true;
+  config.lag_grace_blocks = 0.0F;
+  const auto previous = accepted_at(1, {0.0F, 20.0F, 0.0F}, 1.0);
+  arv::server::MovementValidationContext context;
+  context.receive_time_seconds = 1.05;
+  context.target_chunk_loaded = false;
+  context.void_space_movement = true;
+
+  auto move = move_at(2, {2.0F, 21.0F, 0.0F});
+  move.flags = arv::protocol::PlayerMoveFlags::None;
+
+  const auto result = arv::server::validate_serverbound_player_move(
+      move,
+      previous,
+      context,
+      config);
+
+  EXPECT_TRUE(result.accepted);
+}
+
 TEST(MovementValidationTests, AllowsStationaryAcceptedPositionBeforeChunkLoads) {
   arv::io::MovementValidationConfig config;
   config.reject_unloaded_chunk_movement = true;

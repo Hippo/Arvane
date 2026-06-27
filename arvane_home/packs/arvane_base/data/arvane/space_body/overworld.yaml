@@ -16,7 +16,7 @@ entry:
   mode: fixed_spawn
   require_vehicle_tags:
     - arvane:space_capable
-  spawn_position: [0, 960, 0]
-  spawn_velocity: [0, -18, 0]
+  spawn_position: [0, 118, 0]
+  spawn_velocity: [0, -6, 0]
   spawn_rotation: [0, 0, 0]
   effect: arvane:planet_entry

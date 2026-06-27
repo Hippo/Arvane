@@ -71,6 +71,7 @@ using arv::testsupport::connected_player;
   buggy.authority.max_step_height = 0.6F;
   buggy.authority.requires_ground = false;
   buggy.authority.requires_water = false;
+  buggy.cargo = arv::entity::VehicleCargoDefinition{6};
 
   arv::entity::VehicleDefinition rocket;
   rocket.name = "arvane:command_rocket";
@@ -127,6 +128,7 @@ using arv::testsupport::connected_player;
       20.0F,
       1.0F,
       10.0F};
+  rocket.cargo = arv::entity::VehicleCargoDefinition{9};
   rocket.authority.max_speed = 120.0F;
   rocket.authority.max_acceleration = 80.0F;
   rocket.authority.max_deceleration = 80.0F;
@@ -1340,6 +1342,13 @@ TEST(CommandTests, WorldCommandTransitionMovesMountedVehicleAndPassenger) {
       source_world.find_entity_health(source_vehicle);
   ASSERT_NE(source_health, nullptr);
   source_health->current = 12.0F;
+  arv::entity::VehicleCargoComponent* source_cargo =
+      source_world.find_entity_vehicle_cargo(source_vehicle);
+  ASSERT_NE(source_cargo, nullptr);
+  ASSERT_EQ(source_cargo->inventory.slot_count(), 6U);
+  ASSERT_TRUE(source_cargo->inventory.set_slot(
+      2,
+      arv::player::ItemStack{stone_item, 13}));
   ASSERT_TRUE(source_world.mount_entity(
       source_vehicle,
       source_player_entity.value(),
@@ -1390,6 +1399,13 @@ TEST(CommandTests, WorldCommandTransitionMovesMountedVehicleAndPassenger) {
       target_world->find_entity_health(target_vehicle.value());
   ASSERT_NE(target_health, nullptr);
   EXPECT_FLOAT_EQ(target_health->current, 12.0F);
+  const arv::entity::VehicleCargoComponent* target_cargo =
+      target_world->find_entity_vehicle_cargo(target_vehicle.value());
+  ASSERT_NE(target_cargo, nullptr);
+  ASSERT_EQ(target_cargo->inventory.slot_count(), 6U);
+  ASSERT_TRUE(target_cargo->inventory.slot(2).has_value());
+  EXPECT_EQ(target_cargo->inventory.slot(2)->item, stone_item);
+  EXPECT_EQ(target_cargo->inventory.slot(2)->count, 13U);
 
   pump_client_until_ingame(harness.server, harness.client);
   ASSERT_EQ(harness.client.connection_state(), arv::net::ConnectionState::InGame);
@@ -1580,6 +1596,8 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
       harness.server.sessions().find(session_ids.front());
   ASSERT_NE(session, nullptr);
   const arv::PlayerID player_id = session->player_id;
+  const arv::player::ItemID stone_item =
+      harness.item_registry.find_item("arvane:stone").value();
   EXPECT_EQ(session->world_id, space_record->id);
 
   arv::world::WorldRuntime* space_world =
@@ -1607,6 +1625,12 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
       space_world->find_entity_health(rocket);
   ASSERT_NE(health, nullptr);
   health->current = 33.0F;
+  arv::entity::VehicleCargoComponent* cargo =
+      space_world->find_entity_vehicle_cargo(rocket);
+  ASSERT_NE(cargo, nullptr);
+  ASSERT_TRUE(cargo->inventory.set_slot(
+      3,
+      arv::player::ItemStack{stone_item, 5}));
 
   harness.server.tick();
 
@@ -1642,7 +1666,7 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
   const arv::entity::EntityTransform* transform =
       luna_world->find_entity_transform(target_rocket.value());
   ASSERT_NE(transform, nullptr);
-  EXPECT_EQ(transform->position, (arv::Vec3f{0.0F, 2300.0F, 0.0F}));
+  EXPECT_EQ(transform->position, (arv::Vec3f{0.0F, 124.0F, 0.0F}));
   const arv::entity::VehiclePhysicsComponent* target_physics =
       luna_world->find_entity_vehicle_physics(target_rocket.value());
   ASSERT_NE(target_physics, nullptr);
@@ -1654,12 +1678,24 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
       luna_world->find_entity_health(target_rocket.value());
   ASSERT_NE(target_health, nullptr);
   EXPECT_FLOAT_EQ(target_health->current, 33.0F);
+  const arv::entity::VehicleCargoComponent* target_cargo =
+      luna_world->find_entity_vehicle_cargo(target_rocket.value());
+  ASSERT_NE(target_cargo, nullptr);
+  ASSERT_TRUE(target_cargo->inventory.slot(3).has_value());
+  EXPECT_EQ(target_cargo->inventory.slot(3)->item, stone_item);
+  EXPECT_EQ(target_cargo->inventory.slot(3)->count, 5U);
 
   pump_client_until_ingame(harness.server, harness.client);
   session = harness.server.sessions().find(session_ids.front());
   ASSERT_NE(session, nullptr);
   EXPECT_EQ(session->world_id, luna_record->id);
   EXPECT_EQ(harness.client.camera().world_id(), luna_record->id);
+  const std::optional<arv::EntityNetID> target_rocket_net =
+      luna_world->network_id_for_entity(target_rocket.value());
+  ASSERT_TRUE(target_rocket_net.has_value());
+  EXPECT_EQ(harness.client.mounted_vehicle_id(), target_rocket_net);
+  EXPECT_EQ(std::string{harness.client.mounted_seat_id()}, "pilot");
+  EXPECT_TRUE(harness.client.mounted_controls_vehicle());
 }
 
 TEST(CommandTests, PlanetEntryRequiresEnabledBody) {

@@ -139,7 +139,8 @@ VehicleMovementValidationResult validate_serverbound_vehicle_move(
             ? context.collision_resolved_state
             : stopped_state(previous));
   }
-  if (authority.max_unloaded_chunk_entry_distance >= 0.0F &&
+  if (!context.void_space_movement &&
+      authority.max_unloaded_chunk_entry_distance >= 0.0F &&
       (!context.target_chunk_loaded || !context.swept_path_chunks_loaded)) {
     return reject(previous, protocol::VehicleCorrectionReason::AircraftEnteredUnloadedChunk);
   }

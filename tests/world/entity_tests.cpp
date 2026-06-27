@@ -209,6 +209,7 @@ arv::entity::VehicleDefinitionRegistry make_test_rocket_vehicle_registry() {
       30.0F,
       1.0F,
       10.0F};
+  rocket.cargo = arv::entity::VehicleCargoDefinition{9};
   rocket.authority.max_speed = 100.0F;
   rocket.authority.max_acceleration = 40.0F;
   rocket.authority.max_deceleration = 50.0F;
@@ -1634,6 +1635,13 @@ TEST(WorldEntityTests, PersistentVehicleFuelRecordsRoundTripThroughWorldRuntime)
   physics->fuel_seconds = 17.5F;
   physics->fuel_capacity_seconds = 90.0F;
   physics->fuel_burn_per_second = 1.25F;
+  arv::entity::VehicleCargoComponent* cargo =
+      world.find_entity_vehicle_cargo(rocket);
+  ASSERT_NE(cargo, nullptr);
+  ASSERT_EQ(cargo->inventory.slot_count(), 9U);
+  ASSERT_TRUE(cargo->inventory.set_slot(
+      1,
+      arv::player::ItemStack{arv::player::ItemID{4}, 6}));
 
   const std::vector<arv::entity::PersistentEntityRecord> records =
       world.persistent_entity_records();
@@ -1643,6 +1651,12 @@ TEST(WorldEntityTests, PersistentVehicleFuelRecordsRoundTripThroughWorldRuntime)
   EXPECT_FLOAT_EQ(records.front().vehicle_fuel_seconds, 17.5F);
   EXPECT_FLOAT_EQ(records.front().vehicle_fuel_capacity_seconds, 90.0F);
   EXPECT_FLOAT_EQ(records.front().vehicle_fuel_burn_per_second, 1.25F);
+  ASSERT_TRUE(records.front().has_vehicle_cargo);
+  EXPECT_EQ(records.front().vehicle_cargo_slot_count, 9U);
+  ASSERT_GT(records.front().vehicle_cargo_slots.size(), 1U);
+  ASSERT_TRUE(records.front().vehicle_cargo_slots[1].has_value());
+  EXPECT_EQ(records.front().vehicle_cargo_slots[1]->item, arv::player::ItemID{4});
+  EXPECT_EQ(records.front().vehicle_cargo_slots[1]->count, 6U);
 
   arv::world::WorldRuntime loaded{arv::WorldID{3}};
   loaded.restore_persistent_entities(records, &entity_registry, &vehicles);
@@ -1654,6 +1668,12 @@ TEST(WorldEntityTests, PersistentVehicleFuelRecordsRoundTripThroughWorldRuntime)
   EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_seconds, 17.5F);
   EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_capacity_seconds, 90.0F);
   EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_burn_per_second, 1.25F);
+  ASSERT_TRUE(loaded_records.front().has_vehicle_cargo);
+  EXPECT_EQ(loaded_records.front().vehicle_cargo_slot_count, 9U);
+  ASSERT_GT(loaded_records.front().vehicle_cargo_slots.size(), 1U);
+  ASSERT_TRUE(loaded_records.front().vehicle_cargo_slots[1].has_value());
+  EXPECT_EQ(loaded_records.front().vehicle_cargo_slots[1]->item, arv::player::ItemID{4});
+  EXPECT_EQ(loaded_records.front().vehicle_cargo_slots[1]->count, 6U);
 }
 
 TEST(WorldEntityTests, DroppedItemsArePersistentEntitiesWithStackPayloads) {

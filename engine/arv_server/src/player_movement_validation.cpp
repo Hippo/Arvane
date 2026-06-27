@@ -39,6 +39,9 @@ namespace {
     const protocol::ServerboundPlayerMove& packet,
     const MovementValidationContext& context,
     const io::MovementValidationConfig& config) noexcept {
+  if (context.void_space_movement) {
+    return config.max_fly_speed_blocks_per_second;
+  }
   if (context.can_fly &&
       protocol::has_move_flag(packet.flags, protocol::PlayerMoveFlags::Flying)) {
     return config.max_fly_speed_blocks_per_second;
@@ -112,13 +115,15 @@ MovementValidationResult validate_serverbound_player_move(
     return reject(previous, protocol::PlayerMoveCorrectionReason::StalePacket);
   }
   if (protocol::has_move_flag(packet.flags, protocol::PlayerMoveFlags::Flying) &&
-      !context.can_fly) {
+      !context.can_fly &&
+      !context.void_space_movement) {
     return reject(previous, protocol::PlayerMoveCorrectionReason::PermissionDenied);
   }
   const bool near_previous_position =
       previous.has_accepted_move &&
       distance(packet.position, previous.position) <= config.base_position_epsilon_blocks;
-  if (config.reject_unloaded_chunk_movement && !context.target_chunk_loaded &&
+  if (config.reject_unloaded_chunk_movement && !context.void_space_movement &&
+      !context.target_chunk_loaded &&
       !near_previous_position) {
     return reject(previous, protocol::PlayerMoveCorrectionReason::UnloadedChunk);
   }
@@ -133,8 +138,14 @@ MovementValidationResult validate_serverbound_player_move(
     const f32 allowed_horizontal =
         selected_horizontal_speed(packet, context, config) * static_cast<f32>(elapsed) +
         config.base_position_epsilon_blocks + config.lag_grace_blocks;
+    const f32 vertical_speed_limit =
+        context.void_space_movement
+            ? std::max(
+                  config.max_vertical_speed_blocks_per_second,
+                  config.max_fly_speed_blocks_per_second)
+            : config.max_vertical_speed_blocks_per_second;
     const f32 allowed_vertical =
-        config.max_vertical_speed_blocks_per_second * static_cast<f32>(elapsed) +
+        vertical_speed_limit * static_cast<f32>(elapsed) +
         config.base_position_epsilon_blocks + config.lag_grace_blocks;
     f32 server_horizontal_allowance = 0.0F;
     f32 server_vertical_allowance = 0.0F;

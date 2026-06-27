@@ -56,7 +56,8 @@ public:
   void update_local_movement(
       const player::PlayerCommand& command,
       const physics::ICollisionQuery* collision_query,
-      Seconds tick_seconds);
+      Seconds tick_seconds,
+      bool void_space_world = false);
   void enter_world(
       WorldID world_id,
       PlayerID player_id,
@@ -171,7 +172,8 @@ private:
   void update_render_smoothing() noexcept;
   void update_camera_transform() noexcept;
   [[nodiscard]] bool consume_fly_toggle_request(TickIndex tick_index) noexcept;
-  [[nodiscard]] physics::PlayerMovementAuthority movement_authority() const noexcept;
+  [[nodiscard]] physics::PlayerMovementAuthority movement_authority(
+      bool void_space_world = false) const noexcept;
   [[nodiscard]] protocol::PlayerMoveFlags movement_flags() const noexcept;
 
   CameraShell camera_{};

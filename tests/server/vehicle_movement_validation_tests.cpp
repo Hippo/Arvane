@@ -468,6 +468,24 @@ TEST(VehicleMovementValidationTests, RejectsAircraftEnteringUnloadedChunk) {
       arv::protocol::VehicleCorrectionReason::AircraftEnteredUnloadedChunk);
 }
 
+TEST(VehicleMovementValidationTests, AllowsVoidSpaceVehicleMovementWithoutLoadedChunks) {
+  auto aircraft = authority();
+  aircraft.max_unloaded_chunk_entry_distance = 0.0F;
+
+  auto context = controller_context();
+  context.target_chunk_loaded = false;
+  context.swept_path_chunks_loaded = false;
+  context.void_space_movement = true;
+
+  const auto result = arv::server::validate_serverbound_vehicle_move(
+      vehicle_move(1, {32.0F, 20.0F, 0.0F}),
+      {},
+      context,
+      aircraft);
+
+  EXPECT_TRUE(result.accepted);
+}
+
 TEST(VehicleMovementValidationTests, RejectsSubmersibleUsingWaterEnvelopeInAir) {
   auto submarine = authority();
   submarine.min_water_occupancy = 0.35F;

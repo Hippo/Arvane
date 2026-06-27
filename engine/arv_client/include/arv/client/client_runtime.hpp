@@ -29,6 +29,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace arv::text {
@@ -225,6 +226,9 @@ public:
   net::NetworkResult send_vehicle_action(protocol::ServerboundVehicleAction action);
   net::NetworkResult send_vehicle_move(const protocol::ServerboundVehicleMove& move);
   [[nodiscard]] std::optional<VehicleDebugTelemetry> vehicle_debug_telemetry() const;
+  [[nodiscard]] std::optional<EntityNetID> mounted_vehicle_id() const noexcept;
+  [[nodiscard]] std::string_view mounted_seat_id() const noexcept;
+  [[nodiscard]] bool mounted_controls_vehicle() const noexcept;
   [[nodiscard]] std::vector<ClientAttackFeedback> drain_attack_feedback();
   [[nodiscard]] usize replicated_entity_count() const noexcept;
   [[nodiscard]] const ReplicatedEntityMirror* find_replicated_entity(

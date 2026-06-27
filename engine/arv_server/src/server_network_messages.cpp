@@ -38,6 +38,36 @@ inline constexpr std::string_view ChatColorPermission = "arvane.chat.color";
 inline constexpr std::string_view ChatClickPermission = "arvane.chat.click";
 inline constexpr std::string_view ChatHoverPermission = "arvane.chat.hover";
 
+[[nodiscard]] bool runtime_is_void_space_world(
+    const WorldRegistry& worlds,
+    WorldID world_id) noexcept {
+  const WorldRecord* record = worlds.find(world_id);
+  return record != nullptr && record->world_type == "space";
+}
+
+void enable_void_space_player_movement(MovementValidationContext& context) noexcept {
+  context.void_space_movement = true;
+  context.target_chunk_loaded = true;
+  context.final_aabb_overlaps_solid = false;
+  context.can_fly = true;
+  context.has_collision = false;
+}
+
+void enable_void_space_vehicle_movement(VehicleMovementValidationContext& context) noexcept {
+  context.void_space_movement = true;
+  context.final_aabb_overlaps_solid = false;
+  context.proposed_sweep_hit_solid = false;
+  context.previous_velocity_sweep_hit_solid = false;
+  context.target_chunk_loaded = true;
+  context.swept_path_chunks_loaded = true;
+  context.has_collision_resolved_state = false;
+  context.has_collision_contact = false;
+  context.collision_contact = {};
+  context.has_ground_support = false;
+  context.water_support_samples = 0U;
+  context.water_occupancy = 0.0F;
+}
+
 void configure_skin_transfer_state(
     SkinTransferSessionState& state,
     const io::SkinConfig& skins) {
@@ -1937,7 +1967,7 @@ void ServerRuntimeImpl::handle_player_move(
     pending = command;
   }
 
-  const MovementValidationContext context = make_movement_validation_context(
+  MovementValidationContext context = make_movement_validation_context(
       *runtime,
       *block_registry_,
       *player_state,
@@ -1945,6 +1975,9 @@ void ServerRuntimeImpl::handle_player_move(
       tick_index_,
       base_tps_,
       player_tuning_);
+  if (runtime_is_void_space_world(worlds_, runtime->id())) {
+    enable_void_space_player_movement(context);
+  }
   const MovementValidationResult validation =
       validate_serverbound_player_move(move, previous, context, movement_);
   if (!validation.accepted) {
@@ -2585,7 +2618,7 @@ void ServerRuntimeImpl::handle_vehicle_move(
     return;
   }
 
-  const VehicleMovementValidationContext context =
+  VehicleMovementValidationContext context =
       make_vehicle_validation_context(
           *runtime,
           *block_registry_,
@@ -2595,6 +2628,9 @@ void ServerRuntimeImpl::handle_vehicle_move(
           previous,
           tick_index_,
           base_tps_);
+  if (runtime_is_void_space_world(worlds_, runtime->id())) {
+    enable_void_space_vehicle_movement(context);
+  }
   const VehicleMovementValidationResult validation =
       validate_serverbound_vehicle_move(
           move,

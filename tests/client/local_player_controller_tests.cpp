@@ -246,6 +246,28 @@ TEST(LocalPlayerControllerTests, DoubleTapJumpEnablesLocalFlyingPrediction) {
       arv::protocol::PlayerMoveFlags::Flying));
 }
 
+TEST(LocalPlayerControllerTests, VoidSpaceWorldAllowsFreeFlightWithoutFlyPermission) {
+  arv::client::LocalPlayerController controller;
+  controller.enter_world(
+      arv::WorldID{2},
+      arv::PlayerID{2},
+      arv::EntityNetID{3},
+      {0.0F, 10.0F, 0.0F});
+
+  controller.submit_input(arv::client::InputFrame{
+      .move_forward = true,
+      .jump_held = true});
+  const arv::player::PlayerCommand command = controller.consume_command(20);
+  controller.update_local_movement(
+      command,
+      nullptr,
+      arv::tick_duration_seconds(arv::DefaultBaseTps),
+      true);
+
+  EXPECT_GT(arv::distance(controller.player_position(), {0.0F, 10.0F, 0.0F}), 0.01F);
+  EXPECT_GT(controller.player_position().y, 10.0F);
+}
+
 TEST(LocalPlayerControllerTests, SprintingAppliesCameraFovBoost) {
   arv::client::LocalPlayerController controller;
 

@@ -240,7 +240,6 @@
       "tags": [
         "arvane:vehicle",
         "arvane:rocket",
-        "arvane:rocket/basic",
         "arvane:space_capable"
       ],
       "collision": {
@@ -304,6 +303,9 @@
         "ground_takeoff_speed": 0.0,
         "ground_drag": 0.997,
         "vertical_thrust": true
+      },
+      "cargo": {
+        "slots": 9
       },
       "authority": {
         "max_speed": 105.0,

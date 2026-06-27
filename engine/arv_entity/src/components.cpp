@@ -380,6 +380,31 @@ read_aircraft_movement_definition(
   return Expected<VehicleFuelDefinition, EntityRegistryError>::success(std::move(fuel));
 }
 
+[[nodiscard]] Expected<VehicleCargoDefinition, EntityRegistryError> read_vehicle_cargo_definition(
+    const io::DataValue& root,
+    const std::string& path) {
+  if (root.kind() != io::DataKind::Object) {
+    return Expected<VehicleCargoDefinition, EntityRegistryError>::failure(
+        {path + " must be an object"});
+  }
+  auto slots = read_optional_u32(root, "slots", path, 0U);
+  if (!slots) {
+    return Expected<VehicleCargoDefinition, EntityRegistryError>::failure(slots.error());
+  }
+  if (slots.value() == 0U && root.get("slots") == nullptr && root.get("slot_count") != nullptr) {
+    slots = read_optional_u32(root, "slot_count", path, 0U);
+  }
+  if (!slots) {
+    return Expected<VehicleCargoDefinition, EntityRegistryError>::failure(slots.error());
+  }
+  if (slots.value() == 0U || slots.value() > MaxVehicleCargoSlots) {
+    return Expected<VehicleCargoDefinition, EntityRegistryError>::failure(
+        {path + ".slots must be between 1 and " + std::to_string(MaxVehicleCargoSlots)});
+  }
+  return Expected<VehicleCargoDefinition, EntityRegistryError>::success(
+      VehicleCargoDefinition{static_cast<u16>(slots.value())});
+}
+
 [[nodiscard]] Expected<Quatf, EntityRegistryError> read_quat(
     const io::DataValue& node,
     std::string_view field) {
@@ -844,6 +869,11 @@ VehicleDefinitionRegistry::Result VehicleDefinitionRegistry::build(
       if (fuel.initial_seconds > fuel.capacity_seconds ||
           fuel.min_fuel_for_launch_seconds > fuel.capacity_seconds) {
         return Result::failure({"vehicle " + definition.name + " fuel values exceed capacity"});
+      }
+    }
+    if (definition.cargo.has_value()) {
+      if (definition.cargo->slots == 0U || definition.cargo->slots > MaxVehicleCargoSlots) {
+        return Result::failure({"vehicle " + definition.name + " has invalid cargo slots"});
       }
     }
 
@@ -1687,6 +1717,14 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
         return Expected<VehicleDefinition, EntityRegistryError>::failure(parsed_fuel.error());
       }
       definition.fuel = std::move(parsed_fuel.value());
+    }
+
+    if (const io::DataValue* cargo = vehicle_json.get("cargo"); cargo != nullptr) {
+      auto parsed_cargo = read_vehicle_cargo_definition(*cargo, path + ".cargo");
+      if (!parsed_cargo) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(parsed_cargo.error());
+      }
+      definition.cargo = parsed_cargo.value();
     }
 
     const io::DataValue* authority = vehicle_json.get("authority");

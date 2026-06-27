@@ -152,7 +152,12 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
        "arvane:rocket_fuel/basic",
        22.0F,
        60.0F,
-       1.5F},
+       1.5F,
+       true,
+       3,
+       {{},
+        arv::player::ItemStack{stone_item, 3, stack_data("cargo")},
+        {}}},
       {"entity-test-uuid-b",
        "arvane:test_entity",
        arv::WorldID{1},
@@ -294,6 +299,17 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_seconds, 22.0F);
   EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_capacity_seconds, 60.0F);
   EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_burn_per_second, 1.5F);
+  ASSERT_TRUE(entity_a->has_vehicle_cargo);
+  EXPECT_EQ(entity_a->vehicle_cargo_slot_count, 3U);
+  ASSERT_EQ(entity_a->vehicle_cargo_slots.size(), 3U);
+  ASSERT_TRUE(entity_a->vehicle_cargo_slots[1].has_value());
+  EXPECT_EQ(entity_a->vehicle_cargo_slots[1]->item, stone_item);
+  EXPECT_EQ(entity_a->vehicle_cargo_slots[1]->count, 3U);
+  ASSERT_TRUE(entity_a->vehicle_cargo_slots[1]->data.has_value());
+  const arv::io::DataValue* cargo_stack_data =
+      arv::io::find_path(*entity_a->vehicle_cargo_slots[1]->data, "test.value");
+  ASSERT_NE(cargo_stack_data, nullptr);
+  EXPECT_EQ(cargo_stack_data->as_string_or({}), "cargo");
   const auto entity_b = std::find_if(
       loaded.value().entities.begin(),
       loaded.value().entities.end(),

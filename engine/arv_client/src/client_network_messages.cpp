@@ -91,6 +91,7 @@ void apply_world_join_result(
   runtime.world_environment_sky = result.environment_sky;
   runtime.space_environment =
       result.space_environment || result.environment_sky == "space";
+  runtime.void_space_world = result.space_environment;
   runtime.space_bodies = result.space_bodies;
   if (runtime.world_transition_status.active) {
     runtime.world_transition_status.phase = ClientWorldTransitionPhase::EnteringWorld;
@@ -125,6 +126,7 @@ void apply_world_leave(
   runtime.world_time_update.reset();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
+  runtime.void_space_world = false;
   runtime.space_bodies.clear();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
@@ -141,6 +143,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.world_time_update.reset();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
+  runtime.void_space_world = false;
   runtime.space_bodies.clear();
   runtime.world_transition_status = {};
   runtime.world_transition_fade_remaining_seconds = 0.0;

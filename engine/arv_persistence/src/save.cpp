@@ -376,6 +376,26 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
     fuel.set("burn_per_second", static_cast<f64>(entity.vehicle_fuel_burn_per_second));
     components.set("vehicle_fuel", std::move(fuel));
   }
+  if (entity.has_vehicle_cargo) {
+    io::DataValue cargo = io::DataValue::object();
+    cargo.set("slot_count", static_cast<u64>(entity.vehicle_cargo_slot_count));
+    io::DataValue slots = io::DataValue::array();
+    const usize slot_count = std::min<usize>(
+        entity.vehicle_cargo_slot_count,
+        entity.vehicle_cargo_slots.size());
+    for (usize index = 0; index < slot_count; ++index) {
+      const std::optional<player::ItemStack>& stack = entity.vehicle_cargo_slots[index];
+      if (!stack.has_value()) {
+        continue;
+      }
+      io::DataValue slot = io::DataValue::object();
+      slot.set("slot", static_cast<u64>(index));
+      slot.set("stack", item_stack_to_value(stack.value(), item_registry));
+      slots.push(std::move(slot));
+    }
+    cargo.set("slots", std::move(slots));
+    components.set("vehicle_cargo", std::move(cargo));
+  }
 
   io::DataValue node = io::DataValue::object();
   node.set("uuid", entity.uuid);
@@ -443,6 +463,36 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
             static_cast<f32>(capacity->as_f64_or(0.0));
         record.vehicle_fuel_burn_per_second =
             static_cast<f32>(f64_value_or(*fuel, "burn_per_second", 0.0));
+      }
+    }
+    if (const io::DataValue* cargo = member(*components, "vehicle_cargo");
+        cargo != nullptr && cargo->kind() == io::DataKind::Object) {
+      const u64 slot_count_value = u64_value_or(*cargo, "slot_count", 0U);
+      if (slot_count_value > 0U) {
+        record.has_vehicle_cargo = true;
+        record.vehicle_cargo_slot_count = static_cast<u16>(
+            std::min<u64>(slot_count_value, entity::MaxVehicleCargoSlots));
+        record.vehicle_cargo_slots.resize(record.vehicle_cargo_slot_count);
+        const io::DataValue* slots = member(*cargo, "slots");
+        const io::DataValue::Array* slot_array =
+            slots == nullptr ? nullptr : slots->array_if();
+        if (slot_array != nullptr) {
+          for (const io::DataValue& slot_entry : *slot_array) {
+            if (slot_entry.kind() != io::DataKind::Object) {
+              continue;
+            }
+            const usize slot_index =
+                static_cast<usize>(u64_value_or(slot_entry, "slot", entity::MaxVehicleCargoSlots));
+            if (slot_index >= record.vehicle_cargo_slots.size()) {
+              continue;
+            }
+            if (const io::DataValue* stack = member(slot_entry, "stack");
+                stack != nullptr && stack->kind() == io::DataKind::Object) {
+              record.vehicle_cargo_slots[slot_index] =
+                  item_stack_from_value(*stack, item_registry);
+            }
+          }
+        }
       }
     }
   }

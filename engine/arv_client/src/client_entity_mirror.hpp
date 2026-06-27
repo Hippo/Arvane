@@ -43,7 +43,11 @@ public:
   void clear() noexcept;
 
 private:
+  void apply_pending_relationships();
+
   HashMap<EntityNetID, ReplicatedEntityMirror> entities_{};
+  std::vector<protocol::ClientboundRideStarted> pending_ride_starts_{};
+  std::vector<protocol::ClientboundEntityPassengersSet> pending_passenger_sets_{};
 };
 
 } // namespace arv::client

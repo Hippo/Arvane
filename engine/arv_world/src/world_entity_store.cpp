@@ -398,6 +398,27 @@ const entity::VehiclePhysicsComponent* WorldEntityStore::find_vehicle_physics(En
   return find_component<entity::VehiclePhysicsComponent>(registry_, handle(entity_id));
 }
 
+entity::VehicleCargoComponent* WorldEntityStore::find_vehicle_cargo(EntityID entity_id) noexcept {
+  return find_component<entity::VehicleCargoComponent>(registry_, handle(entity_id));
+}
+
+const entity::VehicleCargoComponent* WorldEntityStore::find_vehicle_cargo(EntityID entity_id) const noexcept {
+  return find_component<entity::VehicleCargoComponent>(registry_, handle(entity_id));
+}
+
+bool WorldEntityStore::set_vehicle_cargo(
+    EntityID entity_id,
+    entity::VehicleCargoComponent cargo) noexcept {
+  const entt::entity entity_handle = handle(entity_id);
+  if (entity_handle == entt::null || !registry_.valid(entity_handle)) {
+    return false;
+  }
+  registry_.emplace_or_replace<entity::VehicleCargoComponent>(
+      entity_handle,
+      std::move(cargo));
+  return true;
+}
+
 entity::EntityHealth* WorldEntityStore::find_health(EntityID entity_id) noexcept {
   return find_component<entity::EntityHealth>(registry_, handle(entity_id));
 }
@@ -936,6 +957,17 @@ std::vector<entity::PersistentEntityRecord> WorldEntityStore::persistent_records
       record.vehicle_fuel_capacity_seconds = vehicle->fuel_capacity_seconds;
       record.vehicle_fuel_burn_per_second = vehicle->fuel_burn_per_second;
     }
+    if (const auto* cargo = registry_.try_get<entity::VehicleCargoComponent>(entity_handle);
+        cargo != nullptr) {
+      record.has_vehicle_cargo = true;
+      record.vehicle_cargo_slot_count =
+          static_cast<u16>(std::min<usize>(
+              cargo->inventory.slot_count(),
+              entity::MaxVehicleCargoSlots));
+      record.vehicle_cargo_slots.assign(
+          cargo->inventory.slots().begin(),
+          cargo->inventory.slots().begin() + record.vehicle_cargo_slot_count);
+    }
     records.push_back(std::move(record));
   }
   return records;
@@ -1009,6 +1041,23 @@ void WorldEntityStore::restore_persistent_entities(
             record.vehicle_fuel_burn_per_second > 0.0F) {
           vehicle->fuel_burn_per_second = record.vehicle_fuel_burn_per_second;
         }
+      }
+    }
+    if (record.has_vehicle_cargo &&
+        record.vehicle_cargo_slot_count <= entity::MaxVehicleCargoSlots) {
+      const entt::entity entity_handle = handle(entity_id);
+      if (entity_handle != entt::null && registry_.valid(entity_handle)) {
+        entity::VehicleCargoComponent cargo{
+            player::Inventory{record.vehicle_cargo_slot_count}};
+        const usize slot_count = std::min<usize>(
+            record.vehicle_cargo_slots.size(),
+            cargo.inventory.slot_count());
+        for (usize slot = 0; slot < slot_count; ++slot) {
+          (void)cargo.inventory.set_slot(slot, record.vehicle_cargo_slots[slot]);
+        }
+        registry_.emplace_or_replace<entity::VehicleCargoComponent>(
+            entity_handle,
+            std::move(cargo));
       }
     }
   }
@@ -1161,6 +1210,20 @@ entity::VehiclePhysicsComponent* WorldRuntime::find_entity_vehicle_physics(Entit
 
 const entity::VehiclePhysicsComponent* WorldRuntime::find_entity_vehicle_physics(EntityID entity_id) const noexcept {
   return impl_->entities.find_vehicle_physics(entity_id);
+}
+
+entity::VehicleCargoComponent* WorldRuntime::find_entity_vehicle_cargo(EntityID entity_id) noexcept {
+  return impl_->entities.find_vehicle_cargo(entity_id);
+}
+
+const entity::VehicleCargoComponent* WorldRuntime::find_entity_vehicle_cargo(EntityID entity_id) const noexcept {
+  return impl_->entities.find_vehicle_cargo(entity_id);
+}
+
+bool WorldRuntime::set_entity_vehicle_cargo(
+    EntityID entity_id,
+    entity::VehicleCargoComponent cargo) noexcept {
+  return impl_->entities.set_vehicle_cargo(entity_id, std::move(cargo));
 }
 
 entity::EntityHealth* WorldRuntime::find_entity_health(EntityID entity_id) noexcept {

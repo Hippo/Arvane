@@ -26,6 +26,7 @@ struct MovementValidationContext {
   bool final_aabb_overlaps_solid{};
   bool can_fly{};
   bool has_collision{true};
+  bool void_space_movement{};
   Vec3f server_velocity{};
   u32 knockback_control_suppression_ticks{};
   f32 min_world_y{-4096.0F};

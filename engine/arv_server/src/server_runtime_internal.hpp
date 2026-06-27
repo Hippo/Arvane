@@ -669,7 +669,20 @@ struct ServerRuntimeImpl {
       Vec3f position,
       VehicleDamageStage stage,
       u32 seed);
+  void send_entity_passengers_to_session(
+      const ServerSession& session,
+      world::WorldRuntime& runtime,
+      EntityID rideable_id,
+      protocol::NetworkLane lane);
   void broadcast_entity_passengers(world::WorldRuntime& runtime, EntityID rideable_id);
+  void send_ride_started_to_session(
+      const ServerSession& session,
+      world::WorldRuntime& runtime,
+      EntityID passenger_id,
+      EntityID rideable_id,
+      std::string_view seat_id,
+      bool controls_vehicle,
+      protocol::NetworkLane lane);
   void broadcast_ride_started(
       world::WorldRuntime& runtime,
       EntityID passenger_id,
