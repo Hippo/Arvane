@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -304,8 +305,11 @@ DesktopLoadedAssetsResult load_desktop_assets(
       return asset_failure("worldgen", worldgen_registry.error().describe());
     }
 
+    auto registry_ptr =
+        std::make_shared<world::worldgen::WorldGenRegistry>(
+            std::move(worldgen_registry.value()));
     auto resolved_worldgen = world::worldgen::resolve_dimension(
-        worldgen_registry.value(),
+        *registry_ptr,
         base::ids::OverworldWorldgenDataID,
         loaded.block_registry);
     if (!resolved_worldgen) {
@@ -313,6 +317,7 @@ DesktopLoadedAssetsResult load_desktop_assets(
     }
     loaded.default_generation_config =
         world::config_from_resolved_dimension(std::move(resolved_worldgen.value()));
+    loaded.worldgen_registry = std::move(registry_ptr);
   }
 
   auto space_definitions = world::load_space_definition_registry_from_packs(packs);

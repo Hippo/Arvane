@@ -22,7 +22,9 @@
 #include "arv/world/entity_goal_registry.hpp"
 #include "arv/world/space_definition.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/worldgen/registry.hpp"
 
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -50,6 +52,7 @@ struct DesktopLoadedAssets {
   asset::FontSystem font_system{};
   ui::UiFontStacks ui_font_stacks{};
   world::WorldGenerationConfig default_generation_config{};
+  std::shared_ptr<const world::worldgen::WorldGenRegistry> worldgen_registry{};
   world::SpaceDefinitionRegistry space_definitions{};
 };
 

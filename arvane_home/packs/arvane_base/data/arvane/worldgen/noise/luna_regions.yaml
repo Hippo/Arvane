@@ -1,0 +1,30 @@
+id: arvane:worldgen/noise/luna_regions
+version: 1
+
+fields:
+  basin:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_basin"
+    frequency: 0.0022
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  crater_density:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_crater_density"
+    frequency: 0.0085
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.52
+
+  highland:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_highland"
+    frequency: 0.0036
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5

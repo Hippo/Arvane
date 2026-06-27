@@ -54,7 +54,8 @@ arv::voxel::BlockRegistry make_worldgen_registry() {
 }
 
 arv::world::WorldGenerationConfig make_pack_worldgen_config(
-    const arv::voxel::BlockRegistry& registry) {
+    const arv::voxel::BlockRegistry& registry,
+    const char* dimension_id = "arvane:worldgen/dimension/overworld") {
   auto packs = arv::asset::PackManager::load_from_packs_root("arvane_home/packs");
   EXPECT_TRUE(packs) << packs.error().describe();
   auto worldgen_registry =
@@ -62,7 +63,7 @@ arv::world::WorldGenerationConfig make_pack_worldgen_config(
   EXPECT_TRUE(worldgen_registry) << worldgen_registry.error().describe();
   auto resolved = arv::world::worldgen::resolve_dimension(
       worldgen_registry.value(),
-      "arvane:worldgen/dimension/overworld",
+      dimension_id,
       registry);
   EXPECT_TRUE(resolved) << resolved.error().describe();
   return arv::world::config_from_resolved_dimension(std::move(resolved.value()));
@@ -724,6 +725,89 @@ TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
                            config.resolved_dimension->placed_features[feature_index].feature_index]
                        .id == "arvane:worldgen/configured_feature/small_ruin";
       }));
+}
+
+TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesLuna) {
+  const arv::voxel::BlockRegistry registry = make_worldgen_registry();
+  const arv::world::WorldGenerationConfig config =
+      make_pack_worldgen_config(registry, "arvane:worldgen/dimension/luna");
+
+  ASSERT_NE(config.resolved_dimension, nullptr);
+  EXPECT_EQ(config.id, "arvane:worldgen/dimension/luna");
+  EXPECT_EQ(config.min_y, -64);
+  EXPECT_EQ(config.max_y, 128);
+  EXPECT_EQ(config.sea_level, -64);
+  EXPECT_EQ(config.resolved_dimension->biomes.size(), 3U);
+  EXPECT_TRUE(config.resolved_dimension->structure_sets.empty());
+  EXPECT_FALSE(config.resolved_dimension->carvers.empty());
+  auto dimension_stage_has_feature = [&](arv::world::worldgen::GenerationStage stage,
+                                         std::string_view id) {
+    const std::vector<arv::usize>& stage_features =
+        config.resolved_dimension
+            ->dimension_features_by_stage[static_cast<arv::usize>(stage)];
+    return std::any_of(
+        stage_features.begin(),
+        stage_features.end(),
+        [&](arv::usize feature_index) {
+          return feature_index < config.resolved_dimension->placed_features.size() &&
+                 config.resolved_dimension->placed_features[feature_index].raw.id == id;
+        });
+  };
+  EXPECT_TRUE(dimension_stage_has_feature(
+      arv::world::worldgen::GenerationStage::SurfaceDecoration,
+      "arvane:worldgen/placed_feature/lunar_dust_patch"));
+  EXPECT_TRUE(dimension_stage_has_feature(
+      arv::world::worldgen::GenerationStage::SurfaceDecoration,
+      "arvane:worldgen/placed_feature/lunar_stone_boulder_sparse"));
+
+  const arv::voxel::BlockVariantID stone = registry.find_variant("arvane:stone").value();
+  const arv::voxel::BlockVariantID sand = registry.find_variant("arvane:sand").value();
+  bool saw_lunar_biome = false;
+  bool saw_sand_surface = false;
+  bool saw_stone_surface = false;
+  for (const arv::u64 seed : std::array<arv::u64, 3>{
+           8181ULL,
+           223344ULL,
+           7390150598859ULL,
+       }) {
+    for (arv::i32 chunk_z = -18; chunk_z <= 18; chunk_z += 3) {
+      for (arv::i32 chunk_x = -18; chunk_x <= 18; chunk_x += 3) {
+        const arv::ChunkCoord coord{chunk_x, chunk_z};
+        const arv::world::worldgen::TerrainProfile profile =
+            arv::world::worldgen::generate_terrain_profile(
+                *config.resolved_dimension,
+                seed,
+                coord);
+        for (arv::usize column_index = 0; column_index < arv::voxel::ChunkArea; ++column_index) {
+          const arv::usize biome_index = profile.biome_by_column[column_index];
+          ASSERT_LT(biome_index, config.resolved_dimension->biomes.size());
+          const arv::world::worldgen::BiomeConfig& biome =
+              config.resolved_dimension->biomes[biome_index].raw;
+          saw_lunar_biome =
+              saw_lunar_biome ||
+              arv::world::worldgen::biome_has_tag(biome, "arvane:biome/lunar");
+          EXPECT_GE(profile.surface_y_by_column[column_index], config.sea_level);
+
+          const arv::ChunkLocalColumn local = arv::voxel::local_column(column_index);
+          const arv::BlockPos surface{{
+              coord.x * arv::ChunkSize + local.x,
+              profile.surface_y_by_column[column_index],
+              coord.z * arv::ChunkSize + local.z}};
+          const arv::voxel::BlockVariantID surface_block =
+              arv::world::worldgen::terrain_block_at(
+                  *config.resolved_dimension,
+                  profile,
+                  surface);
+          EXPECT_TRUE(surface_block == stone || surface_block == sand);
+          saw_sand_surface = saw_sand_surface || surface_block == sand;
+          saw_stone_surface = saw_stone_surface || surface_block == stone;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(saw_lunar_biome);
+  EXPECT_TRUE(saw_sand_surface);
+  EXPECT_TRUE(saw_stone_surface);
 }
 
 TEST(WorldGenerationTests, GeneratedSpawnAvoidsOceanAndDesertAndStandsOnGround) {

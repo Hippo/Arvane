@@ -1,0 +1,27 @@
+id: arvane:worldgen/biome_source/luna
+version: 1
+type: arvane:biome_source/climate_map
+
+noise: arvane:worldgen/noise/luna_regions
+
+sample_scale:
+  xz: 3
+
+biomes:
+  - biome: arvane:worldgen/biome/lunar_maria
+    climate:
+      basin: [-1.0, -0.28]
+      crater_density: [-1.0, 0.35]
+      highland: [-1.0, 0.40]
+
+  - biome: arvane:worldgen/biome/lunar_crater_fields
+    climate:
+      basin: [-0.80, 0.70]
+      crater_density: [0.12, 1.0]
+      highland: [-0.85, 0.85]
+
+  - biome: arvane:worldgen/biome/lunar_highlands
+    climate:
+      basin: [-0.10, 1.0]
+      crater_density: [-1.0, 1.0]
+      highland: [0.15, 1.0]

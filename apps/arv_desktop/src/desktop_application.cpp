@@ -248,6 +248,7 @@ int DesktopApplication::run(int argc, char** argv) {
           water_fluid,
           world_tick_policy,
           assets.default_generation_config,
+          assets.worldgen_registry,
           assets.space_definitions,
           thread_budget,
           assets.language,

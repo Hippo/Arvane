@@ -753,6 +753,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   vehicle_registry_ = start_info.vehicle_registry;
   entity_goals_ = start_info.entity_goals;
   space_definitions_ = start_info.space_definitions;
+  resolve_world_generation_ = start_info.resolve_world_generation;
   game_modes_ = start_info.game_modes == nullptr ? player::GameModeRegistry{}
                                                  : *start_info.game_modes;
   player_tuning_ = start_info.player_tuning;

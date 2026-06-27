@@ -8,6 +8,8 @@
 #include "arv/base/base_module.hpp"
 
 #include <algorithm>
+#include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -131,6 +133,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
     const DedicatedRuntimeConfig& runtime_config,
     const DedicatedLoadedWorld& loaded_world,
     const DedicatedRegistries& registries,
+    const DedicatedWorldgen& worldgen,
     world::WorldGenerationPalette generation_palette) {
   server::ServerChunkGenerationSettings chunk_generation;
   chunk_generation.enabled = true;
@@ -183,6 +186,24 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.vehicle_registry = &registries.vehicle_registry;
   server_start_info.entity_goals = &runtime_config.entity_goals;
   server_start_info.space_definitions = &registries.space_definitions;
+  if (worldgen.registry != nullptr) {
+    std::shared_ptr<const world::worldgen::WorldGenRegistry> registry =
+        worldgen.registry;
+    const voxel::BlockRegistry* block_registry = &registries.block_registry;
+    server_start_info.resolve_world_generation =
+        [registry, block_registry](
+            std::string_view generator_id) -> std::optional<world::WorldGenerationConfig> {
+      if (registry == nullptr || block_registry == nullptr) {
+        return std::nullopt;
+      }
+      auto resolved =
+          world::worldgen::resolve_dimension(*registry, generator_id, *block_registry);
+      if (!resolved) {
+        return std::nullopt;
+      }
+      return world::config_from_resolved_dimension(std::move(resolved.value()));
+    };
+  }
   server_start_info.skins = config.skins;
   server_start_info.movement = config.network.movement;
   server_start_info.keep_alive = config.network.keep_alive;

@@ -30,6 +30,7 @@
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/space_definition.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/worldgen/registry.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <chrono>
@@ -116,6 +117,7 @@ struct DesktopSessionDependencies {
   const voxel::FluidDefinition& water_fluid;
   const world::WorldTickPolicy& world_tick_policy;
   const world::WorldGenerationConfig& default_generation_config;
+  std::shared_ptr<const world::worldgen::WorldGenRegistry> worldgen_registry{};
   const world::SpaceDefinitionRegistry& space_definitions;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
   const arv::text::LanguageCatalog& language;

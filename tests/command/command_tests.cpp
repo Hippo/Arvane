@@ -199,7 +199,7 @@ using arv::testsupport::connected_player;
   luna_world.id = "arvane:world/luna";
   luna_world.kind = arv::world::WorldDefinitionKind::Planet;
   luna_world.display_name = "Luna";
-  luna_world.worldgen = "arvane:worldgen/dimension/overworld";
+  luna_world.worldgen = "arvane:worldgen/dimension/luna";
   luna_world.environment = "arvane:environment/luna";
   luna_world.rules.allow_vehicle_launch = true;
   registry.worlds.emplace(luna_world.id, std::move(luna_world));
@@ -238,6 +238,29 @@ using arv::testsupport::connected_player;
   return registry;
 }
 
+[[nodiscard]] arv::world::WorldGenerationConfig make_command_test_luna_worldgen() {
+  arv::world::WorldGenerationConfig config;
+  config.id = "arvane:worldgen/dimension/luna";
+  config.dimension_id = config.id;
+  config.version = 1U;
+  config.seed_salt = "command_test_luna";
+  config.min_y = -64;
+  config.max_y = 128;
+  config.sea_level = -64;
+  config.base_height = 28;
+  config.height_scale = 12;
+  config.terrain_noise_type = "arvane:noise/simplex_2d";
+  config.terrain_frequency = 0.015F;
+  config.terrain_octaves = 3U;
+  config.terrain_amplitude = 1.0F;
+  config.terrain_lacunarity = 2.0F;
+  config.terrain_gain = 0.5F;
+  config.surface_layers.push_back({"arvane:stone", 4, false});
+  config.surface_layers.push_back({"arvane:sand", 1, false});
+  config.surface_layers.push_back({"arvane:stone", 0, true});
+  return config;
+}
+
 struct RunningServerHarness {
   arv::testsupport::ScopedTempDir temp;
   arv::voxel::BlockRegistry block_registry;
@@ -245,6 +268,7 @@ struct RunningServerHarness {
   arv::entity::EntityRegistry entity_registry;
   arv::entity::VehicleDefinitionRegistry vehicle_registry;
   arv::world::SpaceDefinitionRegistry space_definitions;
+  arv::world::WorldGenerationConfig luna_worldgen;
   arv::player::GameModeRegistry game_modes;
   arv::net::InProcessTransportPair transports;
   arv::server::ServerRuntime server;
@@ -262,6 +286,7 @@ struct RunningServerHarness {
         entity_registry(make_command_test_entity_registry()),
         vehicle_registry(make_command_test_vehicle_registry()),
         space_definitions(make_command_test_space_definitions()),
+        luna_worldgen(make_command_test_luna_worldgen()),
         transports(arv::net::make_in_process_transport_pair()),
         server(std::move(transports.server)),
         client(std::move(transports.client)) {
@@ -275,6 +300,14 @@ struct RunningServerHarness {
     start_info.entity_registry = &entity_registry;
     start_info.vehicle_registry = &vehicle_registry;
     start_info.space_definitions = &space_definitions;
+    start_info.resolve_world_generation =
+        [config = luna_worldgen](
+            std::string_view generator_id) -> std::optional<arv::world::WorldGenerationConfig> {
+      if (generator_id == config.dimension_id || generator_id == config.id) {
+        return config;
+      }
+      return std::nullopt;
+    };
     start_info.game_modes = &game_modes;
     start_info.register_commands = arv::base::register_server_commands;
     start_info.movement = movement;
@@ -1239,7 +1272,7 @@ TEST(CommandTests, WorldCommandCreatesLoadsAndGeneratesVoidSpaceWorld) {
   EXPECT_FALSE(environment.has_atmosphere);
   EXPECT_FALSE(environment.has_oxygen);
   EXPECT_EQ(environment.sky, "space");
-  EXPECT_FLOAT_EQ(environment.ambient_light, 0.02F);
+  EXPECT_FLOAT_EQ(environment.ambient_light, 0.15F);
 
   const std::vector<arv::server::SpaceBodyRuntimeView> bodies =
       harness.server.space_bodies_for_world(record->id);
@@ -1592,6 +1625,58 @@ TEST(CommandTests, SpaceExitRequiresSpaceCapableVehicleTag) {
   EXPECT_TRUE(client_chat_contains(harness.client, "not space-capable"));
 }
 
+TEST(CommandTests, WorldLoadRegeneratesMissingTargetWorldFromDefinition) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create luna --seed 424242");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  const arv::server::WorldRecord* created =
+      harness.server.worlds().find("luna");
+  ASSERT_NE(created, nullptr);
+  const arv::WorldID luna_id = created->id;
+  EXPECT_EQ(created->generator_id, "arvane:worldgen/dimension/overworld");
+
+  const std::filesystem::path save_root = harness.temp.path / "save";
+  const std::filesystem::path luna_root = save_root / "worlds" / "luna";
+  std::error_code remove_error;
+  const auto removed = std::filesystem::remove_all(luna_root, remove_error);
+  ASSERT_FALSE(remove_error) << remove_error.message();
+  EXPECT_GT(removed, 0U);
+  EXPECT_FALSE(std::filesystem::exists(luna_root));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load luna");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* regenerated =
+      harness.server.worlds().find("luna");
+  ASSERT_NE(regenerated, nullptr);
+  EXPECT_EQ(regenerated->id, luna_id);
+  EXPECT_EQ(regenerated->generator_id, "arvane:worldgen/dimension/luna");
+  ASSERT_TRUE(regenerated->spawn.has_value());
+  EXPECT_EQ(regenerated->spawn->world, luna_id);
+
+  arv::world::WorldRuntime* luna_world =
+      harness.server.world_runtime(luna_id);
+  ASSERT_NE(luna_world, nullptr);
+  ASSERT_NE(luna_world->generation_config(), nullptr);
+  EXPECT_EQ(luna_world->generation_config()->dimension_id, "arvane:worldgen/dimension/luna");
+
+  auto loaded_luna = arv::persistence::load_server_root(
+      save_root,
+      "luna",
+      harness.block_registry,
+      harness.item_registry);
+  ASSERT_TRUE(loaded_luna) << loaded_luna.error().message;
+  ASSERT_TRUE(loaded_luna.value().has_world_metadata);
+  EXPECT_EQ(
+      loaded_luna.value().world.generation_config.dimension_id,
+      "arvane:worldgen/dimension/luna");
+}
+
 TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
   RunningServerHarness harness;
 
@@ -1653,9 +1738,12 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
       harness.server.worlds().find("luna");
   ASSERT_NE(luna_record, nullptr);
   EXPECT_EQ(luna_record->world_type, "default");
+  EXPECT_EQ(luna_record->generator_id, "arvane:worldgen/dimension/luna");
   arv::world::WorldRuntime* luna_world =
       harness.server.world_runtime(luna_record->id);
   ASSERT_NE(luna_world, nullptr);
+  ASSERT_NE(luna_world->generation_config(), nullptr);
+  EXPECT_EQ(luna_world->generation_config()->dimension_id, "arvane:worldgen/dimension/luna");
   EXPECT_FLOAT_EQ(luna_world->environment().gravity_scale, 0.18F);
   EXPECT_FALSE(luna_world->environment().has_oxygen);
 

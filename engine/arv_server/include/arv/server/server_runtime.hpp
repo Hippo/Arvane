@@ -188,6 +188,8 @@ struct ServerStartInfo {
   const entity::VehicleDefinitionRegistry* vehicle_registry{};
   const world::EntityGoalRegistry* entity_goals{};
   const world::SpaceDefinitionRegistry* space_definitions{};
+  std::function<std::optional<world::WorldGenerationConfig>(std::string_view)>
+      resolve_world_generation{};
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
   std::filesystem::path server_save_root{};

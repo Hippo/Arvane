@@ -8,11 +8,15 @@
 #include "arv/io/config.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/world_generation.hpp"
+#include "arv/world/worldgen/registry.hpp"
+
+#include <memory>
 
 namespace arv::dedicated {
 
 struct DedicatedWorldgen {
   world::WorldGenerationConfig default_config;
+  std::shared_ptr<const world::worldgen::WorldGenRegistry> registry{};
 };
 
 [[nodiscard]] Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(

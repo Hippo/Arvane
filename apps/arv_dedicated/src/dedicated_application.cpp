@@ -153,6 +153,7 @@ int DedicatedApplication::run(int argc, char** argv) {
       runtime_config,
       loaded_world,
       registries,
+      worldgen,
       std::move(worldgen_palette.value()));
   if (!start_info_result) {
     return fail(start_info_result.error());

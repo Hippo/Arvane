@@ -452,6 +452,11 @@ struct ServerRuntimeImpl {
       const command::WorldCreateCommandRequest& request);
   [[nodiscard]] command::WorldOperationCommandResult load_world_from_command(
       std::string_view name);
+  [[nodiscard]] std::optional<world::WorldGenerationConfig> resolve_world_generation_config(
+      std::string_view generator_id) const;
+  [[nodiscard]] command::WorldOperationCommandResult materialize_world_save_for_record(
+      WorldRecord& record,
+      const world::WorldDefinition* definition);
   [[nodiscard]] command::WorldOperationCommandResult unload_world_from_command(
       std::string_view name,
       bool force);
@@ -811,6 +816,8 @@ struct ServerRuntimeImpl {
   const entity::VehicleDefinitionRegistry* vehicle_registry_{};
   const world::EntityGoalRegistry* entity_goals_{};
   const world::SpaceDefinitionRegistry* space_definitions_{};
+  std::function<std::optional<world::WorldGenerationConfig>(std::string_view)>
+      resolve_world_generation_{};
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
   const BlockBreakBehaviorRegistry* block_break_behaviors_{};

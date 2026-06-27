@@ -1,0 +1,28 @@
+id: arvane:worldgen/dimension/luna
+version: 1
+seed_salt: "luna"
+
+vertical:
+  min_y: -64
+  max_y: 128
+  sea_level: -64
+
+generator:
+  type: arvane:generator/layered_heightmap
+
+biome_source: arvane:worldgen/biome_source/luna
+terrain: arvane:worldgen/terrain/luna
+surface_rule_set: arvane:worldgen/surface_rule_set/luna
+
+carvers:
+  - arvane:worldgen/carver/tunnel_caves
+  - arvane:worldgen/carver/ravines
+
+features:
+  stages:
+    underground_ores:
+      - arvane:worldgen/placed_feature/ore_iron
+      - arvane:worldgen/placed_feature/ore_copper
+    surface_decoration:
+      - arvane:worldgen/placed_feature/lunar_dust_patch
+      - arvane:worldgen/placed_feature/lunar_stone_boulder_sparse

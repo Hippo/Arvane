@@ -1,0 +1,27 @@
+id: arvane:worldgen/placed_feature/lunar_dust_patch
+version: 1
+
+feature: arvane:worldgen/configured_feature/sand_disk
+salt: 77113
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: chance_per_chunk
+    chance: 0.45
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/sandy
+
+    - type: block_below
+      blocks:
+        - arvane:sand
+        - arvane:stone
+
+    - type: slope_less_than
+      value: 0.42

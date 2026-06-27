@@ -1,0 +1,81 @@
+id: arvane:worldgen/terrain/luna
+version: 1
+type: arvane:terrain/heightmap
+
+height:
+  base: 28
+  scale: 12
+  hill_scale: 9
+  ridge_scale: 14
+  detail_scale: 5
+
+shape:
+  ridge_sharpness: 1.65
+  domain_warp_amplitude: 12
+  terrace_step: 3
+  terrace_strength: 0.28
+  max_column_step: 5
+
+noise:
+  primary:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_basin"
+    frequency: 0.0065
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.52
+
+  hill:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_hummocks"
+    frequency: 0.024
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  ridge:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_rims"
+    frequency: 0.013
+    octaves: 4
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.48
+
+  detail:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_regolith"
+    frequency: 0.072
+    octaves: 3
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  warp_x:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_warp_x"
+    frequency: 0.0045
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+  warp_z:
+    type: arvane:noise/simplex_2d
+    seed_salt: "luna_terrain_warp_z"
+    frequency: 0.0045
+    octaves: 2
+    amplitude: 1.0
+    lacunarity: 2.0
+    gain: 0.5
+
+biome_modifiers:
+  base_height_offset: true
+  height_scale_multiplier: true
+  hill_multiplier: true
+  ridge_multiplier: true
+  roughness_multiplier: true
+  terrace_step: true
+  terrace_strength: true

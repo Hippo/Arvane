@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dedicated_error.hpp"
+#include "dedicated_worldgen_loader.hpp"
 
 #include "arv/core/expected.hpp"
 #include "arv/io/config.hpp"
@@ -47,6 +48,7 @@ struct DedicatedRuntimeConfig {
     const DedicatedRuntimeConfig& runtime_config,
     const DedicatedLoadedWorld& loaded_world,
     const DedicatedRegistries& registries,
+    const DedicatedWorldgen& worldgen,
     world::WorldGenerationPalette generation_palette);
 
 } // namespace arv::dedicated

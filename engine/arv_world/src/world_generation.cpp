@@ -384,7 +384,6 @@ WorldGenerationConfig refresh_generation_config_for_current_dimension(
   const bool same_dimension =
       saved_config.dimension_id.empty() ||
       saved_config.dimension_id == current_default_config.dimension_id;
-  saved_config.resolved_dimension = current_default_config.resolved_dimension;
   if (!same_dimension) {
     return saved_config;
   }

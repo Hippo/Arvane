@@ -328,8 +328,26 @@ struct WorldRegistryIndexEntry {
     return std::nullopt;
   }
   error.clear();
-  const std::filesystem::path target =
-      std::filesystem::weakly_canonical(world_root_path(server_save_root, name), error);
+  const std::filesystem::path requested = world_root_path(server_save_root, name);
+  std::filesystem::path target;
+  if (std::filesystem::exists(requested, error)) {
+    if (error) {
+      return std::nullopt;
+    }
+    error.clear();
+    target = std::filesystem::weakly_canonical(requested, error);
+  } else {
+    if (error) {
+      return std::nullopt;
+    }
+    error.clear();
+    const std::filesystem::path parent =
+        std::filesystem::weakly_canonical(requested.parent_path(), error);
+    if (error) {
+      return std::nullopt;
+    }
+    target = (parent / requested.filename()).lexically_normal();
+  }
   if (error || !path_is_within(target, root)) {
     return std::nullopt;
   }
@@ -1196,6 +1214,182 @@ command::SaveAllCommandResult ServerRuntimeImpl::save_all_worlds_from_command(bo
   return out;
 }
 
+std::optional<world::WorldGenerationConfig>
+ServerRuntimeImpl::resolve_world_generation_config(std::string_view generator_id) const {
+  const std::string requested = generator_id.empty()
+                                    ? default_generator_id(chunk_generation_)
+                                    : std::string{generator_id};
+  if (is_void_world_generator(requested)) {
+    return world::make_void_world_generation_config();
+  }
+  if (chunk_generation_.has_value()) {
+    const world::WorldGenerationConfig& active = chunk_generation_->config;
+    if (requested == default_generator_id(chunk_generation_) ||
+        requested == active.id ||
+        requested == active.dimension_id) {
+      return active;
+    }
+  }
+  if (resolve_world_generation_) {
+    std::optional<world::WorldGenerationConfig> resolved =
+        resolve_world_generation_(requested);
+    if (resolved.has_value()) {
+      if (resolved->id.empty()) {
+        resolved->id = requested;
+      }
+      if (resolved->dimension_id.empty()) {
+        resolved->dimension_id = requested;
+      }
+      return resolved;
+    }
+  }
+  if (!chunk_generation_.has_value() && requested == default_generator_id(chunk_generation_)) {
+    return world::WorldGenerationConfig{};
+  }
+  return std::nullopt;
+}
+
+command::WorldOperationCommandResult
+ServerRuntimeImpl::materialize_world_save_for_record(
+    WorldRecord& record,
+    const world::WorldDefinition* definition) {
+  if (server_save_root_.empty()) {
+    return op_failure("Server save root is not configured.");
+  }
+  if (block_registry_ == nullptr || item_registry_ == nullptr) {
+    return op_failure("Cannot create a world without block and item registries.");
+  }
+  const std::optional<std::filesystem::path> safe_path =
+      canonical_world_path_if_safe(server_save_root_, record.name);
+  if (!safe_path.has_value()) {
+    return op_failure("World path is not safely contained by the server worlds directory.");
+  }
+
+  std::error_code error;
+  const bool path_exists = std::filesystem::exists(safe_path.value(), error);
+  if (error) {
+    return op_failure(
+        "Failed to inspect world directory for '" + record.name + "': " +
+        error.message());
+  }
+  if (path_exists) {
+    const bool is_directory = std::filesystem::is_directory(safe_path.value(), error);
+    if (error) {
+      return op_failure(
+          "Failed to inspect world directory for '" + record.name + "': " +
+          error.message());
+    }
+    if (!is_directory) {
+      return op_failure(
+          "World path exists for '" + record.name + "', but is not a directory.");
+    }
+    const bool metadata_exists =
+        std::filesystem::exists(safe_path.value() / "world.json", error);
+    if (error) {
+      return op_failure(
+          "Failed to inspect world metadata for '" + record.name + "': " +
+          error.message());
+    }
+    if (metadata_exists) {
+      return op_success("World metadata already exists for '" + record.name + "'.");
+    }
+    const bool empty_directory = std::filesystem::is_empty(safe_path.value(), error);
+    if (error) {
+      return op_failure(
+          "Failed to inspect world directory for '" + record.name + "': " +
+          error.message());
+    }
+    if (!empty_directory) {
+      return op_failure(
+          "World directory for '" + record.name +
+          "' exists but metadata is missing. Move or delete the directory before regenerating it.");
+    }
+  }
+
+  std::string world_type = record.world_type.empty() ? "default" : record.world_type;
+  if (definition != nullptr && definition->kind == world::WorldDefinitionKind::Space) {
+    world_type = "space";
+  }
+  const bool space_world = is_space_world_type(world_type);
+  std::string generator_id;
+  if (space_world) {
+    generator_id = std::string{world::VoidWorldGenerationID};
+  } else if (definition != nullptr && !definition->worldgen.empty()) {
+    generator_id = definition->worldgen;
+  } else if (!record.generator_id.empty()) {
+    generator_id = record.generator_id;
+  } else {
+    generator_id = default_generator_id(chunk_generation_);
+  }
+
+  std::optional<world::WorldGenerationConfig> generation =
+      resolve_world_generation_config(generator_id);
+  if (!generation.has_value()) {
+    return op_failure(
+        "Unknown or unavailable world generator '" + generator_id + "'.");
+  }
+  if (space_world) {
+    generation = world::make_void_world_generation_config();
+    generator_id = std::string{world::VoidWorldGenerationID};
+  }
+  const bool generator_changed =
+      !record.generator_id.empty() && record.generator_id != generator_id;
+  const u64 seed = record.seed == 0U ? generated_world_seed() : record.seed;
+  Location spawn = !generator_changed && record.spawn.has_value()
+                       ? record.spawn.value()
+                       : world::generate_world_spawn_location(generation.value(), seed);
+  spawn.world = record.id;
+
+  persistence::SaveMetadata save_metadata{
+      persistence::CurrentSaveFormatVersion,
+      std::string{persistence::CurrentGameVersion},
+      0U,
+      0U,
+      server_save_display_name_};
+  persistence::WorldMetadata world_metadata;
+  world_metadata.name = record.name;
+  world_metadata.seed = seed;
+  world_metadata.tick_index = tick_index_;
+  world_metadata.generation_config = generation.value();
+  const world::WorldHeightSettings height =
+      world::world_height_settings_from_generation_config(generation.value());
+  world_metadata.min_chunk_y = height.min_chunk_y;
+  world_metadata.max_chunk_y = height.max_chunk_y;
+  world_metadata.spawn_point = spawn;
+  auto saved = persistence::save_server_root(
+      server_save_root_,
+      save_metadata,
+      world_metadata,
+      std::span<const persistence::SavedChunkSection>{},
+      std::span<const persistence::PlayerSaveData>{},
+      std::span<const entity::PersistentEntityRecord>{},
+      *block_registry_,
+      *item_registry_);
+  if (!saved) {
+    return op_failure(saved.error().message);
+  }
+
+  record.version = record.version == 0U ? 1U : record.version;
+  record.path = world_root_path(server_save_root_, record.name).string();
+  record.seed = seed;
+  record.generator_id = generator_id;
+  record.world_type = world_type;
+  record.spawn = spawn;
+  if (record.created_at.empty()) {
+    record.created_at = current_timestamp_text();
+  }
+  if (!save_registry_index(server_save_root_, worlds_)) {
+    return op_failure("Regenerated world, but failed to persist world registry metadata.");
+  }
+  core::info(
+      "worlds",
+      "regenerated missing world '{}' id={} generator={}",
+      record.name,
+      record.id.value,
+      generator_id);
+  return op_success("Regenerated world '" + record.name + "'.");
+}
+
 command::WorldOperationCommandResult ServerRuntimeImpl::create_world_from_command(
     const command::WorldCreateCommandRequest& request) {
   if (server_save_root_.empty()) {
@@ -1217,7 +1411,6 @@ command::WorldOperationCommandResult ServerRuntimeImpl::create_world_from_comman
     return op_failure("World directory already exists for '" + request.name + "'.");
   }
 
-  const std::string active_generator = default_generator_id(chunk_generation_);
   const bool explicit_void_generator =
       request.generator_id.has_value() &&
       is_void_world_generator(request.generator_id.value());
@@ -1229,20 +1422,23 @@ command::WorldOperationCommandResult ServerRuntimeImpl::create_world_from_comman
         "Space worlds use generator '" +
         std::string{world::VoidWorldGenerationID} + "'.");
   }
-  if (request.generator_id.has_value() &&
-      request.generator_id.value() != active_generator &&
-      !explicit_void_generator) {
+  const std::string requested_generator =
+      space_world || explicit_void_generator
+          ? std::string{world::VoidWorldGenerationID}
+          : request.generator_id.value_or(default_generator_id(chunk_generation_));
+  std::optional<world::WorldGenerationConfig> resolved_generation =
+      resolve_world_generation_config(requested_generator);
+  if (!resolved_generation.has_value()) {
     return op_failure(
-        "Unknown or unavailable world generator '" + request.generator_id.value() + "'.");
+        "Unknown or unavailable world generator '" + requested_generator + "'.");
   }
   world::WorldGenerationConfig generation =
       space_world || explicit_void_generator
           ? world::make_void_world_generation_config()
-          : (chunk_generation_.has_value() ? chunk_generation_->config
-                                           : world::WorldGenerationConfig{});
+          : std::move(resolved_generation.value());
   const std::string generator_id =
       space_world || explicit_void_generator ? std::string{world::VoidWorldGenerationID}
-                                             : active_generator;
+                                             : requested_generator;
   const u64 seed = request.seed.value_or(generated_world_seed());
   const Location spawn = world::generate_world_spawn_location(generation, seed);
 
@@ -1317,6 +1513,26 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
   if (!safe_path.has_value()) {
     return op_failure("World path is not safely contained by the server worlds directory.");
   }
+  std::error_code path_error;
+  const bool metadata_exists =
+      std::filesystem::exists(safe_path.value() / "world.json", path_error);
+  if (path_error) {
+    return op_failure(
+        "Failed to inspect world metadata for '" + record->name + "': " +
+        path_error.message());
+  }
+  if (!metadata_exists) {
+    command::WorldOperationCommandResult regenerated =
+        materialize_world_save_for_record(
+            *record,
+            find_world_definition_for_record(space_definitions_, *record));
+    if (!regenerated.success) {
+      return op_failure(
+          "World target '" + record->name +
+          "' does not exist and could not be regenerated: " +
+          regenerated.message);
+    }
+  }
 
   auto loaded_save_result = persistence::load_server_root(
       server_save_root_,
@@ -1333,13 +1549,37 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
 
   auto runtime = std::make_unique<world::WorldRuntime>(record->id);
   world::WorldGenerationConfig generation = loaded_save.world.generation_config;
+  const world::WorldDefinition* definition =
+      find_world_definition_for_record(space_definitions_, *record);
   if (is_space_world_type(record->world_type) ||
       generation.void_world ||
       generation.id == world::VoidWorldGenerationID ||
       generation.dimension_id == world::VoidWorldGenerationID) {
     generation = world::make_void_world_generation_config();
+  } else {
+    std::string generator_to_resolve;
+    if (definition != nullptr && !definition->worldgen.empty()) {
+      generator_to_resolve = definition->worldgen;
+    } else if (!generation.dimension_id.empty()) {
+      generator_to_resolve = generation.dimension_id;
+    } else if (!generation.id.empty()) {
+      generator_to_resolve = generation.id;
+    } else if (!record->generator_id.empty()) {
+      generator_to_resolve = record->generator_id;
+    }
+    if (!generator_to_resolve.empty()) {
+      std::optional<world::WorldGenerationConfig> resolved_generation =
+          resolve_world_generation_config(generator_to_resolve);
+      if (resolved_generation.has_value()) {
+        generation = world::refresh_generation_config_for_current_dimension(
+            generation,
+            resolved_generation.value());
+      }
+    }
   }
-  if (chunk_generation_.has_value()) {
+  if (!generation.void_world && chunk_generation_.has_value() &&
+      (generation.dimension_id.empty() ||
+       generation.dimension_id == chunk_generation_->config.dimension_id)) {
     generation = world::refresh_generation_config_for_current_dimension(
         generation,
         chunk_generation_->config);

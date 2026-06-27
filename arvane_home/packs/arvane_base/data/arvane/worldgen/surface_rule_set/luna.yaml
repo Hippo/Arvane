@@ -1,0 +1,35 @@
+id: arvane:worldgen/surface_rule_set/luna
+version: 1
+
+rules:
+  - when:
+      slope_greater_than: 0.52
+    layers:
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      biome: arvane:worldgen/biome/lunar_maria
+      slope_less_than: 0.34
+    layers:
+      - block: arvane:sand
+        depth: 2
+      - block: arvane:stone
+        depth: remaining
+
+  - when:
+      height_below: 24
+      slope_less_than: 0.38
+    layers:
+      - block: arvane:sand
+        depth: 2
+      - block: arvane:stone
+        depth: remaining
+
+  - layers:
+      - block: arvane:stone
+        depth: 4
+      - block: arvane:sand
+        depth: 1
+      - block: arvane:stone
+        depth: remaining

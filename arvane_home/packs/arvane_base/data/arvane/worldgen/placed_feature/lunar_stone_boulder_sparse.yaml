@@ -1,0 +1,27 @@
+id: arvane:worldgen/placed_feature/lunar_stone_boulder_sparse
+version: 1
+
+feature: arvane:worldgen/configured_feature/stone_boulder
+salt: 77191
+
+placement:
+  stage: surface_decoration
+
+  count:
+    type: chance_per_chunk
+    chance: 0.38
+
+  height:
+    type: surface
+
+  filters:
+    - type: biome_tag
+      tag: arvane:biome/lunar
+
+    - type: block_below
+      blocks:
+        - arvane:stone
+        - arvane:sand
+
+    - type: slope_less_than
+      value: 0.68

@@ -1,0 +1,26 @@
+id: arvane:worldgen/biome/lunar_crater_fields
+version: 1
+display_name: Lunar Crater Fields
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/rocky
+  - arvane:biome/sandy
+  - arvane:biome/lunar
+
+terrain:
+  base_height_offset: -2
+  height_scale_multiplier: 0.55
+  hill_multiplier: 0.52
+  ridge_multiplier: 0.92
+  roughness_multiplier: 1.05
+  terrace_step: 3
+  terrace_strength: 0.34
+
+surface_rule_set: arvane:worldgen/surface_rule_set/luna
+
+colors:
+  grass: "#74746E"
+  foliage: "#64645F"
+  water: "#5E6673"
+  fog: "#B8BCC4"

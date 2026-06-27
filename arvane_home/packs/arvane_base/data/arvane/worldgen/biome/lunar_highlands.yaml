@@ -1,0 +1,26 @@
+id: arvane:worldgen/biome/lunar_highlands
+version: 1
+display_name: Lunar Highlands
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/rocky
+  - arvane:biome/mountain
+  - arvane:biome/lunar
+
+terrain:
+  base_height_offset: 8
+  height_scale_multiplier: 0.68
+  hill_multiplier: 0.82
+  ridge_multiplier: 1.0
+  roughness_multiplier: 0.82
+  terrace_step: 4
+  terrace_strength: 0.38
+
+surface_rule_set: arvane:worldgen/surface_rule_set/luna
+
+colors:
+  grass: "#85857E"
+  foliage: "#6E6E68"
+  water: "#5E6673"
+  fog: "#C1C4CB"

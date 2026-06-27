@@ -4,6 +4,7 @@
 #include "arv/core/log.hpp"
 #include "arv/world/worldgen/loader.hpp"
 
+#include <memory>
 #include <utility>
 
 namespace arv::dedicated {
@@ -19,8 +20,10 @@ Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
         dedicated_error("worldgen", registry.error().describe()));
   }
 
+  auto registry_ptr =
+      std::make_shared<world::worldgen::WorldGenRegistry>(std::move(registry.value()));
   auto resolved = world::worldgen::resolve_dimension(
-      registry.value(),
+      *registry_ptr,
       base::ids::OverworldWorldgenDataID,
       block_registry);
   if (!resolved) {
@@ -29,6 +32,7 @@ Expected<DedicatedWorldgen, DedicatedError> load_dedicated_worldgen(
   }
 
   DedicatedWorldgen worldgen;
+  worldgen.registry = std::move(registry_ptr);
   worldgen.default_config = world::config_from_resolved_dimension(std::move(resolved.value()));
   core::info(
       "dedicated",

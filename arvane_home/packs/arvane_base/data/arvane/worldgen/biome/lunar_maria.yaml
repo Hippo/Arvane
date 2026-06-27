@@ -1,0 +1,26 @@
+id: arvane:worldgen/biome/lunar_maria
+version: 1
+display_name: Lunar Maria
+
+tags:
+  - arvane:biome/land
+  - arvane:biome/rocky
+  - arvane:biome/sandy
+  - arvane:biome/lunar
+
+terrain:
+  base_height_offset: -6
+  height_scale_multiplier: 0.35
+  hill_multiplier: 0.35
+  ridge_multiplier: 0.32
+  roughness_multiplier: 0.45
+  terrace_step: 3
+  terrace_strength: 0.22
+
+surface_rule_set: arvane:worldgen/surface_rule_set/luna
+
+colors:
+  grass: "#7A7A72"
+  foliage: "#686862"
+  water: "#5E6673"
+  fog: "#B8BCC4"

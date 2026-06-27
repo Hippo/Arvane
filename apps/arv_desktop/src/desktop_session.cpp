@@ -341,6 +341,24 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.vehicle_registry = &dependencies_.vehicle_registry;
   server_start_info.entity_goals = &dependencies_.entity_goals;
   server_start_info.space_definitions = &dependencies_.space_definitions;
+  if (dependencies_.worldgen_registry != nullptr) {
+    std::shared_ptr<const world::worldgen::WorldGenRegistry> registry =
+        dependencies_.worldgen_registry;
+    const voxel::BlockRegistry* block_registry = &dependencies_.block_registry;
+    server_start_info.resolve_world_generation =
+        [registry, block_registry](
+            std::string_view generator_id) -> std::optional<world::WorldGenerationConfig> {
+      if (registry == nullptr || block_registry == nullptr) {
+        return std::nullopt;
+      }
+      auto resolved =
+          world::worldgen::resolve_dimension(*registry, generator_id, *block_registry);
+      if (!resolved) {
+        return std::nullopt;
+      }
+      return world::config_from_resolved_dimension(std::move(resolved.value()));
+    };
+  }
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
