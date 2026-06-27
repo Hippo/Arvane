@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -412,6 +413,166 @@ struct MasonMarkerInteractionResult {
   return result;
 }
 
+struct VehicleFuelInteractionResult {
+  bool handled{};
+  std::string feedback_message{};
+};
+
+[[nodiscard]] Aabb3f entity_interaction_bounds(
+    const entity::EntityTransform& transform,
+    const entity::EntityCollision* collision) noexcept {
+  const Vec3f box = collision == nullptr
+                        ? Vec3f{1.0F, 1.0F, 1.0F}
+                        : Vec3f{
+                              std::max(collision->box.x, 0.0F),
+                              std::max(collision->box.y, 0.0F),
+                              std::max(collision->box.z, 0.0F)};
+  const f32 half_x = box.x * 0.5F;
+  const f32 half_z = box.z * 0.5F;
+  return {
+      {transform.position.x - half_x,
+       transform.position.y,
+       transform.position.z - half_z},
+      {transform.position.x + half_x,
+       transform.position.y + box.y,
+       transform.position.z + half_z}};
+}
+
+[[nodiscard]] std::optional<EntityID> targeted_vehicle_entity(
+    const world::WorldRuntime& runtime,
+    const voxel::BlockRegistry& block_registry,
+    const physics::ICollisionQuery& interaction_query,
+    PlayerID player_id,
+    Vec3f eye_position,
+    Vec3f look_direction,
+    f32 reach_distance) {
+  look_direction = normalize_or_zero(look_direction);
+  if (look_direction == Vec3f{}) {
+    return std::nullopt;
+  }
+
+  f32 max_distance = std::max(0.0F, reach_distance);
+  if (const std::optional<physics::BlockRaycastHit> block_hit =
+          physics::raycast_blocks(
+              interaction_query,
+              eye_position,
+              look_direction,
+              max_distance);
+      block_hit.has_value() && !block_registry.is_air(block_hit->variant)) {
+    max_distance = std::min(max_distance, block_hit->distance);
+  }
+
+  const std::optional<EntityID> local_entity = runtime.entity_for_player(player_id);
+  std::optional<EntityID> best_entity;
+  f32 best_distance = max_distance;
+  for (const EntityID entity : runtime.entity_ids()) {
+    if (local_entity.has_value() && entity == local_entity.value()) {
+      continue;
+    }
+    if (runtime.find_entity_vehicle_physics(entity) == nullptr ||
+        runtime.find_entity_rideable(entity) == nullptr) {
+      continue;
+    }
+    const entity::EntityTransform* transform = runtime.find_entity_transform(entity);
+    if (transform == nullptr) {
+      continue;
+    }
+    const std::optional<physics::RayAabbHit> hit =
+        physics::ray_intersects_aabb(
+            eye_position,
+            look_direction,
+            entity_interaction_bounds(
+                *transform,
+                runtime.find_entity_collision(entity)),
+            best_distance);
+    if (hit.has_value() && hit->distance <= best_distance) {
+      best_distance = hit->distance;
+      best_entity = entity;
+    }
+  }
+  return best_entity;
+}
+
+[[nodiscard]] VehicleFuelInteractionResult handle_vehicle_fuel_interaction(
+    world::WorldRuntime& runtime,
+    player::PlayerState& player_state,
+    const player::PlayerCommand& command,
+    const physics::ICollisionQuery& interaction_query,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry,
+    const entity::VehicleDefinitionRegistry& vehicle_registry,
+    Vec3f eye_position,
+    Vec3f look_direction,
+    f32 reach_distance) {
+  if (!command.secondary_pressed) {
+    return {};
+  }
+  const player::ItemStack* held = held_item_stack(player_state);
+  if (held == nullptr || held->count == 0U) {
+    return {};
+  }
+  const player::ItemRecord* held_item = item_registry.item(held->item);
+  if (held_item == nullptr) {
+    return {};
+  }
+
+  const std::optional<EntityID> target =
+      targeted_vehicle_entity(
+          runtime,
+          block_registry,
+          interaction_query,
+          player_state.player_id,
+          eye_position,
+          look_direction,
+          reach_distance);
+  if (!target.has_value()) {
+    return {};
+  }
+
+  entity::VehiclePhysicsComponent* physics =
+      runtime.find_entity_vehicle_physics(target.value());
+  if (physics == nullptr) {
+    return {};
+  }
+  const entity::VehicleDefinition* definition =
+      vehicle_registry.find(physics->definition);
+  if (definition == nullptr || !definition->fuel.has_value() ||
+      held_item->name != definition->fuel->item) {
+    return {};
+  }
+
+  const entity::VehicleFuelDefinition& fuel = definition->fuel.value();
+  physics->fuel_item = fuel.item;
+  physics->fuel_capacity_seconds = fuel.capacity_seconds;
+  physics->fuel_burn_per_second = fuel.burn_per_second;
+  physics->fuel_seconds =
+      std::clamp(physics->fuel_seconds, 0.0F, physics->fuel_capacity_seconds);
+
+  if (physics->fuel_seconds + 0.001F >= physics->fuel_capacity_seconds) {
+    return {
+        .handled = true,
+        .feedback_message = "Rocket fuel tank is already full."};
+  }
+
+  const f32 previous_fuel_seconds = physics->fuel_seconds;
+  if (!player_state.inventory.consume_one(player_state.selected_hotbar_slot)) {
+    return {};
+  }
+  physics->fuel_seconds =
+      std::clamp(
+          previous_fuel_seconds + fuel.capacity_seconds,
+          0.0F,
+          physics->fuel_capacity_seconds);
+
+  std::ostringstream message;
+  message << "Rocket fueled: "
+          << static_cast<int>(std::round(physics->fuel_seconds))
+          << "/"
+          << static_cast<int>(std::round(physics->fuel_capacity_seconds))
+          << " seconds.";
+  return {.handled = true, .feedback_message = message.str()};
+}
+
 [[nodiscard]] std::optional<player::ItemID> mined_block_drop_item(
     const player::ItemRegistry& item_registry,
     const voxel::BlockRegistry& block_registry,
@@ -438,9 +599,17 @@ struct MasonMarkerInteractionResult {
   return std::nullopt;
 }
 
+[[nodiscard]] bool allow_block_placement(const world::WorldRuntime& runtime) noexcept {
+  const world::GameRuleState* rule = runtime.game_rule("allowBlockPlacement");
+  return rule == nullptr ||
+         rule->type != world::GameRuleValueType::Boolean ||
+         rule->bool_value;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::apply_player_interaction_command(
+    world::WorldRuntime& runtime,
     player::PlayerState& player_state,
     const player::PlayerCommand& command,
     const physics::ICollisionQuery& interaction_query,
@@ -448,6 +617,25 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     Vec3f look_direction,
     const physics::KinematicConfig& physics_config,
     Seconds tick_seconds) {
+  auto send_system_to_player = [this, player_id = player_state.player_id](
+                                   std::string_view message) {
+    if (message.empty()) {
+      return;
+    }
+    const ServerSession* recipient = nullptr;
+    sessions_.for_each_session([&](const ServerSession& session) {
+      if (session.player_id == player_id && session.authenticated && !session.closing) {
+        recipient = &session;
+      }
+    });
+    if (recipient == nullptr) {
+      return;
+    }
+    send_system_message(
+        *recipient,
+        arv::text::ChatMessageTemplate::parse(message).to_rich_text());
+  };
+
   const MasonMarkerInteractionResult marker_interaction = handle_mason_marker_interaction(
       player_state,
       command,
@@ -456,24 +644,6 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       look_direction,
       player_tuning_.reach_distance);
   if (marker_interaction.handled) {
-    auto send_system_to_player = [this, player_id = player_state.player_id](
-                                     std::string_view message) {
-      if (message.empty()) {
-        return;
-      }
-      const ServerSession* recipient = nullptr;
-      sessions_.for_each_session([&](const ServerSession& session) {
-        if (session.player_id == player_id && session.authenticated && !session.closing) {
-          recipient = &session;
-        }
-      });
-      if (recipient == nullptr) {
-        return;
-      }
-      send_system_message(
-          *recipient,
-          arv::text::ChatMessageTemplate::parse(message).to_rich_text());
-    };
     for (const std::string& message : marker_interaction.feedback_messages) {
       send_system_to_player(message);
     }
@@ -481,7 +651,30 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     return;
   }
 
+  if (item_registry_ != nullptr && block_registry_ != nullptr &&
+      vehicle_registry_ != nullptr) {
+    const VehicleFuelInteractionResult fuel_interaction =
+        handle_vehicle_fuel_interaction(
+            runtime,
+            player_state,
+            command,
+            interaction_query,
+            *block_registry_,
+            *item_registry_,
+            *vehicle_registry_,
+            eye_position,
+            look_direction,
+            player_tuning_.reach_distance);
+    if (fuel_interaction.handled) {
+      send_system_to_player(fuel_interaction.feedback_message);
+      play_right_hand_interaction_animation(runtime, player_state.player_id);
+      clear_block_break_attempt(player_state.player_id);
+      return;
+    }
+  }
+
   tick_block_break_attempt(
+      runtime,
       player_state,
       command,
       interaction_query,
@@ -504,7 +697,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     if (!fluid_containers_.empty_container_item_name.empty() &&
         held_item->name == fluid_containers_.empty_container_item_name) {
       const std::optional<BlockPos> source = raycast_source_fluid(
-          default_world_,
+          runtime,
           *block_registry_,
           fluid_definition_,
           eye_position,
@@ -521,18 +714,21 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       if (!next_inventory.has_value()) {
         return;
       }
-      if (default_world_.set_fluid(
+      if (runtime.set_fluid(
               source.value(),
               voxel::empty_fluid_cell(),
               fluid_definition_)) {
         player_state.inventory = std::move(next_inventory.value());
-        play_right_hand_interaction_animation(default_world_, player_state.player_id);
+        play_right_hand_interaction_animation(runtime, player_state.player_id);
       }
       return;
     }
 
     if (!fluid_containers_.filled_source_item_name.empty() &&
         held_item->name == fluid_containers_.filled_source_item_name) {
+      if (!allow_block_placement(runtime)) {
+        return;
+      }
       auto hit = physics::raycast_blocks(
           interaction_query,
           eye_position,
@@ -543,7 +739,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       }
 
       BlockPos place_pos = hit->block;
-      const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
+      const voxel::BlockVariantID target_variant = runtime.get_block(hit->block);
       if (!block_registry_->is_replaceable(target_variant)) {
         place_pos.value = place_pos.value + voxel::block_face_offset(hit->face);
       }
@@ -552,7 +748,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       }
 
       if (!can_place_fluid_source_at(
-              default_world_,
+              runtime,
               *block_registry_,
               fluid_definition_,
               place_pos)) {
@@ -567,14 +763,17 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       if (!next_inventory.has_value()) {
         return;
       }
-      if (default_world_.place_fluid_source(place_pos, fluid_definition_)) {
+      if (runtime.place_fluid_source(place_pos, fluid_definition_)) {
         player_state.inventory = std::move(next_inventory.value());
-        play_right_hand_interaction_animation(default_world_, player_state.player_id);
+        play_right_hand_interaction_animation(runtime, player_state.player_id);
       }
       return;
     }
 
     if (!held_item->placement_variant.has_value()) {
+      return;
+    }
+    if (!allow_block_placement(runtime)) {
       return;
     }
 
@@ -588,7 +787,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
     }
 
     BlockPos place_pos = hit->block;
-    const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
+    const voxel::BlockVariantID target_variant = runtime.get_block(hit->block);
     if (!block_registry_->is_replaceable(target_variant)) {
       place_pos.value = place_pos.value + voxel::block_face_offset(hit->face);
     }
@@ -597,7 +796,7 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       return;
     }
 
-    const voxel::BlockVariantID existing = default_world_.get_block(place_pos);
+    const voxel::BlockVariantID existing = runtime.get_block(place_pos);
     if (!(block_registry_->is_air(existing) || block_registry_->is_replaceable(existing))) {
       return;
     }
@@ -628,9 +827,9 @@ void ServerRuntimeImpl::apply_player_interaction_command(
       }
     }
 
-    if (default_world_.set_block(place_pos, placed_variant)) {
+    if (runtime.set_block(place_pos, placed_variant)) {
       (void)player_state.inventory.consume_one(player_state.selected_hotbar_slot);
-      play_right_hand_interaction_animation(default_world_, player_state.player_id);
+      play_right_hand_interaction_animation(runtime, player_state.player_id);
     }
   }
 }
@@ -640,6 +839,7 @@ void ServerRuntimeImpl::clear_block_break_attempt(PlayerID player_id) {
 }
 
 void ServerRuntimeImpl::tick_block_break_attempt(
+    world::WorldRuntime& runtime,
     player::PlayerState& player_state,
     const player::PlayerCommand& command,
     const physics::ICollisionQuery& interaction_query,
@@ -671,7 +871,7 @@ void ServerRuntimeImpl::tick_block_break_attempt(
     return;
   }
 
-  const voxel::BlockVariantID target_variant = default_world_.get_block(hit->block);
+  const voxel::BlockVariantID target_variant = runtime.get_block(hit->block);
   const voxel::BlockVariantRecord* target = block_registry_->variant(target_variant);
   if (target == nullptr || block_registry_->is_air(target_variant)) {
     clear_block_break_attempt(player_state.player_id);
@@ -708,7 +908,7 @@ void ServerRuntimeImpl::tick_block_break_attempt(
   }
 
   if (!std::isfinite(required_seconds) || required_seconds <= 0.0F) {
-    if (default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+    if (runtime.set_block(hit->block, voxel::AirBlockVariantID)) {
       drop_and_remove_block_container(player_state.world_id, hit->block);
       if (!player_state.resolved_permissions.core.has_creative_inventory) {
         const std::optional<player::ItemID> drop_item =
@@ -755,7 +955,7 @@ void ServerRuntimeImpl::tick_block_break_attempt(
   attempt.stage = break_stage_for_progress(attempt.progress);
 
   if (attempt.elapsed_seconds >= attempt.required_seconds &&
-      default_world_.set_block(hit->block, voxel::AirBlockVariantID)) {
+      runtime.set_block(hit->block, voxel::AirBlockVariantID)) {
     drop_and_remove_block_container(player_state.world_id, hit->block);
     if (!player_state.resolved_permissions.core.has_creative_inventory) {
       const std::optional<player::ItemID> drop_item =

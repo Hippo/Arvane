@@ -214,7 +214,8 @@ void apply_dropped_item_ground_friction(
 
 [[nodiscard]] f32 vehicle_ground_drag(
     const entity::VehiclePhysicsComponent& physics,
-    const entity::VehicleDefinition* definition) noexcept {
+    const entity::VehicleDefinition* definition,
+    bool space_environment) noexcept {
   switch (physics.kind) {
     case entity::VehiclePhysicsKind::LivingMount:
       return definition == nullptr
@@ -229,10 +230,16 @@ void apply_dropped_item_ground_friction(
     case entity::VehiclePhysicsKind::GroundVehicle:
       return definition == nullptr ? 0.94F : definition->ground.drag;
     case entity::VehiclePhysicsKind::Aircraft:
-      return definition == nullptr
-                 ? 0.985F
-                 : (physics.grounded ? definition->aircraft.ground_drag
-                                     : definition->aircraft.drag);
+      if (definition == nullptr) {
+        return 0.985F;
+      }
+      {
+        const entity::AircraftMovementDefinition& movement =
+            space_environment && definition->space_aircraft.has_value()
+                ? definition->space_aircraft.value()
+                : definition->aircraft;
+        return physics.grounded ? movement.ground_drag : movement.drag;
+      }
     case entity::VehiclePhysicsKind::Submersible:
       if (definition == nullptr) {
         return physics.in_water ? 0.88F : 0.45F;
@@ -245,7 +252,8 @@ void apply_dropped_item_ground_friction(
 
 [[nodiscard]] f32 vehicle_gravity_scale(
     const entity::VehiclePhysicsComponent& physics,
-    const entity::VehicleDefinition* definition) noexcept {
+    const entity::VehicleDefinition* definition,
+    bool space_environment) noexcept {
   if (definition == nullptr) {
     return 1.0F;
   }
@@ -257,7 +265,9 @@ void apply_dropped_item_ground_friction(
     case entity::VehiclePhysicsKind::GroundVehicle:
       return definition->ground.gravity_scale;
     case entity::VehiclePhysicsKind::Aircraft:
-      return definition->aircraft.gravity_scale;
+      return space_environment && definition->space_aircraft.has_value()
+                 ? definition->space_aircraft->gravity_scale
+                 : definition->aircraft.gravity_scale;
     case entity::VehiclePhysicsKind::Submersible:
       return physics.in_water ? 0.0F : definition->submersible.gravity_scale_out_of_water;
   }
@@ -729,7 +739,9 @@ u32 WorldEntitySimulation::tick_entity_physics(
   }
 
   const WorldCollisionQuery collision_query(world, *block_registry, true);
-  const physics::KinematicConfig physics_config;
+  physics::KinematicConfig physics_config;
+  physics_config.gravity_per_second *=
+      std::max(0.0F, world.environment().gravity_scale);
   const auto view = registry.view<
       entity::RuntimeEntity,
       entity::EntityTransform,
@@ -758,6 +770,7 @@ u32 WorldEntitySimulation::tick_entity_physics(
           vehicle_registry == nullptr
               ? nullptr
               : vehicle_registry->find(vehicle_physics->definition);
+      const bool space_environment = world.environment().sky == "space";
       const Aabb3f bounds = entity_body_bounds(transform.position, collision.box);
       const EntityLiquidProbe liquid = probe_entity_liquid(
           collision_query,
@@ -789,7 +802,12 @@ u32 WorldEntitySimulation::tick_entity_physics(
           velocity.linear.y = std::max(
               velocity.linear.y -
                   physics_config.gravity_per_second *
-                      std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
+                      std::max(
+                          0.0F,
+                          vehicle_gravity_scale(
+                              *vehicle_physics,
+                              definition,
+                              space_environment)) *
                       EntityLiquidGravityScale *
                       static_cast<f32>(tick_seconds),
               -physics_config.terminal_velocity * EntityLiquidTerminalVelocityScale);
@@ -797,7 +815,12 @@ u32 WorldEntitySimulation::tick_entity_physics(
           velocity.linear.y = std::max(
               velocity.linear.y -
                   physics_config.gravity_per_second *
-                      std::max(0.0F, vehicle_gravity_scale(*vehicle_physics, definition)) *
+                      std::max(
+                          0.0F,
+                          vehicle_gravity_scale(
+                              *vehicle_physics,
+                              definition,
+                              space_environment)) *
                       static_cast<f32>(tick_seconds),
               -physics_config.terminal_velocity);
         }
@@ -899,7 +922,10 @@ u32 WorldEntitySimulation::tick_entity_physics(
       }
 
       const f32 authored_drag =
-          std::clamp(vehicle_ground_drag(*vehicle_physics, definition), 0.0F, 1.0F);
+          std::clamp(
+              vehicle_ground_drag(*vehicle_physics, definition, space_environment),
+              0.0F,
+              1.0F);
       const f32 per_second_ticks =
           static_cast<f32>(tick_seconds) * static_cast<f32>(DefaultBaseTps);
       const f32 drag =
@@ -1167,7 +1193,9 @@ u32 WorldEntitySimulation::tick_dropped_items(
       entity::EntityTransform,
       entity::EntityVelocity,
       entity::DroppedItem>();
-  const physics::KinematicConfig physics_config;
+  physics::KinematicConfig physics_config;
+  physics_config.gravity_per_second *=
+      std::max(0.0F, world.environment().gravity_scale);
   const std::optional<WorldCollisionQuery> collision_query =
       block_registry == nullptr
           ? std::optional<WorldCollisionQuery>{}

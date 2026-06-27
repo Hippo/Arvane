@@ -163,10 +163,11 @@ void ServerRuntimeImpl::send_vehicle_correction(
 }
 
 void ServerRuntimeImpl::broadcast_vehicle_state(
+    WorldID world_id,
     EntityNetID vehicle_net_id,
     const AcceptedVehicleMovementState& accepted) {
   protocol::ClientboundVehicleState state;
-  state.world_id = default_world_.id();
+  state.world_id = world_id;
   state.vehicle_id = vehicle_net_id;
   state.server_tick = tick_index_;
   state.accepted_sequence = accepted.last_sequence;
@@ -178,7 +179,7 @@ void ServerRuntimeImpl::broadcast_vehicle_state(
   const std::vector<u8> payload = protocol::serialize_clientbound_vehicle_state(state);
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != world_id) {
       return;
     }
     (void)send_protocol_message(
@@ -192,6 +193,7 @@ void ServerRuntimeImpl::broadcast_vehicle_state(
 }
 
 void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
+    WorldID world_id,
     Vec3f position,
     VehicleDamageStage stage,
     u32 seed) {
@@ -200,7 +202,7 @@ void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
     return;
   }
   protocol::ClientboundSpawnParticles particles;
-  particles.world_id = default_world_.id();
+  particles.world_id = world_id;
   particles.particle_type = "arvane:vehicle_smoke";
   particles.position = position;
   particles.normal = {0.0F, 1.0F, 0.0F};
@@ -216,7 +218,7 @@ void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
       protocol::serialize_clientbound_spawn_particles(particles);
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != world_id) {
       return;
     }
     (void)send_protocol_message(
@@ -229,11 +231,13 @@ void ServerRuntimeImpl::broadcast_vehicle_smoke_particles(
   });
 }
 
-void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
+void ServerRuntimeImpl::broadcast_entity_passengers(
+    world::WorldRuntime& runtime,
+    EntityID rideable_id) {
   const entity::RideableComponent* rideable =
-      default_world_.find_entity_rideable(rideable_id);
+      runtime.find_entity_rideable(rideable_id);
   const std::optional<EntityNetID> rideable_net =
-      default_world_.network_id_for_entity(rideable_id);
+      runtime.network_id_for_entity(rideable_id);
   if (rideable == nullptr || !rideable_net.has_value()) {
     return;
   }
@@ -245,7 +249,7 @@ void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
       continue;
     }
     const std::optional<EntityNetID> passenger_net =
-        default_world_.network_id_for_entity(seat.occupant);
+        runtime.network_id_for_entity(seat.occupant);
     if (!passenger_net.has_value()) {
       continue;
     }
@@ -256,7 +260,7 @@ void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
       protocol::serialize_clientbound_entity_passengers_set(packet);
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != runtime.id()) {
       return;
     }
     (void)send_protocol_message(
@@ -270,14 +274,15 @@ void ServerRuntimeImpl::broadcast_entity_passengers(EntityID rideable_id) {
 }
 
 void ServerRuntimeImpl::broadcast_ride_started(
+    world::WorldRuntime& runtime,
     EntityID passenger_id,
     EntityID rideable_id,
     std::string_view seat_id,
     bool controls_vehicle) {
   const std::optional<EntityNetID> passenger_net =
-      default_world_.network_id_for_entity(passenger_id);
+      runtime.network_id_for_entity(passenger_id);
   const std::optional<EntityNetID> rideable_net =
-      default_world_.network_id_for_entity(rideable_id);
+      runtime.network_id_for_entity(rideable_id);
   if (!passenger_net.has_value() || !rideable_net.has_value()) {
     return;
   }
@@ -289,7 +294,7 @@ void ServerRuntimeImpl::broadcast_ride_started(
   const std::vector<u8> payload = protocol::serialize_clientbound_ride_started(packet);
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != runtime.id()) {
       return;
     }
     (void)send_protocol_message(
@@ -300,25 +305,31 @@ void ServerRuntimeImpl::broadcast_ride_started(
         protocol::NetworkLane::Gameplay,
         payload);
   });
-  broadcast_entity_passengers(rideable_id);
+  broadcast_entity_passengers(runtime, rideable_id);
 }
 
 void ServerRuntimeImpl::broadcast_ride_ended(
+    world::WorldRuntime& runtime,
     EntityID passenger_id,
     EntityID rideable_id,
     Vec3f position) {
   const std::optional<EntityNetID> passenger_net =
-      default_world_.network_id_for_entity(passenger_id);
+      runtime.network_id_for_entity(passenger_id);
   const std::optional<EntityNetID> rideable_net =
-      default_world_.network_id_for_entity(rideable_id);
+      runtime.network_id_for_entity(rideable_id);
   if (!passenger_net.has_value() || !rideable_net.has_value()) {
     return;
   }
-  broadcast_ride_ended(passenger_net.value(), rideable_net.value(), position);
-  broadcast_entity_passengers(rideable_id);
+  broadcast_ride_ended(
+      runtime.id(),
+      passenger_net.value(),
+      rideable_net.value(),
+      position);
+  broadcast_entity_passengers(runtime, rideable_id);
 }
 
 void ServerRuntimeImpl::broadcast_ride_ended(
+    WorldID world_id,
     EntityNetID passenger_net_id,
     EntityNetID rideable_net_id,
     Vec3f position) {
@@ -329,7 +340,7 @@ void ServerRuntimeImpl::broadcast_ride_ended(
   const std::vector<u8> payload = protocol::serialize_clientbound_ride_ended(packet);
   sessions_.for_each_session([&](const ServerSession& session) {
     if (!session.authenticated || session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != world_id) {
       return;
     }
     (void)send_protocol_message(
@@ -343,17 +354,23 @@ void ServerRuntimeImpl::broadcast_ride_ended(
 }
 
 void ServerRuntimeImpl::broadcast_pending_ride_ended_events() {
-  for (const world::RideEndedEvent& event : default_world_.drain_ride_ended_events()) {
-    if (!event.passenger_net_id.has_value() || !event.rideable_net_id.has_value()) {
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    if (runtime == nullptr) {
       continue;
     }
-    broadcast_ride_ended(
-        event.passenger_net_id.value(),
-        event.rideable_net_id.value(),
-        event.position);
-    accepted_vehicle_movement_.erase(event.rideable_net_id.value());
-    if (default_world_.entity_exists(event.rideable)) {
-      broadcast_entity_passengers(event.rideable);
+    for (const world::RideEndedEvent& event : runtime->drain_ride_ended_events()) {
+      if (!event.passenger_net_id.has_value() || !event.rideable_net_id.has_value()) {
+        continue;
+      }
+      broadcast_ride_ended(
+          runtime->id(),
+          event.passenger_net_id.value(),
+          event.rideable_net_id.value(),
+          event.position);
+      accepted_vehicle_movement_.erase({runtime->id(), event.rideable_net_id.value()});
+      if (runtime->entity_exists(event.rideable)) {
+        broadcast_entity_passengers(*runtime, event.rideable);
+      }
     }
   }
 }

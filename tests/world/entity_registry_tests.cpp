@@ -1,11 +1,14 @@
 #include "arv/asset/resource.hpp"
 #include "arv/base/base_module.hpp"
 #include "arv/entity/components.hpp"
+#include "arv/player/item.hpp"
+#include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
-#include <fstream>
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -424,6 +427,95 @@ TEST(VehicleDefinitionRegistryTests, BaseBuggyCrashDestructionIsInsideAuthorityE
   EXPECT_TRUE(buggy->crash.explode_on_destruction);
 }
 
+TEST(VehicleDefinitionRegistryTests, BaseRocketVehicleEntityAndFuelContentLoad) {
+  auto parsed_vehicles = arv::entity::parse_vehicle_definitions_json(
+      read_text_file("arvane_home/packs/arvane_base/data/arvane/vehicles.json"));
+  ASSERT_TRUE(parsed_vehicles) << parsed_vehicles.error().message;
+  auto vehicle_registry_result =
+      arv::entity::VehicleDefinitionRegistry::build(std::move(parsed_vehicles.value()));
+  ASSERT_TRUE(vehicle_registry_result) << vehicle_registry_result.error().message;
+
+  const arv::entity::VehicleDefinition* rocket =
+      vehicle_registry_result.value().find("arvane:rocket");
+  ASSERT_NE(rocket, nullptr);
+  EXPECT_EQ(rocket->physics, arv::entity::VehiclePhysicsKind::Aircraft);
+  EXPECT_NE(
+      std::find(
+          rocket->tags.begin(),
+          rocket->tags.end(),
+          std::string{"arvane:space_capable"}),
+      rocket->tags.end());
+  EXPECT_NE(
+      std::find(
+          rocket->tags.begin(),
+          rocket->tags.end(),
+          std::string{"arvane:rocket/basic"}),
+      rocket->tags.end());
+  ASSERT_TRUE(rocket->space_aircraft.has_value());
+  EXPECT_GT(rocket->space_aircraft->max_speed, rocket->aircraft.max_speed);
+  EXPECT_LT(rocket->space_aircraft->gravity_scale, rocket->aircraft.gravity_scale);
+  EXPECT_TRUE(rocket->aircraft.vertical_thrust);
+  EXPECT_TRUE(rocket->space_aircraft->vertical_thrust);
+  EXPECT_FLOAT_EQ(rocket->aircraft.ground_takeoff_speed, 0.0F);
+  EXPECT_GT(rocket->aircraft.max_climb_rate, 24.0F);
+  EXPECT_FALSE(rocket->fuel.has_value());
+
+  auto parsed_entities = arv::entity::parse_entity_definitions_json(
+      read_text_file("arvane_home/packs/arvane_base/data/arvane/entities.json"));
+  ASSERT_TRUE(parsed_entities) << parsed_entities.error().message;
+  auto entity_registry_result =
+      arv::base::build_base_entity_registry(std::move(parsed_entities.value()));
+  ASSERT_TRUE(entity_registry_result) << entity_registry_result.error().message;
+  const std::optional<arv::EntityTypeID> rocket_type =
+      entity_registry_result.value().find_type("arvane:rocket");
+  ASSERT_TRUE(rocket_type.has_value());
+  const arv::entity::EntityTypeRecord* rocket_record =
+      entity_registry_result.value().type(rocket_type.value());
+  ASSERT_NE(rocket_record, nullptr);
+  ASSERT_TRUE(rocket_record->components.rideable.has_value());
+  EXPECT_EQ(rocket_record->components.rideable->definition, "arvane:rocket");
+  ASSERT_TRUE(rocket_record->components.vehicle_physics.has_value());
+  EXPECT_EQ(rocket_record->components.vehicle_physics->definition, "arvane:rocket");
+  EXPECT_EQ(rocket_record->model_asset, "arvane:model/entity/rocket");
+  const std::optional<arv::EntityTypeID> basic_rocket_type =
+      entity_registry_result.value().find_type("arvane:rocket/basic");
+  ASSERT_TRUE(basic_rocket_type.has_value());
+  const arv::entity::EntityTypeRecord* basic_rocket_record =
+      entity_registry_result.value().type(basic_rocket_type.value());
+  ASSERT_NE(basic_rocket_record, nullptr);
+  ASSERT_TRUE(basic_rocket_record->components.rideable.has_value());
+  EXPECT_EQ(basic_rocket_record->components.rideable->definition, "arvane:rocket");
+  ASSERT_TRUE(basic_rocket_record->components.vehicle_physics.has_value());
+  EXPECT_EQ(
+      basic_rocket_record->components.vehicle_physics->definition,
+      "arvane:rocket");
+  EXPECT_EQ(basic_rocket_record->model_asset, "arvane:model/entity/rocket");
+  EXPECT_TRUE(basic_rocket_record->spawnable);
+
+  auto parsed_items = arv::player::parse_item_definitions_json(
+      read_text_file("arvane_home/packs/arvane_base/data/arvane/items.json"));
+  ASSERT_TRUE(parsed_items) << parsed_items.error().message;
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  auto item_registry_result =
+      arv::player::ItemRegistry::build_from_blocks_and_items(
+          block_registry,
+          std::move(parsed_items.value()));
+  ASSERT_TRUE(item_registry_result) << item_registry_result.error().message;
+  const std::optional<arv::player::ItemID> rocket_fuel =
+      item_registry_result.value().find_item("arvane:rocket_fuel/basic");
+  ASSERT_TRUE(rocket_fuel.has_value());
+  const arv::player::ItemRecord* fuel_record =
+      item_registry_result.value().item(rocket_fuel.value());
+  ASSERT_NE(fuel_record, nullptr);
+  EXPECT_NE(
+      std::find(
+          fuel_record->tags.begin(),
+          fuel_record->tags.end(),
+          std::string{"arvane:rocket_fuel"}),
+      fuel_record->tags.end());
+}
+
 TEST(VehicleDefinitionRegistryTests, LoadsAircraftAndSubmersibleDefinitions) {
   auto parsed = arv::entity::parse_vehicle_definitions_json(R"json(
 {
@@ -531,6 +623,7 @@ TEST(VehicleDefinitionRegistryTests, LoadsAircraftAndSubmersibleDefinitions) {
   EXPECT_EQ(plane->seats.front().camera_mode, arv::entity::CameraMode::VehicleChase);
   EXPECT_FLOAT_EQ(plane->aircraft.max_speed, 42.0F);
   EXPECT_NEAR(plane->aircraft.roll_rate, arv::degrees_to_radians(110.0F), 0.00001F);
+  EXPECT_FALSE(plane->aircraft.vertical_thrust);
   EXPECT_TRUE(plane->authority.requires_swept_collision);
   EXPECT_FLOAT_EQ(plane->authority.max_unloaded_chunk_entry_distance, 0.0F);
 

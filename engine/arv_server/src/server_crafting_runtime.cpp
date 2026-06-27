@@ -40,7 +40,9 @@ void append_unique_unlocks(
 } // namespace
 
 void ServerRuntimeImpl::send_recipe_book_snapshot(const ServerSession& session) {
-  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  const world::WorldRuntime* runtime = world_for_session(session);
+  const player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session.player_id);
   if (player_state == nullptr) {
     return;
   }
@@ -141,7 +143,9 @@ void ServerRuntimeImpl::handle_craft_recipe(
     return;
   }
 
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  world::WorldRuntime* runtime = world_for_session(*session);
+  player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
   if (player_state == nullptr || item_registry_ == nullptr ||
       crafting_registry_ == nullptr || request.count == 0U) {
     send_craft_recipe_result(

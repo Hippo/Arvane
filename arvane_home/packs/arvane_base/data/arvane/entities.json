@@ -209,6 +209,60 @@
       "replicated_by_default": true
     },
     {
+      "name": "arvane:rocket",
+      "category": "vehicle",
+      "components": {
+        "arvane:transform": {},
+        "arvane:velocity": {},
+        "arvane:collision": {
+          "box": [1.2, 3.0, 1.2]
+        },
+        "arvane:health": {
+          "max": 60,
+          "current": 60
+        },
+        "arvane:rideable": {
+          "definition": "arvane:rocket"
+        },
+        "arvane:vehicle_physics": {
+          "definition": "arvane:rocket"
+        }
+      },
+      "presentation": {
+        "model": "arvane:model/entity/rocket"
+      },
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    },
+    {
+      "name": "arvane:rocket/basic",
+      "category": "vehicle",
+      "components": {
+        "arvane:transform": {},
+        "arvane:velocity": {},
+        "arvane:collision": {
+          "box": [1.2, 3.0, 1.2]
+        },
+        "arvane:health": {
+          "max": 60,
+          "current": 60
+        },
+        "arvane:rideable": {
+          "definition": "arvane:rocket"
+        },
+        "arvane:vehicle_physics": {
+          "definition": "arvane:rocket"
+        }
+      },
+      "presentation": {
+        "model": "arvane:model/entity/rocket"
+      },
+      "spawnable": true,
+      "persistent_by_default": true,
+      "replicated_by_default": true
+    },
+    {
       "name": "arvane:submarine",
       "category": "vehicle",
       "components": {

@@ -127,6 +127,7 @@ struct VehicleMovementProfile {
   f32 max_descent_rate{};
   f32 ground_takeoff_speed{};
   f32 ground_drag{0.9F};
+  bool vertical_thrust{};
   f32 ascend_rate{};
   f32 descend_rate{};
   f32 water_drag{0.9F};
@@ -138,13 +139,35 @@ struct VehicleMovementProfile {
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
 };
 
+[[nodiscard]] const entity::VehicleDefinition* vehicle_definition_for_entity(
+    const entity::VehicleDefinitionRegistry* registry,
+    std::string_view entity_type_name) noexcept {
+  if (registry == nullptr) {
+    return nullptr;
+  }
+  if (const entity::VehicleDefinition* direct = registry->find(entity_type_name);
+      direct != nullptr) {
+    return direct;
+  }
+  for (const entity::VehicleDefinition& definition : registry->records()) {
+    if (std::find(
+            definition.tags.begin(),
+            definition.tags.end(),
+            entity_type_name) != definition.tags.end()) {
+      return &definition;
+    }
+  }
+  return nullptr;
+}
+
 [[nodiscard]] VehicleMovementProfile vehicle_movement_profile(
     const ReplicatedEntityMirror& mirror,
     const entity::VehicleDefinitionRegistry* registry,
-    const player::PlayerCommand& command) noexcept {
+    const player::PlayerCommand& command,
+    bool space_environment) noexcept {
   VehicleMovementProfile profile;
   const entity::VehicleDefinition* definition =
-      registry != nullptr ? registry->find(mirror.entity_type_name) : nullptr;
+      vehicle_definition_for_entity(registry, mirror.entity_type_name);
   if (definition == nullptr) {
     return profile;
   }
@@ -187,27 +210,33 @@ struct VehicleMovementProfile {
       profile.step_height = definition->ground.max_step_height;
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
-    case entity::VehiclePhysicsKind::Aircraft:
-      profile.min_forward_speed = definition->aircraft.min_speed;
-      profile.max_forward_speed = definition->aircraft.max_speed;
+    case entity::VehiclePhysicsKind::Aircraft: {
+      const entity::AircraftMovementDefinition& aircraft =
+          space_environment && definition->space_aircraft.has_value()
+              ? definition->space_aircraft.value()
+              : definition->aircraft;
+      profile.max_forward_speed = aircraft.max_speed;
       profile.max_reverse_speed = 0.0F;
-      profile.acceleration = definition->aircraft.acceleration;
-      profile.brake_force = definition->aircraft.brake_deceleration;
-      profile.drag = definition->aircraft.drag;
-      profile.gravity_scale = definition->aircraft.gravity_scale;
-      profile.pitch_rate = definition->aircraft.pitch_rate;
-      profile.yaw_rate = definition->aircraft.yaw_rate;
-      profile.roll_rate = definition->aircraft.roll_rate;
-      profile.roll_auto_level_rate = definition->aircraft.roll_auto_level_rate;
-      profile.lift_strength = definition->aircraft.lift_strength;
-      profile.stall_speed = definition->aircraft.stall_speed;
-      profile.stall_gravity_scale = definition->aircraft.stall_gravity_scale;
-      profile.max_climb_rate = definition->aircraft.max_climb_rate;
-      profile.max_descent_rate = definition->aircraft.max_descent_rate;
-      profile.ground_takeoff_speed = definition->aircraft.ground_takeoff_speed;
-      profile.ground_drag = definition->aircraft.ground_drag;
+      profile.min_forward_speed = aircraft.min_speed;
+      profile.acceleration = aircraft.acceleration;
+      profile.brake_force = aircraft.brake_deceleration;
+      profile.drag = aircraft.drag;
+      profile.gravity_scale = aircraft.gravity_scale;
+      profile.pitch_rate = aircraft.pitch_rate;
+      profile.yaw_rate = aircraft.yaw_rate;
+      profile.roll_rate = aircraft.roll_rate;
+      profile.roll_auto_level_rate = aircraft.roll_auto_level_rate;
+      profile.lift_strength = aircraft.lift_strength;
+      profile.stall_speed = aircraft.stall_speed;
+      profile.stall_gravity_scale = aircraft.stall_gravity_scale;
+      profile.max_climb_rate = aircraft.max_climb_rate;
+      profile.max_descent_rate = aircraft.max_descent_rate;
+      profile.ground_takeoff_speed = aircraft.ground_takeoff_speed;
+      profile.ground_drag = aircraft.ground_drag;
+      profile.vertical_thrust = aircraft.vertical_thrust;
       profile.base_flags = protocol::VehicleMoveFlags::None;
       break;
+    }
     case entity::VehiclePhysicsKind::Submersible:
       profile.max_forward_speed = definition->submersible.max_forward_speed;
       profile.max_reverse_speed = definition->submersible.max_reverse_speed;
@@ -607,6 +636,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     ClientProtocolSender& sender,
     ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
+    bool space_environment,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
   u32 drop_requests = 0U;
@@ -667,11 +697,11 @@ void ClientInputRuntime::send_fixed_tick_input(
       return;
     }
     const entity::VehicleDefinition* definition =
-        vehicle_registry == nullptr ? nullptr : vehicle_registry->find(mirror->entity_type_name);
+        vehicle_definition_for_entity(vehicle_registry, mirror->entity_type_name);
     const entity::VehicleSeatDefinition* seat =
         find_vehicle_seat(definition, player_controller.mounted_seat_id());
     const VehicleMovementProfile profile =
-        vehicle_movement_profile(*mirror, vehicle_registry, command);
+        vehicle_movement_profile(*mirror, vehicle_registry, command, space_environment);
     if (should_reset_vehicle_prediction(
             vehicle_id,
             *mirror,
@@ -769,6 +799,10 @@ void ClientInputRuntime::send_fixed_tick_input(
               (command.sneak_held ? 1.0F : 0.0F),
           -1.0F,
           1.0F);
+      const f32 vertical_thrust_input =
+          profile.vertical_thrust ? pitch_input : 0.0F;
+      const f32 pitch_control_input =
+          profile.vertical_thrust ? 0.0F : pitch_input;
       const f32 yaw_input = steer;
       const f32 roll_input = std::clamp(
           (command.vehicle_roll_right_held ? 1.0F : 0.0F) -
@@ -780,7 +814,8 @@ void ClientInputRuntime::send_fixed_tick_input(
           length(predicted_vehicle_velocity_) <= 0.05F &&
           std::abs(throttle) <= 0.01F &&
           std::abs(steer) <= 0.01F &&
-          std::abs(pitch_input) <= 0.01F &&
+          std::abs(pitch_control_input) <= 0.01F &&
+          std::abs(vertical_thrust_input) <= 0.01F &&
           std::abs(roll_input) <= 0.01F &&
           !command.secondary_held;
       f32 roll_delta = roll_input * profile.roll_rate * dt;
@@ -794,7 +829,7 @@ void ClientInputRuntime::send_fixed_tick_input(
                           1.0F) *
                       profile.roll_auto_level_rate * dt;
       }
-      const f32 pitch_delta = pitch_input * profile.pitch_rate * dt;
+      const f32 pitch_delta = pitch_control_input * profile.pitch_rate * dt;
       const f32 yaw_delta = yaw_input * profile.yaw_rate * dt;
       predicted_vehicle_rotation_ =
           apply_local_vehicle_rotation(
@@ -809,6 +844,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       if (length(forward) <= 0.0F) {
         forward = horizontal_forward(predicted_vehicle_yaw_);
       }
+      const f32 previous_vertical_speed = predicted_vehicle_velocity_.y;
       if (near_takeoff_surface) {
         Vec3f ground_forward{forward.x, 0.0F, forward.z};
         if (length(ground_forward) <= 0.0F) {
@@ -820,8 +856,12 @@ void ClientInputRuntime::send_fixed_tick_input(
       } else {
         predicted_vehicle_velocity_ = forward * forward_speed;
       }
+      if (profile.vertical_thrust) {
+        predicted_vehicle_velocity_.y = previous_vertical_speed;
+      }
       const f32 assisted_takeoff_speed = profile.ground_takeoff_speed * 0.6F;
       const bool takeoff_ready =
+          (profile.vertical_thrust && vertical_thrust_input > 0.01F) ||
           !near_takeoff_surface ||
           forward_speed >= profile.ground_takeoff_speed ||
           (command.jump_held && throttle > 0.01F &&
@@ -833,17 +873,34 @@ void ClientInputRuntime::send_fixed_tick_input(
             profile.max_forward_speed <= 0.0F
                 ? 0.0F
                 : std::clamp(forward_speed / profile.max_forward_speed, 0.0F, 1.0F);
-        predicted_vehicle_velocity_.y +=
-            speed_fraction * speed_fraction * profile.lift_strength * dt;
-        predicted_vehicle_velocity_.y -=
-            VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
-        if (forward_speed < profile.stall_speed) {
+        if (profile.vertical_thrust) {
           predicted_vehicle_velocity_.y -=
-              VehicleGravityBlocksPerSecondSquared *
-              profile.stall_gravity_scale *
-              dt;
+              VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
+          if (std::abs(vertical_thrust_input) > 0.01F) {
+            const f32 target_vertical_speed =
+                vertical_thrust_input > 0.0F
+                    ? profile.max_climb_rate
+                    : -profile.max_descent_rate;
+            const f32 vertical_acceleration =
+                std::max(profile.lift_strength, profile.acceleration);
+            predicted_vehicle_velocity_.y = approach(
+                predicted_vehicle_velocity_.y,
+                target_vertical_speed,
+                vertical_acceleration * dt);
+          }
+        } else {
+          predicted_vehicle_velocity_.y +=
+              speed_fraction * speed_fraction * profile.lift_strength * dt;
+          predicted_vehicle_velocity_.y -=
+              VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
+          if (forward_speed < profile.stall_speed) {
+            predicted_vehicle_velocity_.y -=
+                VehicleGravityBlocksPerSecondSquared *
+                profile.stall_gravity_scale *
+                dt;
+          }
         }
-        if (near_takeoff_surface && command.jump_held) {
+        if (near_takeoff_surface && command.jump_held && !profile.vertical_thrust) {
           predicted_vehicle_velocity_.y = std::max(
               predicted_vehicle_velocity_.y,
               profile.max_climb_rate * 0.28F);

@@ -1,0 +1,12 @@
+id: arvane:environment/deep_space
+version: 1
+gravity_scale: 0.0
+has_atmosphere: false
+has_oxygen: false
+sky: space
+ambient_light: 0.02
+fog: none
+reentry:
+  enabled: false
+  drag_scale: 0.0
+  heat_damage: false

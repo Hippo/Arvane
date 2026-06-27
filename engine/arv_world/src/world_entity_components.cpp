@@ -133,10 +133,18 @@ void apply_authored_components(
             ? nullptr
             : vehicle_definitions->find(components.vehicle_physics->definition);
     if (definition != nullptr) {
+      entity::VehiclePhysicsComponent physics;
+      physics.kind = definition->physics;
+      physics.definition = definition->name;
+      if (definition->fuel.has_value()) {
+        physics.fuel_item = definition->fuel->item;
+        physics.fuel_seconds = definition->fuel->initial_seconds;
+        physics.fuel_capacity_seconds = definition->fuel->capacity_seconds;
+        physics.fuel_burn_per_second = definition->fuel->burn_per_second;
+      }
       registry.emplace_or_replace<entity::VehiclePhysicsComponent>(
           handle,
-          definition->physics,
-          definition->name);
+          std::move(physics));
     }
   }
 }

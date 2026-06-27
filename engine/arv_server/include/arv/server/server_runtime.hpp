@@ -2,6 +2,7 @@
 
 #include "arv/command/command.hpp"
 #include "arv/command/command_registry.hpp"
+#include "arv/command/server_command_services.hpp"
 #include "arv/core/expected.hpp"
 #include "arv/core/location.hpp"
 #include "arv/core/time.hpp"
@@ -26,6 +27,7 @@
 #include "arv/server/world_registry.hpp"
 #include "arv/voxel/fluid.hpp"
 #include "arv/world/natural_spawning.hpp"
+#include "arv/world/space_definition.hpp"
 #include "arv/world/world_runtime.hpp"
 
 #include <filesystem>
@@ -147,6 +149,18 @@ struct ServerPackSyncConfig {
   u32 chunk_size{protocol::PackSyncDefaultChunkSize};
 };
 
+struct SpaceBodyRuntimeView {
+  std::string body_id{};
+  std::string display_name{};
+  std::string target_world_id{};
+  std::string render_model{};
+  std::string render_texture{};
+  Vec3f position{};
+  f32 visual_radius{};
+  f32 entry_radius{};
+  bool entry_enabled{};
+};
+
 struct ServerStartInfo {
   ServerMode mode{ServerMode::Integrated};
   TickRate base_tps{DefaultBaseTps};
@@ -173,9 +187,11 @@ struct ServerStartInfo {
   const entity::EntityRegistry* entity_registry{};
   const entity::VehicleDefinitionRegistry* vehicle_registry{};
   const world::EntityGoalRegistry* entity_goals{};
+  const world::SpaceDefinitionRegistry* space_definitions{};
   TickIndex initial_tick_index{};
   std::string world_name{"default"};
   std::filesystem::path server_save_root{};
+  std::string server_save_display_name{};
   std::span<const ServerPlayerSaveState> saved_players{};
   BlockBreakingConfig block_breaking{};
   const BlockBreakBehaviorRegistry* block_break_behaviors{};
@@ -273,8 +289,17 @@ public:
   [[nodiscard]] const std::vector<ServerPlayerSaveState>& saved_player_states() const noexcept;
   [[nodiscard]] const world::WorldRuntime& voxel_world() const noexcept;
   [[nodiscard]] world::WorldRuntime& voxel_world() noexcept;
+  [[nodiscard]] const world::WorldRuntime* world_runtime(WorldID world_id) const noexcept;
+  [[nodiscard]] world::WorldRuntime* world_runtime(WorldID world_id) noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
   [[nodiscard]] const entity::VehicleDefinitionRegistry* vehicle_registry() const noexcept;
+  [[nodiscard]] const world::SpaceDefinitionRegistry* space_definitions() const noexcept;
+  [[nodiscard]] std::vector<SpaceBodyRuntimeView> space_bodies_for_world(
+      WorldID world_id) const;
+  [[nodiscard]] std::vector<SpaceBodyRuntimeView> space_bodies_near(
+      WorldID world_id,
+      Vec3f position,
+      f32 extra_radius = 0.0F) const;
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept;
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;
@@ -289,6 +314,7 @@ public:
   [[nodiscard]] const world::NaturalSpawnCounters& natural_spawn_counters() const noexcept;
   [[nodiscard]] std::optional<VehicleCrashDebugInfo> last_vehicle_crash_debug(
       EntityNetID vehicle_id) const;
+  [[nodiscard]] command::SaveAllCommandResult save_all_worlds(bool flush = false);
 
   [[nodiscard]] bool set_player_game_mode(PlayerID player_id, std::string_view mode_id);
   [[nodiscard]] bool set_player_fly_speed(PlayerID player_id, f32 fly_speed);

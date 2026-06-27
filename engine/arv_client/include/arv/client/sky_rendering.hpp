@@ -15,4 +15,6 @@ void configure_frame_sky(
     const world::WorldClock& clock,
     const io::RenderConfig::SkyConfig& sky_config) noexcept;
 
+void configure_frame_space_sky(render::FramePacket& frame) noexcept;
+
 } // namespace arv::client

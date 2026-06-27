@@ -1,0 +1,13 @@
+id: arvane:environment/overworld
+version: 1
+gravity_scale: 1.0
+has_atmosphere: true
+has_oxygen: true
+sky: overworld
+ambient_light: 0.15
+fog: overworld
+reentry:
+  enabled: true
+  effect: arvane:reentry_wake
+  drag_scale: 1.0
+  heat_damage: false

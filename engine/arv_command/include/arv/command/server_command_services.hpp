@@ -206,7 +206,7 @@ using EntityTypeByNameFn =
     FunctionRef<std::optional<EntityTypeCommandRecord>(std::string_view)>;
 using SpawnEntityFn =
     FunctionRef<std::optional<EntityCommandTarget>(WorldID, std::string_view, Vec3f)>;
-using KillEntityFn = FunctionRef<bool(EntityID)>;
+using KillEntityFn = FunctionRef<bool(WorldID, EntityID)>;
 using ItemByNameFn = FunctionRef<std::optional<ItemCommandRecord>(std::string_view)>;
 using GivePlayerItemFn =
     FunctionRef<InventoryInsertCommandResult(
@@ -217,11 +217,11 @@ using GivePlayerItemFn =
 using ClearPlayerInventoryFn =
     FunctionRef<InventoryClearCommandResult(PlayerID, std::optional<u32>)>;
 using ApplyStatusEffectFn =
-    FunctionRef<bool(EntityID, std::string_view, u32, u32)>;
+    FunctionRef<bool(WorldID, EntityID, std::string_view, u32, u32)>;
 using ClearStatusEffectsFn =
-    FunctionRef<u32(EntityID, std::optional<std::string_view>)>;
+    FunctionRef<u32(WorldID, EntityID, std::optional<std::string_view>)>;
 using ListStatusEffectsFn =
-    FunctionRef<std::vector<StatusEffectCommandState>(EntityID)>;
+    FunctionRef<std::vector<StatusEffectCommandState>(WorldID, EntityID)>;
 using SaveAllFn = FunctionRef<SaveAllCommandResult(bool)>;
 using WorldListFn = FunctionRef<std::vector<WorldCommandInfo>()>;
 using WorldInfoFn = FunctionRef<std::optional<WorldCommandInfo>(std::string_view)>;

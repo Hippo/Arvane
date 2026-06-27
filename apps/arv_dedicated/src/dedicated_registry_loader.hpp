@@ -14,6 +14,7 @@
 #include "arv/text/language.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
+#include "arv/world/space_definition.hpp"
 
 namespace arv::dedicated {
 
@@ -33,6 +34,7 @@ struct DedicatedRegistries {
 
   entity::EntityRegistry entity_registry;
   entity::VehicleDefinitionRegistry vehicle_registry;
+  world::SpaceDefinitionRegistry space_definitions{};
 
   std::string client_registry_snapshot_json{};
   std::string client_registry_snapshot_hash{};

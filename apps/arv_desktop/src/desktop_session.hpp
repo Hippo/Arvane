@@ -28,6 +28,7 @@
 #include "arv/sched/job_system.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/voxel/fluid.hpp"
+#include "arv/world/space_definition.hpp"
 #include "arv/world/world_generation.hpp"
 #include "arv/world/world_runtime.hpp"
 
@@ -115,6 +116,7 @@ struct DesktopSessionDependencies {
   const voxel::FluidDefinition& water_fluid;
   const world::WorldTickPolicy& world_tick_policy;
   const world::WorldGenerationConfig& default_generation_config;
+  const world::SpaceDefinitionRegistry& space_definitions;
   const sched::RuntimeThreadBudgetPlan& thread_budget;
   const arv::text::LanguageCatalog& language;
   plugin::PluginManager* plugins{};
@@ -166,6 +168,7 @@ public:
   void delete_singleplayer_save(const ui::DeleteSinglePlayerSaveCommand& command);
 
   void refresh_inventory_slots(DesktopGameSession& session) const;
+  void sync_client_world_context(DesktopGameSession& session) const;
   void collect_client_chunk_stream(DesktopGameSession& session) const;
   void apply_pending_client_chunk_stream(
       DesktopGameSession& session,

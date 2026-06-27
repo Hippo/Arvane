@@ -1,0 +1,101 @@
+{
+  "textures": [
+    "arvane:texture/entity/rocket"
+  ],
+  "texture_sizes": [
+    [
+      128,
+      128
+    ]
+  ],
+  "bones": {
+    "base": {
+      "pivot": [
+        -7,
+        0,
+        -7
+      ]
+    }
+  },
+  "boxes": [
+    {
+      "bone": "base",
+      "min": [
+        -8,
+        0,
+        -8
+      ],
+      "max": [
+        8,
+        48,
+        8
+      ],
+      "inflate": 0,
+      "origin": [
+        -7,
+        0,
+        -7
+      ],
+      "north": {
+        "texture": 0,
+        "uv": [
+          0,
+          0,
+          16,
+          48
+        ],
+        "rotation": 0
+      },
+      "south": {
+        "texture": 0,
+        "uv": [
+          32,
+          0,
+          48,
+          48
+        ],
+        "rotation": 0
+      },
+      "east": {
+        "texture": 0,
+        "uv": [
+          16,
+          0,
+          32,
+          48
+        ],
+        "rotation": 0
+      },
+      "west": {
+        "texture": 0,
+        "uv": [
+          0,
+          48,
+          16,
+          96
+        ],
+        "rotation": 0
+      },
+      "up": {
+        "texture": 0,
+        "uv": [
+          64,
+          16,
+          48,
+          0
+        ],
+        "rotation": 0
+      },
+      "down": {
+        "texture": 0,
+        "uv": [
+          32,
+          48,
+          16,
+          64
+        ],
+        "rotation": 0
+      }
+    }
+  ]
+}

@@ -18,6 +18,22 @@ std::vector<u8> serialize_clientbound_world_join_result(const ClientboundWorldJo
   writer.write<u64>(result.initial_tick);
   writer.write<u32>(result.tick_rate);
   writer.write<i32>(result.effective_view_distance);
+  writer.write_string(result.environment_sky);
+  writer.write_bool(result.space_environment);
+  writer.write<u32>(static_cast<u32>(result.space_bodies.size()));
+  for (const ClientboundSpaceBodyView& body : result.space_bodies) {
+    writer.write_string(body.body_id);
+    writer.write_string(body.display_name);
+    writer.write_string(body.target_world_id);
+    writer.write_string(body.render_model);
+    writer.write_string(body.render_texture);
+    write_f32(writer, body.position.x);
+    write_f32(writer, body.position.y);
+    write_f32(writer, body.position.z);
+    write_f32(writer, body.visual_radius);
+    write_f32(writer, body.entry_radius);
+    writer.write_bool(body.entry_enabled);
+  }
   return std::move(writer).take_bytes();
 }
 
@@ -34,11 +50,48 @@ Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_worl
   auto initial_tick = reader.read<u64>();
   auto tick_rate = reader.read<u32>();
   auto view_distance = reader.read<i32>();
+  auto environment_sky = reader.read_string();
+  auto space_environment = reader.read_bool();
+  auto space_body_count = reader.read<u32>();
   if (!accepted || !reason || !world_id || !player_id || !entity_id || !pos_x ||
-      !pos_y || !pos_z || !initial_tick || !tick_rate || !view_distance) {
+      !pos_y || !pos_z || !initial_tick || !tick_rate || !view_distance ||
+      !environment_sky || !space_environment || !space_body_count) {
     return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(
         ProtocolError{"failed to decode world join result"});
   }
+
+  std::vector<ClientboundSpaceBodyView> space_bodies;
+  space_bodies.reserve(space_body_count.value());
+  for (u32 index = 0; index < space_body_count.value(); ++index) {
+    auto body_id = reader.read_string();
+    auto display_name = reader.read_string();
+    auto target_world_id = reader.read_string();
+    auto render_model = reader.read_string();
+    auto render_texture = reader.read_string();
+    auto body_x = read_f32(reader);
+    auto body_y = read_f32(reader);
+    auto body_z = read_f32(reader);
+    auto visual_radius = read_f32(reader);
+    auto entry_radius = read_f32(reader);
+    auto entry_enabled = reader.read_bool();
+    if (!body_id || !display_name || !target_world_id || !render_model ||
+        !render_texture || !body_x || !body_y || !body_z || !visual_radius ||
+        !entry_radius || !entry_enabled) {
+      return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(
+          ProtocolError{"failed to decode world join space body"});
+    }
+    space_bodies.push_back({
+        std::move(body_id.value()),
+        std::move(display_name.value()),
+        std::move(target_world_id.value()),
+        std::move(render_model.value()),
+        std::move(render_texture.value()),
+        {body_x.value(), body_y.value(), body_z.value()},
+        visual_radius.value(),
+        entry_radius.value(),
+        entry_enabled.value()});
+  }
+
   auto trailing = require_no_trailing_bytes(reader, "world join message");
   if (!trailing) {
     return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(trailing.error());
@@ -54,6 +107,9 @@ Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_worl
   result.initial_tick = initial_tick.value();
   result.tick_rate = tick_rate.value();
   result.effective_view_distance = view_distance.value();
+  result.environment_sky = std::move(environment_sky.value());
+  result.space_environment = space_environment.value();
+  result.space_bodies = std::move(space_bodies);
   return Expected<ClientboundWorldJoinResult, ProtocolError>::success(std::move(result));
 }
 

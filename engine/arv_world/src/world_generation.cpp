@@ -350,9 +350,37 @@ WorldGenerationConfig config_from_resolved_dimension(
   return config;
 }
 
+WorldGenerationConfig make_void_world_generation_config() {
+  WorldGenerationConfig config;
+  config.id = std::string{VoidWorldGenerationID};
+  config.dimension_id = std::string{VoidWorldGenerationID};
+  config.version = 1U;
+  config.seed_salt = "void";
+  config.min_y = -64;
+  config.max_y = 128;
+  config.sea_level = 0;
+  config.base_height = config.min_y - 1;
+  config.height_scale = 0;
+  config.terrain_noise_type = "void";
+  config.terrain_frequency = 1.0F;
+  config.terrain_octaves = 1U;
+  config.terrain_amplitude = 1.0F;
+  config.terrain_lacunarity = 1.0F;
+  config.terrain_gain = 1.0F;
+  config.void_world = true;
+  return config;
+}
+
 WorldGenerationConfig refresh_generation_config_for_current_dimension(
     WorldGenerationConfig saved_config,
     const WorldGenerationConfig& current_default_config) {
+  if (saved_config.void_world ||
+      saved_config.dimension_id == VoidWorldGenerationID ||
+      saved_config.id == VoidWorldGenerationID) {
+    saved_config.void_world = true;
+    saved_config.resolved_dimension.reset();
+    return saved_config;
+  }
   const bool same_dimension =
       saved_config.dimension_id.empty() ||
       saved_config.dimension_id == current_default_config.dimension_id;
@@ -389,6 +417,14 @@ WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
   if (const io::DataValue* seed_salt = member(root, "seed_salt");
       seed_salt != nullptr) {
     config.seed_salt = std::string{seed_salt->as_string_or(config.seed_salt)};
+  }
+  if (const io::DataValue* void_world = member(root, "void");
+      void_world != nullptr && void_world->kind() == io::DataKind::Bool) {
+    config.void_world = void_world->as_bool_or(config.void_world);
+  }
+  if (const io::DataValue* void_world = member(root, "void_world");
+      void_world != nullptr && void_world->kind() == io::DataKind::Bool) {
+    config.void_world = void_world->as_bool_or(config.void_world);
   }
 
   if (const io::DataValue* vertical = member(root, "vertical"); vertical != nullptr) {
@@ -460,6 +496,12 @@ WorldGenerationConfigResult parse_world_generation_yaml(std::string_view text) {
   if (config.min_y > config.max_y) {
     return WorldGenerationConfigResult::failure({"vertical.min_y must be <= vertical.max_y"});
   }
+  if (config.void_world || config.id == VoidWorldGenerationID ||
+      config.dimension_id == VoidWorldGenerationID) {
+    config.void_world = true;
+    config.resolved_dimension.reset();
+    return WorldGenerationConfigResult::success(std::move(config));
+  }
   if (config.terrain_frequency <= 0.0F) {
     return WorldGenerationConfigResult::failure({"noise.terrain.frequency must be positive"});
   }
@@ -493,6 +535,10 @@ WorldGenerationPaletteResult resolve_world_generation_palette(
     const voxel::BlockRegistry& registry) {
   WorldGenerationPalette palette;
   palette.resolved_dimension = config.resolved_dimension;
+  if (config.void_world || config.dimension_id == VoidWorldGenerationID ||
+      config.id == VoidWorldGenerationID) {
+    return WorldGenerationPaletteResult::success(std::move(palette));
+  }
   if (palette.resolved_dimension != nullptr && config.surface_layers.empty()) {
     return WorldGenerationPaletteResult::success(std::move(palette));
   }
@@ -521,6 +567,10 @@ i32 terrain_height_at(
     u64 seed,
     i32 world_x,
     i32 world_z) noexcept {
+  if (config.void_world || config.dimension_id == VoidWorldGenerationID ||
+      config.id == VoidWorldGenerationID) {
+    return config.min_y - 1;
+  }
   if (config.resolved_dimension != nullptr) {
     const ChunkCoord coord{floor_div(world_x, ChunkSize), floor_div(world_z, ChunkSize)};
     const worldgen::TerrainProfile profile =
@@ -536,6 +586,12 @@ GenerationSurfaceProfile terrain_height_profile_at(
     const WorldGenerationConfig& config,
     u64 seed,
     ChunkCoord coord) noexcept {
+  if (config.void_world || config.dimension_id == VoidWorldGenerationID ||
+      config.id == VoidWorldGenerationID) {
+    GenerationSurfaceProfile surface_y_by_column{};
+    surface_y_by_column.fill(config.min_y - 1);
+    return surface_y_by_column;
+  }
   if (config.resolved_dimension != nullptr) {
     return worldgen::generate_terrain_profile(*config.resolved_dimension, seed, coord)
         .surface_y_by_column;
@@ -568,6 +624,10 @@ voxel::BlockVariantID choose_surface_block(
 arv::Location generate_world_spawn_location(
     const WorldGenerationConfig& config,
     u64 seed) noexcept {
+  if (config.void_world || config.dimension_id == VoidWorldGenerationID ||
+      config.id == VoidWorldGenerationID) {
+    return arv::Location{0.5F, 0.0F, 0.5F, 0.0F, 0.0F};
+  }
   constexpr u32 MaxSpawnAttempts = 768U;
   for (u32 attempt = 0; attempt < MaxSpawnAttempts; ++attempt) {
     const Vec2i candidate = spawn_candidate_column(seed, attempt);
@@ -618,6 +678,27 @@ GeneratedChunkResult generate_chunk(const ChunkGenerationRequest& request) {
                  : request.config.resolved_dimension);
   if (resolved_dimension != nullptr) {
     return worldgen::generate_resolved_chunk(request, *resolved_dimension);
+  }
+
+  if (request.config.void_world ||
+      request.config.dimension_id == VoidWorldGenerationID ||
+      request.config.id == VoidWorldGenerationID) {
+    GeneratedChunk chunk;
+    chunk.world_id = request.world_id;
+    chunk.seed = request.seed;
+    chunk.generator_version = request.config.version;
+    chunk.coord = request.coord;
+    chunk.surface_y_by_column.fill(request.config.min_y - 1);
+    const i32 min_chunk_y = std::min(request.min_chunk_y, request.max_chunk_y);
+    const i32 max_chunk_y = std::max(request.min_chunk_y, request.max_chunk_y);
+    chunk.sections.reserve(static_cast<usize>(max_chunk_y - min_chunk_y + 1));
+    for (i32 chunk_y = min_chunk_y; chunk_y <= max_chunk_y; ++chunk_y) {
+      GeneratedChunkSection section;
+      section.coord = chunk_section(request.coord, chunk_y);
+      section.blocks.fill(voxel::AirBlockVariantID);
+      chunk.sections.emplace_back(std::move(section));
+    }
+    return GeneratedChunkResult::success(std::move(chunk));
   }
 
   if (request.palette.surface_layers.empty()) {

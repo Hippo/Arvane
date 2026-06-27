@@ -4,12 +4,18 @@
 #include "arv/base/base_module.hpp"
 #include "arv/base/command_services.hpp"
 #include "arv/command/command_system.hpp"
+#include "arv/core/coordinates.hpp"
+#include "arv/entity/components.hpp"
 #include "arv/net/in_process_transport.hpp"
+#include "arv/persistence/save.hpp"
 #include "arv/player/permissions.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/text/language.hpp"
 #include "arv/text/rich_text.hpp"
+#include "arv/voxel/storage.hpp"
+#include "arv/world/space_definition.hpp"
+#include "arv/world/world_generation.hpp"
 #include "arv/world/world_time.hpp"
 #include "support/server_harness.hpp"
 #include "support/temp_dir.hpp"
@@ -44,11 +50,199 @@ using arv::testsupport::connected_player;
   return std::move(result.value());
 }
 
+[[nodiscard]] arv::entity::VehicleDefinitionRegistry make_command_test_vehicle_registry() {
+  arv::entity::VehicleDefinition buggy;
+  buggy.name = "arvane:command_buggy";
+  buggy.kind = arv::entity::VehicleKind::Vehicle;
+  buggy.physics = arv::entity::VehiclePhysicsKind::GroundVehicle;
+  buggy.collision_size = {1.8F, 1.2F, 3.2F};
+  buggy.seats.push_back({"driver",
+                         "driver",
+                         arv::entity::SeatRole::Driver,
+                         {0.0F, 0.8F, 0.0F},
+                         {},
+                         true,
+                         arv::entity::CameraMode::ThirdPersonFollow});
+  buggy.authority.max_speed = 22.0F;
+  buggy.authority.max_acceleration = 18.0F;
+  buggy.authority.max_deceleration = 50.0F;
+  buggy.authority.max_angular_speed = arv::degrees_to_radians(110.0F);
+  buggy.authority.max_vertical_speed = 24.0F;
+  buggy.authority.max_step_height = 0.6F;
+  buggy.authority.requires_ground = false;
+  buggy.authority.requires_water = false;
+
+  arv::entity::VehicleDefinition rocket;
+  rocket.name = "arvane:command_rocket";
+  rocket.kind = arv::entity::VehicleKind::Vehicle;
+  rocket.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  rocket.tags = {"arvane:vehicle", "arvane:rocket", "arvane:space_capable"};
+  rocket.collision_size = {1.2F, 3.0F, 1.2F};
+  rocket.seats.push_back({"pilot",
+                          "pilot",
+                          arv::entity::SeatRole::Driver,
+                          {0.0F, 1.4F, 0.0F},
+                          {},
+                          true,
+                          arv::entity::CameraMode::VehicleChase});
+  rocket.aircraft = {
+      0.0F,
+      80.0F,
+      24.0F,
+      16.0F,
+      0.98F,
+      arv::degrees_to_radians(70.0F),
+      arv::degrees_to_radians(60.0F),
+      arv::degrees_to_radians(90.0F),
+      arv::degrees_to_radians(45.0F),
+      30.0F,
+      8.0F,
+      1.2F,
+      0.75F,
+      80.0F,
+      80.0F,
+      8.0F,
+      0.90F};
+  rocket.space_aircraft = arv::entity::AircraftMovementDefinition{
+      0.0F,
+      120.0F,
+      20.0F,
+      12.0F,
+      0.997F,
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(120.0F),
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      120.0F,
+      120.0F,
+      0.0F,
+      0.997F};
+  rocket.fuel = arv::entity::VehicleFuelDefinition{
+      "arvane:rocket_fuel/basic",
+      60.0F,
+      20.0F,
+      1.0F,
+      10.0F};
+  rocket.authority.max_speed = 120.0F;
+  rocket.authority.max_acceleration = 80.0F;
+  rocket.authority.max_deceleration = 80.0F;
+  rocket.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  rocket.authority.max_vertical_speed = 120.0F;
+
+  auto result = arv::entity::VehicleDefinitionRegistry::build(
+      {std::move(buggy), std::move(rocket)});
+  EXPECT_TRUE(result) << result.error().message;
+  return std::move(result.value());
+}
+
+[[nodiscard]] arv::world::SpaceDefinitionRegistry make_command_test_space_definitions() {
+  arv::world::SpaceDefinitionRegistry registry;
+
+  arv::world::EnvironmentDefinition deep_space;
+  deep_space.id = "arvane:environment/deep_space";
+  deep_space.gravity_scale = 0.0F;
+  deep_space.has_atmosphere = false;
+  deep_space.has_oxygen = false;
+  deep_space.sky = "space";
+  deep_space.ambient_light = 0.02F;
+  deep_space.fog = "none";
+  registry.environments.emplace(deep_space.id, std::move(deep_space));
+
+  arv::world::EnvironmentDefinition overworld_env;
+  overworld_env.id = "arvane:environment/overworld";
+  overworld_env.gravity_scale = 1.0F;
+  overworld_env.has_atmosphere = true;
+  overworld_env.has_oxygen = true;
+  overworld_env.sky = "overworld";
+  overworld_env.ambient_light = 0.15F;
+  overworld_env.fog = "none";
+  registry.environments.emplace(overworld_env.id, std::move(overworld_env));
+
+  arv::world::EnvironmentDefinition luna_env;
+  luna_env.id = "arvane:environment/luna";
+  luna_env.gravity_scale = 0.18F;
+  luna_env.has_atmosphere = false;
+  luna_env.has_oxygen = false;
+  luna_env.sky = "space";
+  luna_env.ambient_light = 0.08F;
+  luna_env.fog = "none";
+  registry.environments.emplace(luna_env.id, std::move(luna_env));
+
+  arv::world::WorldDefinition default_world;
+  default_world.id = "arvane:world/default";
+  default_world.kind = arv::world::WorldDefinitionKind::Planet;
+  default_world.display_name = "Default";
+  default_world.worldgen = "arvane:worldgen/dimension/overworld";
+  default_world.environment = "arvane:environment/overworld";
+  default_world.rules.allow_vehicle_launch = true;
+  arv::world::SpaceExitDefinition exit;
+  exit.enabled = true;
+  exit.target_space_world = "arvane:space/solar_system";
+  exit.min_y = 20;
+  exit.min_vertical_speed = 5.0F;
+  exit.require_vehicle_tags = {"arvane:space_capable"};
+  exit.consume_fuel = true;
+  exit.transition_spawn.position = {11.0F, 22.0F, 33.0F};
+  exit.transition_spawn.velocity = {0.0F, 1.0F, 0.0F};
+  exit.transition_spawn.rotation_degrees = {0.0F, 90.0F, 0.0F};
+  exit.transition_spawn.velocity_scale = 0.25F;
+  default_world.space_exit = std::move(exit);
+  registry.worlds.emplace(default_world.id, std::move(default_world));
+
+  arv::world::WorldDefinition luna_world;
+  luna_world.id = "arvane:world/luna";
+  luna_world.kind = arv::world::WorldDefinitionKind::Planet;
+  luna_world.display_name = "Luna";
+  luna_world.worldgen = "arvane:worldgen/dimension/overworld";
+  luna_world.environment = "arvane:environment/luna";
+  luna_world.rules.allow_vehicle_launch = true;
+  registry.worlds.emplace(luna_world.id, std::move(luna_world));
+
+  arv::world::WorldDefinition solar_system;
+  solar_system.id = "arvane:space/solar_system";
+  solar_system.kind = arv::world::WorldDefinitionKind::Space;
+  solar_system.display_name = "Solar System";
+  solar_system.worldgen = std::string{arv::world::VoidWorldGenerationID};
+  solar_system.environment = "arvane:environment/deep_space";
+  solar_system.rules.allow_block_placement = false;
+  solar_system.rules.allow_space_entry = true;
+  arv::world::SpaceWorldDefinition space;
+  space.bodies.push_back("arvane:space_body/luna");
+  solar_system.space = std::move(space);
+  registry.worlds.emplace(solar_system.id, std::move(solar_system));
+
+  arv::world::SpaceBodyDefinition luna;
+  luna.id = "arvane:space_body/luna";
+  luna.type = arv::world::SpaceBodyType::Moon;
+  luna.display_name = "Luna";
+  luna.space_world = "arvane:space/solar_system";
+  luna.target_world = "arvane:world/luna";
+  luna.position = {2200.0F, 0.0F, 700.0F};
+  luna.visual_radius = 90.0F;
+  luna.entry_radius = 130.0F;
+  luna.entry.enabled = true;
+  luna.entry.mode = arv::world::SpaceBodyEntryMode::FixedSpawn;
+  luna.entry.require_vehicle_tags = {"arvane:space_capable"};
+  luna.entry.spawn_position = {0.0F, 2300.0F, 0.0F};
+  luna.entry.spawn_velocity = {0.0F, -10.0F, 0.0F};
+  luna.entry.spawn_rotation_degrees = {0.0F, 180.0F, 0.0F};
+  luna.entry.effect = "arvane:moon_entry";
+  registry.space_bodies.emplace(luna.id, std::move(luna));
+
+  return registry;
+}
+
 struct RunningServerHarness {
   arv::testsupport::ScopedTempDir temp;
   arv::voxel::BlockRegistry block_registry;
   arv::player::ItemRegistry item_registry;
   arv::entity::EntityRegistry entity_registry;
+  arv::entity::VehicleDefinitionRegistry vehicle_registry;
+  arv::world::SpaceDefinitionRegistry space_definitions;
   arv::player::GameModeRegistry game_modes;
   arv::net::InProcessTransportPair transports;
   arv::server::ServerRuntime server;
@@ -58,11 +252,14 @@ struct RunningServerHarness {
       arv::io::MovementValidationConfig movement = arv::io::MovementValidationConfig{},
       arv::Location world_spawn = arv::default_spawn_location(),
       std::string permission_denied_message = "No permission",
-      const arv::text::LanguageCatalog* language = nullptr)
+      const arv::text::LanguageCatalog* language = nullptr,
+      std::string server_save_display_name = {})
       : temp("arvane_command_"),
         block_registry(arv::testsupport::make_test_block_registry()),
         item_registry(arv::testsupport::make_test_item_registry(block_registry)),
         entity_registry(make_command_test_entity_registry()),
+        vehicle_registry(make_command_test_vehicle_registry()),
+        space_definitions(make_command_test_space_definitions()),
         transports(arv::net::make_in_process_transport_pair()),
         server(std::move(transports.server)),
         client(std::move(transports.client)) {
@@ -74,12 +271,15 @@ struct RunningServerHarness {
     start_info.block_registry = &block_registry;
     start_info.item_registry = &item_registry;
     start_info.entity_registry = &entity_registry;
+    start_info.vehicle_registry = &vehicle_registry;
+    start_info.space_definitions = &space_definitions;
     start_info.game_modes = &game_modes;
     start_info.register_commands = arv::base::register_server_commands;
     start_info.movement = movement;
     start_info.world_spawn = world_spawn;
     start_info.world_name = "default";
     start_info.server_save_root = temp.path / "save";
+    start_info.server_save_display_name = std::move(server_save_display_name);
     start_info.command_permission_denied_message = std::move(permission_denied_message);
     start_info.language = language;
     EXPECT_TRUE(server.start(start_info));
@@ -123,6 +323,18 @@ void submit_chat_text(arv::client::ClientRuntime& client, std::string_view text)
   client.submit_input(arv::client::InputFrame{.text_submit_pressed = true});
 }
 
+void pump_client_until_ingame(
+    arv::server::ServerRuntime& server,
+    arv::client::ClientRuntime& client) {
+  (void)server;
+  for (int i = 0; i < 20; ++i) {
+    client.poll_network();
+    if (client.connection_state() == arv::net::ConnectionState::InGame) {
+      return;
+    }
+  }
+}
+
 [[nodiscard]] bool client_chat_contains(
     const arv::client::ClientRuntime& client,
     std::string_view needle) {
@@ -133,6 +345,79 @@ void submit_chat_text(arv::client::ClientRuntime& client, std::string_view text)
       [&](const std::string& message) {
         return message.find(needle) != std::string::npos;
       });
+}
+
+[[nodiscard]] arv::EntityID create_command_test_entity(
+    arv::world::WorldRuntime& world,
+    arv::Vec3f position) {
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:cow";
+  info.position = position;
+  return world.create_entity(std::move(info));
+}
+
+[[nodiscard]] arv::EntityID create_command_test_vehicle(
+    arv::world::WorldRuntime& world,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.8F, 1.2F, 3.2F}};
+  components.health = arv::entity::AuthoredHealthComponent{30.0F};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:command_buggy"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:command_buggy"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{20};
+  info.type_name = "arvane:command_buggy";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return world.create_entity(std::move(info));
+}
+
+[[nodiscard]] arv::EntityID create_command_test_rocket(
+    arv::world::WorldRuntime& world,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision =
+      arv::entity::AuthoredCollisionComponent{{1.2F, 3.0F, 1.2F}};
+  components.health = arv::entity::AuthoredHealthComponent{40.0F};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:command_rocket"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:command_rocket"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{21};
+  info.type_name = "arvane:command_rocket";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return world.create_entity(std::move(info));
+}
+
+[[nodiscard]] const arv::server::WorldRecord* create_and_load_command_test_space_world(
+    RunningServerHarness& harness) {
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create solar_system --type space --seed 4242");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Success);
+  if (result.status != arv::command::CommandStatus::Success) {
+    return nullptr;
+  }
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load solar_system");
+  EXPECT_EQ(result.status, arv::command::CommandStatus::Success);
+  if (result.status != arv::command::CommandStatus::Success) {
+    return nullptr;
+  }
+
+  return harness.server.worlds().find("solar_system");
 }
 
 [[nodiscard]] std::vector<arv::text::RichTextRun> last_chat_runs(
@@ -585,6 +870,103 @@ TEST(CommandTests, CoreEntityAndEffectCommandsUseRegistriesAndSelectors) {
   EXPECT_TRUE(result_contains(result, "Affected"));
 }
 
+TEST(CommandTests, EffectCommandsUseTargetWorldAfterWorldTeleport) {
+  RunningServerHarness harness;
+  arv::player::PlayerState& player = connected_player(harness.server);
+  const arv::PlayerID player_id = player.player_id;
+  player.permission_overrides.custom_overrides["*"] = arv::player::TriState::Allow;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create effect_world --seed 24680");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load effect_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp effect_world local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      harness.server.worlds().find("effect_world");
+  ASSERT_NE(runtime_record, nullptr);
+  arv::world::WorldRuntime* runtime =
+      harness.server.world_runtime(runtime_record->id);
+  ASSERT_NE(runtime, nullptr);
+  const std::optional<arv::EntityID> runtime_entity =
+      runtime->entity_for_player(player_id);
+  ASSERT_TRUE(runtime_entity.has_value());
+
+  std::optional<arv::command::CommandSender> sender =
+      connected_player_sender(harness);
+  ASSERT_TRUE(sender.has_value());
+  ASSERT_EQ(sender->world_id, runtime_record->id);
+
+  result = harness.server.execute_command(
+      sender.value(),
+      "/effect give @s arvane:speed 1 2");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Applied arvane:speed to 1 entities."));
+  ASSERT_EQ(runtime->status_effects(runtime_entity.value()).size(), 1U);
+  EXPECT_EQ(
+      runtime->status_effects(runtime_entity.value()).front().effect_id,
+      "arvane:speed");
+
+  result = harness.server.execute_command(sender.value(), "/effect list @s");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "arvane:speed"));
+
+  result = harness.server.execute_command(sender.value(), "/effect clear @s arvane:speed");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Cleared 1 effects."));
+  EXPECT_TRUE(runtime->status_effects(runtime_entity.value()).empty());
+}
+
+TEST(CommandTests, KillCommandUsesTargetWorldForEntityIdCollisions) {
+  RunningServerHarness harness;
+  const arv::EntityID default_entity =
+      create_command_test_entity(harness.server.voxel_world(), {1.0F, 70.0F, 1.0F});
+  ASSERT_NE(default_entity.value, 0U);
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create kill_world --seed 97531");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load kill_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      harness.server.worlds().find("kill_world");
+  ASSERT_NE(runtime_record, nullptr);
+  arv::world::WorldRuntime* runtime =
+      harness.server.world_runtime(runtime_record->id);
+  ASSERT_NE(runtime, nullptr);
+
+  arv::EntityID runtime_entity{};
+  while (runtime_entity.value < default_entity.value) {
+    runtime_entity =
+        create_command_test_entity(*runtime, {2.0F, 70.0F, 2.0F});
+    ASSERT_NE(runtime_entity.value, 0U);
+  }
+  ASSERT_EQ(runtime_entity, default_entity);
+
+  arv::command::CommandSender sender = arv::server::server_console_command_sender();
+  sender.world_id = runtime_record->id;
+  sender.entity_id = runtime_entity;
+  sender.position = arv::Vec3f{2.0F, 70.0F, 2.0F};
+  result = harness.server.execute_command(sender, "/kill @s");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(harness.server.voxel_world().entity_exists(default_entity));
+  EXPECT_FALSE(runtime->entity_exists(runtime_entity));
+}
+
 TEST(CommandTests, CoreAdminCommandsProduceFeedback) {
   RunningServerHarness harness;
   arv::player::PlayerState& player = connected_player(harness.server);
@@ -687,6 +1069,7 @@ TEST(CommandTests, WorldCommandCreatesListsInspectsPersistsAndDeletesWorlds) {
   start_info.block_registry = &harness.block_registry;
   start_info.item_registry = &harness.item_registry;
   start_info.entity_registry = &harness.entity_registry;
+  start_info.vehicle_registry = &harness.vehicle_registry;
   start_info.game_modes = &harness.game_modes;
   start_info.register_commands = arv::base::register_server_commands;
   start_info.world_name = "default";
@@ -739,9 +1122,8 @@ TEST(CommandTests, WorldCommandLoadsTeleportsUnloadsAndDeletesLiveWorldRuntime) 
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   EXPECT_TRUE(result_contains(result, "Teleported local_player to world 'runtime_world'."));
 
-  for (int i = 0; i < 3; ++i) {
-    harness.client.fixed_tick(harness.server.tick_index());
-  }
+  pump_client_until_ingame(harness.server, harness.client);
+  ASSERT_EQ(harness.client.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(harness.client.camera().world_id(), runtime_world_id);
   const std::vector<arv::SessionID> session_ids =
       harness.server.sessions().session_ids();
@@ -762,9 +1144,8 @@ TEST(CommandTests, WorldCommandLoadsTeleportsUnloadsAndDeletesLiveWorldRuntime) 
       "/world unload runtime_world --force");
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   EXPECT_TRUE(result_contains(result, "Unloaded world 'runtime_world'."));
-  for (int i = 0; i < 3; ++i) {
-    harness.client.fixed_tick(harness.server.tick_index());
-  }
+  pump_client_until_ingame(harness.server, harness.client);
+  ASSERT_EQ(harness.client.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(harness.client.camera().world_id(), arv::server::DefaultWorldID);
   session = harness.server.sessions().find(session_ids.front());
   ASSERT_NE(session, nullptr);
@@ -792,6 +1173,802 @@ TEST(CommandTests, WorldCommandLoadsTeleportsUnloadsAndDeletesLiveWorldRuntime) 
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   EXPECT_FALSE(std::filesystem::exists(
       harness.temp.path / "save" / "worlds" / "runtime_world"));
+}
+
+TEST(CommandTests, WorldCommandCreatesLoadsAndGeneratesVoidSpaceWorld) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create solar_system --type space --seed 4242");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created world 'solar_system'."));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world info solar_system");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Generator: arvane:worldgen/void"));
+  EXPECT_TRUE(result_contains(result, "Type: space"));
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load solar_system");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* record =
+      harness.server.worlds().find("solar_system");
+  ASSERT_NE(record, nullptr);
+  EXPECT_EQ(record->world_type, "space");
+  EXPECT_EQ(record->generator_id, std::string{arv::world::VoidWorldGenerationID});
+
+  arv::world::WorldRuntime* runtime = harness.server.world_runtime(record->id);
+  ASSERT_NE(runtime, nullptr);
+  const arv::world::WorldGenerationConfig* generation =
+      runtime->generation_config();
+  ASSERT_NE(generation, nullptr);
+  EXPECT_TRUE(generation->void_world);
+  EXPECT_EQ(generation->dimension_id, std::string{arv::world::VoidWorldGenerationID});
+  const arv::world::GameRuleState* placement_rule =
+      runtime->game_rule("allowBlockPlacement");
+  ASSERT_NE(placement_rule, nullptr);
+  EXPECT_FALSE(placement_rule->bool_value);
+  const arv::world::GameRuleState* spawning_rule =
+      runtime->game_rule("doMobSpawning");
+  ASSERT_NE(spawning_rule, nullptr);
+  EXPECT_FALSE(spawning_rule->bool_value);
+  const arv::world::WorldEnvironmentState& environment = runtime->environment();
+  EXPECT_FLOAT_EQ(environment.gravity_scale, 0.0F);
+  EXPECT_FALSE(environment.has_atmosphere);
+  EXPECT_FALSE(environment.has_oxygen);
+  EXPECT_EQ(environment.sky, "space");
+  EXPECT_FLOAT_EQ(environment.ambient_light, 0.02F);
+
+  const std::vector<arv::server::SpaceBodyRuntimeView> bodies =
+      harness.server.space_bodies_for_world(record->id);
+  ASSERT_EQ(bodies.size(), 1U);
+  EXPECT_EQ(bodies.front().body_id, "arvane:space_body/luna");
+  EXPECT_EQ(bodies.front().target_world_id, "arvane:world/luna");
+  EXPECT_EQ(bodies.front().position.x, 2200.0F);
+  EXPECT_EQ(bodies.front().position.z, 700.0F);
+  EXPECT_FLOAT_EQ(bodies.front().visual_radius, 90.0F);
+  EXPECT_FLOAT_EQ(bodies.front().entry_radius, 130.0F);
+  EXPECT_TRUE(bodies.front().entry_enabled);
+  EXPECT_EQ(
+      harness.server.space_bodies_near(record->id, {2200.0F, 0.0F, 700.0F}).size(),
+      1U);
+  EXPECT_TRUE(
+      harness.server.space_bodies_near(record->id, {2500.0F, 0.0F, 700.0F}).empty());
+
+  auto palette = arv::world::resolve_world_generation_palette(
+      *generation,
+      harness.block_registry);
+  ASSERT_TRUE(palette) << palette.error().message;
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = record->id;
+  request.seed = runtime->generation_seed();
+  request.coord = {1, -1};
+  request.config = *generation;
+  request.palette = std::move(palette.value());
+  const arv::world::WorldHeightSettings height = runtime->height_settings();
+  request.min_chunk_y = height.min_chunk_y;
+  request.max_chunk_y = height.max_chunk_y;
+  auto generated = arv::world::generate_chunk(request);
+  ASSERT_TRUE(generated) << generated.error().message;
+  for (const arv::world::GeneratedChunkSection& section : generated.value().sections) {
+    for (const arv::voxel::BlockVariantID block : section.blocks) {
+      ASSERT_EQ(block, arv::voxel::AirBlockVariantID);
+    }
+  }
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  pump_client_until_ingame(harness.server, harness.client);
+  session = harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, record->id);
+  EXPECT_EQ(harness.client.camera().world_id(), record->id);
+  EXPECT_EQ(harness.client.world_environment_sky(), "space");
+  EXPECT_TRUE(harness.client.space_environment());
+  ASSERT_EQ(harness.client.space_bodies().size(), 1U);
+  EXPECT_EQ(harness.client.space_bodies().front().body_id, "arvane:space_body/luna");
+  EXPECT_EQ(harness.client.space_bodies().front().display_name, "Luna");
+  EXPECT_EQ(harness.client.space_bodies().front().target_world_id, "arvane:world/luna");
+  EXPECT_EQ(harness.client.space_bodies().front().position.x, 2200.0F);
+  EXPECT_FLOAT_EQ(harness.client.space_bodies().front().visual_radius, 90.0F);
+  EXPECT_FLOAT_EQ(harness.client.space_bodies().front().entry_radius, 130.0F);
+  const arv::player::PlayerState* space_player = runtime->find_player(player_id);
+  ASSERT_NE(space_player, nullptr);
+  EXPECT_EQ(space_player->world_id, record->id);
+  EXPECT_EQ(harness.server.voxel_world().find_player(player_id), nullptr);
+}
+
+TEST(CommandTests, WorldCommandTransitionMovesMountedVehicleAndPassenger) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create vehicle_world --seed 24681");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load vehicle_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* vehicle_record =
+      harness.server.worlds().find("vehicle_world");
+  ASSERT_NE(vehicle_record, nullptr);
+  arv::world::WorldRuntime* target_world =
+      harness.server.world_runtime(vehicle_record->id);
+  ASSERT_NE(target_world, nullptr);
+
+  arv::world::WorldRuntime& source_world = harness.server.voxel_world();
+  arv::player::PlayerState& player_state = connected_player(harness.server);
+  const arv::PlayerID player_id = player_state.player_id;
+  const arv::player::ItemID stone_item =
+      harness.item_registry.find_item("arvane:stone").value();
+  ASSERT_TRUE(player_state.inventory.set_slot(
+      0,
+      arv::player::ItemStack{stone_item, 7}));
+  const std::optional<arv::EntityID> source_player_entity =
+      source_world.entity_for_player(player_state.player_id);
+  ASSERT_TRUE(source_player_entity.has_value());
+
+  const arv::EntityID source_vehicle = create_command_test_vehicle(
+      source_world,
+      harness.vehicle_registry,
+      {2.0F, 20.0F, 0.0F});
+  ASSERT_NE(source_vehicle, (arv::EntityID{}));
+  arv::entity::VehiclePhysicsComponent* source_physics =
+      source_world.find_entity_vehicle_physics(source_vehicle);
+  ASSERT_NE(source_physics, nullptr);
+  source_physics->fuel_item = "arvane:rocket_fuel/basic";
+  source_physics->fuel_seconds = 12.5F;
+  source_physics->fuel_capacity_seconds = 40.0F;
+  source_physics->fuel_burn_per_second = 1.25F;
+  arv::entity::EntityHealth* source_health =
+      source_world.find_entity_health(source_vehicle);
+  ASSERT_NE(source_health, nullptr);
+  source_health->current = 12.0F;
+  ASSERT_TRUE(source_world.mount_entity(
+      source_vehicle,
+      source_player_entity.value(),
+      "driver"));
+  EXPECT_EQ(
+      source_world.mounted_rideable(source_player_entity.value()),
+      std::optional<arv::EntityID>{source_vehicle});
+  EXPECT_EQ(source_world.mounted_seat(source_player_entity.value()), "driver");
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp vehicle_world local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Teleported local_player to world 'vehicle_world'."));
+
+  EXPECT_FALSE(source_world.entity_exists(source_vehicle));
+  EXPECT_FALSE(source_world.entity_exists(source_player_entity.value()));
+  EXPECT_FALSE(source_world.entity_for_player(player_id).has_value());
+
+  const arv::player::PlayerState* target_player =
+      target_world->find_player(player_id);
+  ASSERT_NE(target_player, nullptr);
+  EXPECT_EQ(target_player->world_id, vehicle_record->id);
+  ASSERT_TRUE(target_player->inventory.slot(0).has_value());
+  EXPECT_EQ(target_player->inventory.slot(0)->item, stone_item);
+  EXPECT_EQ(target_player->inventory.slot(0)->count, 7U);
+
+  const std::optional<arv::EntityID> target_player_entity =
+      target_world->entity_for_player(player_id);
+  ASSERT_TRUE(target_player_entity.has_value());
+  const std::optional<arv::EntityID> target_vehicle =
+      target_world->mounted_rideable(target_player_entity.value());
+  ASSERT_TRUE(target_vehicle.has_value());
+  EXPECT_EQ(target_world->mounted_seat(target_player_entity.value()), "driver");
+  const arv::entity::EntityType* target_vehicle_type =
+      target_world->find_entity_type(target_vehicle.value());
+  ASSERT_NE(target_vehicle_type, nullptr);
+  EXPECT_EQ(target_vehicle_type->type_name, "arvane:command_buggy");
+  const arv::entity::VehiclePhysicsComponent* target_physics =
+      target_world->find_entity_vehicle_physics(target_vehicle.value());
+  ASSERT_NE(target_physics, nullptr);
+  EXPECT_EQ(target_physics->definition, "arvane:command_buggy");
+  EXPECT_EQ(target_physics->fuel_item, "arvane:rocket_fuel/basic");
+  EXPECT_FLOAT_EQ(target_physics->fuel_seconds, 12.5F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_capacity_seconds, 40.0F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_burn_per_second, 1.25F);
+  const arv::entity::EntityHealth* target_health =
+      target_world->find_entity_health(target_vehicle.value());
+  ASSERT_NE(target_health, nullptr);
+  EXPECT_FLOAT_EQ(target_health->current, 12.0F);
+
+  pump_client_until_ingame(harness.server, harness.client);
+  ASSERT_EQ(harness.client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(harness.client.camera().world_id(), vehicle_record->id);
+}
+
+TEST(CommandTests, SpaceExitTransitionsMountedRocketToConfiguredSpaceWorld) {
+  RunningServerHarness harness;
+
+  arv::world::WorldRuntime& source_world = harness.server.voxel_world();
+  arv::player::PlayerState& player = connected_player(harness.server);
+  const arv::PlayerID player_id = player.player_id;
+  player.position = {0.0F, 21.0F, 0.0F};
+  const std::optional<arv::EntityID> player_entity =
+      source_world.entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(source_world.set_entity_position(
+      player_entity.value(),
+      player.position));
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      source_world,
+      harness.vehicle_registry,
+      {2.0F, 21.0F, 0.0F});
+  ASSERT_TRUE(source_world.mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+  arv::entity::VehiclePhysicsComponent* physics =
+      source_world.find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  physics->fuel_seconds = 20.0F;
+  physics->fuel_capacity_seconds = 60.0F;
+  physics->fuel_burn_per_second = 1.0F;
+  physics->linear_velocity = {0.0F, 6.0F, 0.0F};
+  arv::entity::EntityVelocity* velocity =
+      source_world.find_entity_velocity(rocket);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = physics->linear_velocity;
+
+  harness.server.tick();
+
+  const arv::server::WorldRecord* space_record =
+      harness.server.worlds().find("solar_system");
+  ASSERT_NE(space_record, nullptr);
+  EXPECT_EQ(space_record->world_type, "space");
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  EXPECT_EQ(space_world->environment().sky, "space");
+
+  EXPECT_FALSE(source_world.entity_exists(rocket));
+  EXPECT_FALSE(source_world.entity_for_player(player_id).has_value());
+  const arv::player::PlayerState* target_player =
+      space_world->find_player(player_id);
+  ASSERT_NE(target_player, nullptr);
+  EXPECT_EQ(target_player->world_id, space_record->id);
+  EXPECT_NEAR(target_player->velocity.y, 2.5F, 0.0001F);
+
+  const std::optional<arv::EntityID> target_player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(target_player_entity.has_value());
+  const std::optional<arv::EntityID> target_rocket =
+      space_world->mounted_rideable(target_player_entity.value());
+  ASSERT_TRUE(target_rocket.has_value());
+  const arv::entity::EntityTransform* transform =
+      space_world->find_entity_transform(target_rocket.value());
+  ASSERT_NE(transform, nullptr);
+  EXPECT_EQ(transform->position, (arv::Vec3f{11.0F, 22.0F, 33.0F}));
+  const arv::entity::VehiclePhysicsComponent* target_physics =
+      space_world->find_entity_vehicle_physics(target_rocket.value());
+  ASSERT_NE(target_physics, nullptr);
+  EXPECT_EQ(target_physics->definition, "arvane:command_rocket");
+  EXPECT_FLOAT_EQ(target_physics->fuel_seconds, 20.0F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_capacity_seconds, 60.0F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_burn_per_second, 1.0F);
+  EXPECT_NEAR(target_physics->linear_velocity.y, 2.5F, 0.0001F);
+
+  pump_client_until_ingame(harness.server, harness.client);
+  EXPECT_EQ(harness.client.camera().world_id(), space_record->id);
+}
+
+TEST(CommandTests, SpaceExitRequiresLaunchFuel) {
+  RunningServerHarness harness;
+
+  arv::world::WorldRuntime& source_world = harness.server.voxel_world();
+  arv::player::PlayerState& player = connected_player(harness.server);
+  const arv::PlayerID player_id = player.player_id;
+  player.position = {0.0F, 21.0F, 0.0F};
+  const std::optional<arv::EntityID> player_entity =
+      source_world.entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(source_world.set_entity_position(
+      player_entity.value(),
+      player.position));
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      source_world,
+      harness.vehicle_registry,
+      {2.0F, 21.0F, 0.0F});
+  ASSERT_TRUE(source_world.mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+  arv::entity::VehiclePhysicsComponent* physics =
+      source_world.find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  physics->fuel_seconds = 1.0F;
+  physics->fuel_capacity_seconds = 60.0F;
+  physics->fuel_burn_per_second = 1.0F;
+  physics->linear_velocity = {0.0F, 6.0F, 0.0F};
+  arv::entity::EntityVelocity* velocity =
+      source_world.find_entity_velocity(rocket);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = physics->linear_velocity;
+
+  harness.server.tick();
+  harness.client.poll_network();
+
+  EXPECT_EQ(harness.server.worlds().find("solar_system"), nullptr);
+  EXPECT_TRUE(source_world.entity_exists(rocket));
+  ASSERT_TRUE(source_world.entity_for_player(player_id).has_value());
+  EXPECT_EQ(
+      source_world.mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{rocket});
+  EXPECT_TRUE(client_chat_contains(harness.client, "needs more fuel"));
+}
+
+TEST(CommandTests, SpaceExitRequiresSpaceCapableVehicleTag) {
+  RunningServerHarness harness;
+
+  arv::world::WorldRuntime& source_world = harness.server.voxel_world();
+  arv::player::PlayerState& player = connected_player(harness.server);
+  const arv::PlayerID player_id = player.player_id;
+  player.position = {0.0F, 21.0F, 0.0F};
+  const std::optional<arv::EntityID> player_entity =
+      source_world.entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(source_world.set_entity_position(
+      player_entity.value(),
+      player.position));
+
+  const arv::EntityID buggy = create_command_test_vehicle(
+      source_world,
+      harness.vehicle_registry,
+      {2.0F, 21.0F, 0.0F});
+  ASSERT_TRUE(source_world.mount_entity(
+      buggy,
+      player_entity.value(),
+      "driver"));
+  arv::entity::VehiclePhysicsComponent* physics =
+      source_world.find_entity_vehicle_physics(buggy);
+  ASSERT_NE(physics, nullptr);
+  physics->linear_velocity = {0.0F, 6.0F, 0.0F};
+  arv::entity::EntityVelocity* velocity =
+      source_world.find_entity_velocity(buggy);
+  ASSERT_NE(velocity, nullptr);
+  velocity->linear = physics->linear_velocity;
+
+  harness.server.tick();
+  harness.client.poll_network();
+
+  EXPECT_EQ(harness.server.worlds().find("solar_system"), nullptr);
+  EXPECT_TRUE(source_world.entity_exists(buggy));
+  ASSERT_TRUE(source_world.entity_for_player(player_id).has_value());
+  EXPECT_EQ(
+      source_world.mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{buggy});
+  EXPECT_TRUE(client_chat_contains(harness.client, "not space-capable"));
+}
+
+TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
+  RunningServerHarness harness;
+
+  const arv::server::WorldRecord* space_record =
+      create_and_load_command_test_space_world(harness);
+  ASSERT_NE(space_record, nullptr);
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  pump_client_until_ingame(harness.server, harness.client);
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  EXPECT_EQ(session->world_id, space_record->id);
+
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      *space_world,
+      harness.vehicle_registry,
+      {2200.0F, 0.0F, 700.0F});
+  ASSERT_TRUE(space_world->mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+  arv::entity::VehiclePhysicsComponent* physics =
+      space_world->find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  physics->fuel_seconds = 17.5F;
+  physics->fuel_capacity_seconds = 60.0F;
+  physics->fuel_burn_per_second = 1.0F;
+  arv::entity::EntityHealth* health =
+      space_world->find_entity_health(rocket);
+  ASSERT_NE(health, nullptr);
+  health->current = 33.0F;
+
+  harness.server.tick();
+
+  const arv::server::WorldRecord* luna_record =
+      harness.server.worlds().find("luna");
+  ASSERT_NE(luna_record, nullptr);
+  EXPECT_EQ(luna_record->world_type, "default");
+  arv::world::WorldRuntime* luna_world =
+      harness.server.world_runtime(luna_record->id);
+  ASSERT_NE(luna_world, nullptr);
+  EXPECT_FLOAT_EQ(luna_world->environment().gravity_scale, 0.18F);
+  EXPECT_FALSE(luna_world->environment().has_oxygen);
+
+  EXPECT_FALSE(space_world->entity_exists(rocket));
+  EXPECT_FALSE(space_world->entity_for_player(player_id).has_value());
+  const arv::player::PlayerState* target_player =
+      luna_world->find_player(player_id);
+  ASSERT_NE(target_player, nullptr);
+  EXPECT_EQ(target_player->world_id, luna_record->id);
+  EXPECT_NEAR(target_player->velocity.y, -10.0F, 0.0001F);
+  EXPECT_NEAR(
+      target_player->yaw_radians,
+      arv::degrees_to_radians(180.0F),
+      0.0001F);
+
+  const std::optional<arv::EntityID> target_player_entity =
+      luna_world->entity_for_player(player_id);
+  ASSERT_TRUE(target_player_entity.has_value());
+  const std::optional<arv::EntityID> target_rocket =
+      luna_world->mounted_rideable(target_player_entity.value());
+  ASSERT_TRUE(target_rocket.has_value());
+  EXPECT_EQ(luna_world->mounted_seat(target_player_entity.value()), "pilot");
+  const arv::entity::EntityTransform* transform =
+      luna_world->find_entity_transform(target_rocket.value());
+  ASSERT_NE(transform, nullptr);
+  EXPECT_EQ(transform->position, (arv::Vec3f{0.0F, 2300.0F, 0.0F}));
+  const arv::entity::VehiclePhysicsComponent* target_physics =
+      luna_world->find_entity_vehicle_physics(target_rocket.value());
+  ASSERT_NE(target_physics, nullptr);
+  EXPECT_EQ(target_physics->definition, "arvane:command_rocket");
+  EXPECT_FLOAT_EQ(target_physics->fuel_seconds, 17.5F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_capacity_seconds, 60.0F);
+  EXPECT_FLOAT_EQ(target_physics->fuel_burn_per_second, 1.0F);
+  const arv::entity::EntityHealth* target_health =
+      luna_world->find_entity_health(target_rocket.value());
+  ASSERT_NE(target_health, nullptr);
+  EXPECT_FLOAT_EQ(target_health->current, 33.0F);
+
+  pump_client_until_ingame(harness.server, harness.client);
+  session = harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, luna_record->id);
+  EXPECT_EQ(harness.client.camera().world_id(), luna_record->id);
+}
+
+TEST(CommandTests, PlanetEntryRequiresEnabledBody) {
+  RunningServerHarness harness;
+  auto body =
+      harness.space_definitions.space_bodies.find("arvane:space_body/luna");
+  ASSERT_NE(body, harness.space_definitions.space_bodies.end());
+  body->second.entry.enabled = false;
+
+  const arv::server::WorldRecord* space_record =
+      create_and_load_command_test_space_world(harness);
+  ASSERT_NE(space_record, nullptr);
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      *space_world,
+      harness.vehicle_registry,
+      {2200.0F, 0.0F, 700.0F});
+  ASSERT_TRUE(space_world->mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+
+  harness.server.tick();
+
+  EXPECT_EQ(harness.server.worlds().find("luna"), nullptr);
+  EXPECT_TRUE(space_world->entity_exists(rocket));
+  ASSERT_TRUE(space_world->entity_for_player(player_id).has_value());
+  EXPECT_EQ(
+      space_world->mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{rocket});
+}
+
+TEST(CommandTests, PlanetEntryRequiresSpaceCapableVehicleTag) {
+  RunningServerHarness harness;
+
+  const arv::server::WorldRecord* space_record =
+      create_and_load_command_test_space_world(harness);
+  ASSERT_NE(space_record, nullptr);
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+
+  const arv::EntityID buggy = create_command_test_vehicle(
+      *space_world,
+      harness.vehicle_registry,
+      {2200.0F, 0.0F, 700.0F});
+  ASSERT_TRUE(space_world->mount_entity(
+      buggy,
+      player_entity.value(),
+      "driver"));
+
+  harness.server.tick();
+
+  EXPECT_EQ(harness.server.worlds().find("luna"), nullptr);
+  EXPECT_TRUE(space_world->entity_exists(buggy));
+  ASSERT_TRUE(space_world->entity_for_player(player_id).has_value());
+  EXPECT_EQ(
+      space_world->mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{buggy});
+}
+
+TEST(CommandTests, PlanetEntryReconnectsInTargetWorldAfterRestart) {
+  RunningServerHarness harness;
+
+  const arv::server::WorldRecord* space_record =
+      create_and_load_command_test_space_world(harness);
+  ASSERT_NE(space_record, nullptr);
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  pump_client_until_ingame(harness.server, harness.client);
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      *space_world,
+      harness.vehicle_registry,
+      {2200.0F, 0.0F, 700.0F});
+  ASSERT_TRUE(space_world->mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+  harness.server.tick();
+
+  const arv::server::WorldRecord* luna_record =
+      harness.server.worlds().find("luna");
+  ASSERT_NE(luna_record, nullptr);
+  const arv::WorldID luna_world_id = luna_record->id;
+  pump_client_until_ingame(harness.server, harness.client);
+  ASSERT_EQ(harness.client.camera().world_id(), luna_world_id);
+
+  const arv::client::LocalPlayerIdentity identity = harness.client.local_identity();
+  const std::filesystem::path save_root = harness.temp.path / "save";
+  const arv::command::SaveAllCommandResult saved =
+      harness.server.save_all_worlds(true);
+  ASSERT_TRUE(saved.success) << saved.message;
+  harness.server.shutdown();
+
+  arv::net::InProcessTransportPair transports =
+      arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime restarted(std::move(transports.server));
+  arv::client::ClientRuntime reconnected(std::move(transports.client));
+  reconnected.set_local_identity(identity);
+  reconnected.configure_vehicles(&harness.vehicle_registry);
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &harness.block_registry;
+  start_info.item_registry = &harness.item_registry;
+  start_info.entity_registry = &harness.entity_registry;
+  start_info.vehicle_registry = &harness.vehicle_registry;
+  start_info.space_definitions = &harness.space_definitions;
+  start_info.game_modes = &harness.game_modes;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = save_root;
+  ASSERT_TRUE(restarted.start(start_info));
+
+  const arv::server::WorldRecord* restarted_luna =
+      restarted.worlds().find("luna");
+  ASSERT_NE(restarted_luna, nullptr);
+  ASSERT_EQ(restarted_luna->state, arv::server::WorldRuntimeState::Running);
+
+  ASSERT_TRUE(reconnected.connect_integrated());
+  complete_integrated_handshake(restarted, reconnected);
+  ASSERT_EQ(reconnected.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(reconnected.camera().world_id(), luna_world_id);
+
+  const std::vector<arv::SessionID> restarted_session_ids =
+      restarted.sessions().session_ids();
+  ASSERT_EQ(restarted_session_ids.size(), 1U);
+  const arv::server::ServerSession* restarted_session =
+      restarted.sessions().find(restarted_session_ids.front());
+  ASSERT_NE(restarted_session, nullptr);
+  EXPECT_EQ(restarted_session->world_id, luna_world_id);
+}
+
+TEST(CommandTests, WorldCommandTransitionReconnectsInTargetWorld) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create reconnect_world --seed 112233");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load reconnect_world");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  const arv::server::WorldRecord* record =
+      harness.server.worlds().find("reconnect_world");
+  ASSERT_NE(record, nullptr);
+  const arv::WorldID reconnect_world_id = record->id;
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp reconnect_world local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  pump_client_until_ingame(harness.server, harness.client);
+  ASSERT_EQ(harness.client.connection_state(), arv::net::ConnectionState::InGame);
+  ASSERT_EQ(harness.client.camera().world_id(), reconnect_world_id);
+
+  const arv::client::LocalPlayerIdentity identity = harness.client.local_identity();
+  const std::filesystem::path save_root = harness.temp.path / "save";
+  const arv::command::SaveAllCommandResult saved =
+      harness.server.save_all_worlds(true);
+  ASSERT_TRUE(saved.success) << saved.message;
+  harness.server.shutdown();
+
+  arv::net::InProcessTransportPair transports =
+      arv::net::make_in_process_transport_pair();
+  arv::server::ServerRuntime restarted(std::move(transports.server));
+  arv::client::ClientRuntime reconnected(std::move(transports.client));
+  reconnected.set_local_identity(identity);
+
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &harness.block_registry;
+  start_info.item_registry = &harness.item_registry;
+  start_info.entity_registry = &harness.entity_registry;
+  start_info.vehicle_registry = &harness.vehicle_registry;
+  start_info.game_modes = &harness.game_modes;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = save_root;
+  ASSERT_TRUE(restarted.start(start_info));
+
+  const arv::server::WorldRecord* restarted_record =
+      restarted.worlds().find("reconnect_world");
+  ASSERT_NE(restarted_record, nullptr);
+  ASSERT_EQ(restarted_record->state, arv::server::WorldRuntimeState::Running);
+
+  ASSERT_TRUE(reconnected.connect_integrated());
+  complete_integrated_handshake(restarted, reconnected);
+  ASSERT_EQ(reconnected.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(reconnected.camera().world_id(), reconnect_world_id);
+
+  const std::vector<arv::SessionID> session_ids =
+      restarted.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      restarted.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, reconnect_world_id);
+}
+
+TEST(CommandTests, SaveAllWorldsPersistsLoadedNonDefaultWorlds) {
+  RunningServerHarness harness(
+      arv::io::MovementValidationConfig{},
+      arv::default_spawn_location(),
+      "No permission",
+      nullptr,
+      "Pretty Command Save");
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create runtime_save --seed 13579");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load runtime_save");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      harness.server.worlds().find("runtime_save");
+  ASSERT_NE(runtime_record, nullptr);
+  arv::world::WorldRuntime* runtime =
+      harness.server.world_runtime(runtime_record->id);
+  ASSERT_NE(runtime, nullptr);
+  const std::optional<arv::voxel::BlockVariantID> stone =
+      harness.block_registry.find_variant("arvane:stone");
+  ASSERT_TRUE(stone.has_value());
+  const arv::BlockPos target{{4, 5, 6}};
+  (void)runtime->ensure_chunk(arv::block_to_chunk(target));
+  ASSERT_TRUE(runtime->set_block(target, stone.value()));
+
+  const arv::command::SaveAllCommandResult saved =
+      harness.server.save_all_worlds(false);
+  ASSERT_TRUE(saved.success) << saved.message;
+  EXPECT_GE(saved.saved_chunks, 1U);
+
+  auto loaded = arv::persistence::load_server_root(
+      harness.temp.path / "save",
+      "runtime_save",
+      harness.block_registry,
+      harness.item_registry);
+  ASSERT_TRUE(loaded) << loaded.error().message;
+  EXPECT_EQ(loaded.value().save.name, "Pretty Command Save");
+
+  const arv::ChunkSectionCoord target_chunk = arv::block_to_chunk(target);
+  const auto chunk = std::find_if(
+      loaded.value().chunks.begin(),
+      loaded.value().chunks.end(),
+      [&](const arv::persistence::SavedChunkSection& saved_chunk) {
+        return saved_chunk.coord == target_chunk;
+      });
+  ASSERT_NE(chunk, loaded.value().chunks.end());
+  const arv::usize block_index =
+      arv::voxel::local_index(arv::block_to_local(target));
+  EXPECT_EQ(chunk->blocks[block_index], stone.value());
 }
 
 TEST(CommandTests, WorldCommandValidatesNamesAndPermissions) {
@@ -1456,6 +2633,70 @@ TEST(CommandTests, ExplodeCommandRequiresPermissionAndUsesServerExplosion) {
       "/boom 1.5 2 3.5 arvane:shockwave --seed 124");
   ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
   EXPECT_TRUE(result_contains(result, "Created explosion arvane:shockwave"));
+}
+
+TEST(CommandTests, ExplodeCommandUsesSenderWorldAfterWorldTeleport) {
+  RunningServerHarness harness;
+
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_explode --seed 6790");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_explode");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      harness.server.worlds().find("orbit_explode");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_explode local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    harness.client.fixed_tick(harness.server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world =
+      harness.server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  runtime_player->position = {1.5F, 2.0F, 3.5F};
+  runtime_player->permission_overrides.custom_overrides["command.explode"] =
+      arv::player::TriState::Allow;
+
+  const std::optional<arv::voxel::BlockVariantID> stone =
+      harness.block_registry.find_variant("arvane:stone");
+  ASSERT_TRUE(stone.has_value());
+  const arv::BlockPos target{{1, 2, 3}};
+  (void)harness.server.voxel_world().ensure_chunk_section({{0, 0, 0}});
+  (void)runtime_world->ensure_chunk_section({{0, 0, 0}});
+  ASSERT_TRUE(harness.server.voxel_world().set_block(target, stone.value()));
+  ASSERT_TRUE(runtime_world->set_block(target, stone.value()));
+
+  std::optional<arv::command::CommandSender> sender =
+      harness.server.command_sender_for_session(session_ids.front());
+  ASSERT_TRUE(sender.has_value());
+  result = harness.server.execute_command(
+      sender.value(),
+      "/explode ~ ~ ~ arvane:debug --no-drops --seed 125");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  EXPECT_TRUE(result_contains(result, "Created explosion arvane:debug"));
+  EXPECT_EQ(runtime_world->get_block(target), arv::voxel::AirBlockVariantID);
+  EXPECT_EQ(harness.server.voxel_world().get_block(target), stone.value());
 }
 
 TEST(CommandTests, BlueprintCommandSavesListsAndPastesWorldBlueprints) {

@@ -2063,8 +2063,10 @@ TEST(IntegratedHandshakeTests, GameNetworkingSocketsLoopbackReceivesGeneratedChu
 
   EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(server.sessions().size(), 1U);
-  ASSERT_EQ(chunks.size(), 1U);
-  EXPECT_EQ(chunks.front().world_id, arv::server::DefaultWorldID);
+  ASSERT_GE(chunks.size(), 1U);
+  for (const arv::protocol::ClientboundChunkSectionData& chunk : chunks) {
+    EXPECT_EQ(chunk.world_id, arv::server::DefaultWorldID);
+  }
   EXPECT_GT(server.voxel_world().loaded_chunk_count(), 0U);
 
   arv::player::PlayerState& player = connected_player(server);

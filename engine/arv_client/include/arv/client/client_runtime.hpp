@@ -21,6 +21,7 @@
 #include "arv/protocol/crafting.hpp"
 #include "arv/protocol/skins.hpp"
 #include "arv/protocol/vehicles.hpp"
+#include "arv/protocol/world_join.hpp"
 #include "arv/protocol/world_time.hpp"
 
 #include <filesystem>
@@ -57,6 +58,20 @@ struct ClientChatSettings {
   usize max_history_messages{DefaultMaxChatHistoryMessages};
 };
 
+enum class ClientWorldTransitionPhase : u8 {
+  None,
+  LeavingWorld,
+  EnteringWorld,
+};
+
+struct ClientWorldTransitionStatus {
+  bool active{};
+  ClientWorldTransitionPhase phase{ClientWorldTransitionPhase::None};
+  WorldID world_id{};
+  f32 fade_alpha{};
+  std::string message{};
+};
+
 struct RemoteClientFixedTickResult {
   bool was_in_game{};
   bool entered_game{};
@@ -80,6 +95,11 @@ public:
   void configure_networking(ClientNetworkSettings settings) noexcept;
   void configure_chat(ClientChatSettings settings);
   [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;
+  [[nodiscard]] const std::string& world_environment_sky() const noexcept;
+  [[nodiscard]] bool space_environment() const noexcept;
+  [[nodiscard]] std::span<const protocol::ClientboundSpaceBodyView> space_bodies() const noexcept;
+  [[nodiscard]] const ClientWorldTransitionStatus& world_transition_status()
+      const noexcept;
   net::ConnectResult connect_integrated();
   net::ConnectResult connect(net::NetworkAddress address);
   void disconnect();

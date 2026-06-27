@@ -12,6 +12,7 @@
 #include "web_ui_host.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -185,6 +186,20 @@ void append_web_gameplay_ui_to_frame(
           });
   if (append_result.draw_commands.rolled_back) {
     return;
+  }
+  const arv::client::ClientWorldTransitionStatus& transition =
+      g_app.session->world_transition_status();
+  if (transition.active && transition.fade_alpha > 0.0F) {
+    arv::render::UIRectDrawItem fade;
+    fade.min = {0.0F, 0.0F};
+    fade.max = metrics.framebuffer_size;
+    fade.color = {
+        0.0F,
+        0.0F,
+        0.0F,
+        std::clamp(transition.fade_alpha, 0.0F, 1.0F) * 0.88F};
+    fade.layer = 240U;
+    frame.ui_rects.push_back(fade);
   }
 }
 

@@ -12,6 +12,18 @@
 
 namespace arv::protocol {
 
+struct ClientboundSpaceBodyView {
+  std::string body_id{};
+  std::string display_name{};
+  std::string target_world_id{};
+  std::string render_model{};
+  std::string render_texture{};
+  Vec3f position{};
+  f32 visual_radius{};
+  f32 entry_radius{};
+  bool entry_enabled{};
+};
+
 struct ClientboundWorldJoinResult {
   bool accepted{};
   std::string reject_reason{};
@@ -22,6 +34,9 @@ struct ClientboundWorldJoinResult {
   u64 initial_tick{};
   u32 tick_rate{};
   i32 effective_view_distance{};
+  std::string environment_sky{};
+  bool space_environment{};
+  std::vector<ClientboundSpaceBodyView> space_bodies{};
 };
 
 struct ClientboundWorldLeave {

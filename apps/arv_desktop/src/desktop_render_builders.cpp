@@ -136,6 +136,9 @@ void populate_world_frame_draw_items(
           ? session.client_world
           : session.integrated_server->voxel_world();
   client::configure_frame_sky(frame, sky_world.clock(), render_config.sky);
+  if (session.client->space_environment()) {
+    client::configure_frame_space_sky(frame);
+  }
   const std::optional<PlayerID> local_player_id = session.client->local_player_id();
   const std::optional<EntityNetID> local_entity_id = session.client->local_entity_id();
 
@@ -242,6 +245,7 @@ void populate_world_frame_draw_items(
            session.client->active_container_block_source(),
        .block_outline_target = session.block_outline_target,
        .block_break = session.client->block_break_progress(),
+       .space_bodies = session.client->space_bodies(),
        .animation_time_seconds = entity_animation_time,
        .block_attached_sections =
            {.count = resident_chunks.size(),

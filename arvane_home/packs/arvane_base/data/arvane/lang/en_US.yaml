@@ -75,6 +75,9 @@ item:
       display_name: Bucket
     water_bucket:
       display_name: Water Bucket
+    rocket_fuel:
+      basic:
+        display_name: Basic Rocket Fuel
 
 entity:
   arvane:
@@ -90,6 +93,10 @@ entity:
       display_name: Buggy
     plane:
       display_name: Plane
+    rocket:
+      display_name: Rocket
+      basic:
+        display_name: Basic Rocket
     submarine:
       display_name: Submarine
 

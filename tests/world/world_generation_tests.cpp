@@ -621,6 +621,38 @@ TEST(WorldGenerationTests, SameSeedAndChunkProduceSameOutputThroughAJob) {
   EXPECT_EQ(first.value().sections, second.value().sections);
 }
 
+TEST(WorldGenerationTests, VoidWorldGeneratesOnlyAirSectionsWithoutPalette) {
+  arv::world::WorldGenerationConfig config =
+      arv::world::make_void_world_generation_config();
+  auto palette = arv::world::resolve_world_generation_palette(
+      config,
+      make_worldgen_registry());
+  ASSERT_TRUE(palette) << palette.error().message;
+  EXPECT_TRUE(palette.value().surface_layers.empty());
+
+  arv::world::ChunkGenerationRequest request;
+  request.world_id = arv::WorldID{9};
+  request.seed = 12345U;
+  request.coord = {2, -3};
+  request.config = config;
+  request.palette = std::move(palette.value());
+  request.min_chunk_y = arv::floor_div(config.min_y, arv::ChunkSize);
+  request.max_chunk_y = arv::floor_div(config.max_y, arv::ChunkSize);
+
+  auto generated = arv::world::generate_chunk(request);
+  ASSERT_TRUE(generated) << generated.error().message;
+  EXPECT_EQ(generated.value().world_id, arv::WorldID{9});
+  EXPECT_EQ(generated.value().sections.size(), 13U);
+  for (const arv::i32 surface_y : generated.value().surface_y_by_column) {
+    EXPECT_EQ(surface_y, config.min_y - 1);
+  }
+  for (const arv::world::GeneratedChunkSection& section : generated.value().sections) {
+    for (const arv::voxel::BlockVariantID block : section.blocks) {
+      ASSERT_EQ(block, arv::voxel::AirBlockVariantID);
+    }
+  }
+}
+
 TEST(WorldGenerationTests, LoadsPackWorldgenResourcesAndResolvesOverworld) {
   const arv::voxel::BlockRegistry registry = make_worldgen_registry();
   const arv::world::WorldGenerationConfig config = make_pack_worldgen_config(registry);

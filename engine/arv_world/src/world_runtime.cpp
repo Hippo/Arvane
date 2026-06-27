@@ -13,10 +13,11 @@
 namespace arv::world {
 namespace {
 
-constexpr std::array<GameRuleDefinition, 7> DefaultGameRules{{
+constexpr std::array<GameRuleDefinition, 8> DefaultGameRules{{
     {"doDaylightCycle", GameRuleValueType::Boolean, "Controls whether world time advances through the day-night cycle.", true, 0, {}},
     {"doWeatherCycle", GameRuleValueType::Boolean, "Controls whether automatic weather changes are allowed.", true, 0, {}},
     {"doMobSpawning", GameRuleValueType::Boolean, "Controls whether natural mob spawning is allowed.", true, 0, {}},
+    {"allowBlockPlacement", GameRuleValueType::Boolean, "Controls whether players may place blocks and fluid sources.", true, 0, {}},
     {"keepInventory", GameRuleValueType::Boolean, "Controls whether players keep inventory after death.", false, 0, {}},
     {"mobGriefing", GameRuleValueType::Boolean, "Controls whether mobs may alter blocks or inventory.", true, 0, {}},
     {"fallDamage", GameRuleValueType::Boolean, "Controls whether players and entities take fall damage.", true, 0, {}},
@@ -222,6 +223,17 @@ bool WorldRuntime::set_weather_id(std::string weather_id) {
   }
   impl_->weather = std::move(weather_id);
   return true;
+}
+
+const WorldEnvironmentState& WorldRuntime::environment() const noexcept {
+  return impl_->environment;
+}
+
+void WorldRuntime::set_environment(WorldEnvironmentState environment) noexcept {
+  assert_owner_thread();
+  environment.gravity_scale = std::max(0.0F, environment.gravity_scale);
+  environment.ambient_light = std::clamp(environment.ambient_light, 0.0F, 1.0F);
+  impl_->environment = std::move(environment);
 }
 
 WorldDifficulty WorldRuntime::difficulty() const noexcept {

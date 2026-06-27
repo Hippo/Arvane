@@ -153,6 +153,72 @@ arv::entity::VehicleDefinitionRegistry make_test_living_mount_registry() {
   return std::move(registry.value());
 }
 
+arv::entity::VehicleDefinitionRegistry make_test_rocket_vehicle_registry() {
+  arv::entity::VehicleDefinition rocket;
+  rocket.name = "arvane:test_rocket";
+  rocket.kind = arv::entity::VehicleKind::Vehicle;
+  rocket.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  rocket.tags = {"arvane:vehicle", "arvane:rocket", "arvane:space_capable"};
+  rocket.collision_size = {1.2F, 3.0F, 1.2F};
+  rocket.seats.push_back({"pilot",
+                          "pilot",
+                          arv::entity::SeatRole::Driver,
+                          {0.0F, 1.4F, 0.0F},
+                          {},
+                          true,
+                          arv::entity::CameraMode::VehicleChase});
+  rocket.aircraft = {
+      0.0F,
+      48.0F,
+      24.0F,
+      16.0F,
+      0.98F,
+      arv::degrees_to_radians(70.0F),
+      arv::degrees_to_radians(55.0F),
+      arv::degrees_to_radians(90.0F),
+      arv::degrees_to_radians(45.0F),
+      32.0F,
+      6.0F,
+      1.2F,
+      0.8F,
+      28.0F,
+      32.0F,
+      6.0F,
+      0.90F};
+  rocket.space_aircraft = arv::entity::AircraftMovementDefinition{
+      0.0F,
+      96.0F,
+      24.0F,
+      12.0F,
+      0.997F,
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(120.0F),
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      96.0F,
+      96.0F,
+      0.0F,
+      0.997F};
+  rocket.fuel = arv::entity::VehicleFuelDefinition{
+      "arvane:rocket_fuel/basic",
+      90.0F,
+      30.0F,
+      1.0F,
+      10.0F};
+  rocket.authority.max_speed = 100.0F;
+  rocket.authority.max_acceleration = 40.0F;
+  rocket.authority.max_deceleration = 50.0F;
+  rocket.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  rocket.authority.max_vertical_speed = 96.0F;
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(rocket)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
 arv::entity::EntityComponentSet make_hostile_brain_components(float damage) {
   arv::entity::EntityComponentSet components;
   components.collision = arv::entity::AuthoredCollisionComponent{{0.8F, 1.2F, 0.8F}};
@@ -197,6 +263,25 @@ arv::EntityID create_test_rideable(
 
   arv::world::EntityCreateInfo info;
   info.type_name = "arvane:test_buggy";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return world.create_entity(std::move(info));
+}
+
+arv::EntityID create_test_rocket_vehicle(
+    arv::world::WorldRuntime& world,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position = {0.0F, 20.0F, 0.0F}) {
+  arv::entity::EntityComponentSet components;
+  components.collision = arv::entity::AuthoredCollisionComponent{{1.2F, 3.0F, 1.2F}};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_rocket"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_rocket"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_rocket";
   info.position = position;
   info.authored_components = components;
   info.vehicle_definitions = &vehicles;
@@ -351,6 +436,50 @@ TEST(WorldEntityTests, UnmountedVehiclePhysicsDampsServerOwnedMotion) {
   EXPECT_TRUE(physics->grounded);
   EXPECT_NEAR(arv::horizontal_length(physics->linear_velocity), 0.0F, 0.0001F);
   EXPECT_NEAR(arv::length(physics->angular_velocity), 0.0F, 0.0001F);
+}
+
+TEST(WorldEntityTests, SpaceEnvironmentUsesRocketSpaceMovementProfileForServerPhysics) {
+  const arv::entity::VehicleDefinitionRegistry vehicles =
+      make_test_rocket_vehicle_registry();
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+
+  const auto tick_rocket = [&](std::string sky) {
+    arv::world::WorldRuntime world{arv::WorldID{1}};
+    arv::world::WorldEnvironmentState environment;
+    environment.sky = std::move(sky);
+    world.set_environment(std::move(environment));
+    const arv::EntityID rocket =
+        create_test_rocket_vehicle(world, vehicles, {0.0F, 3.0F, 0.0F});
+    (void)world.ensure_chunk(arv::block_to_chunk({{0, 0, 0}}));
+
+    arv::entity::EntityVelocity* velocity =
+        world.find_entity_velocity(rocket);
+    EXPECT_NE(velocity, nullptr);
+    if (velocity == nullptr) {
+      return arv::Vec3f{};
+    }
+    velocity->linear = {12.0F, 0.0F, 0.0F};
+    arv::entity::VehiclePhysicsComponent* physics =
+        world.find_entity_vehicle_physics(rocket);
+    EXPECT_NE(physics, nullptr);
+    if (physics == nullptr) {
+      return arv::Vec3f{};
+    }
+    physics->linear_velocity = velocity->linear;
+
+    (void)world.tick_entities(&block_registry, nullptr, &vehicles);
+    physics = world.find_entity_vehicle_physics(rocket);
+    EXPECT_NE(physics, nullptr);
+    return physics == nullptr ? arv::Vec3f{} : physics->linear_velocity;
+  };
+
+  const arv::Vec3f atmosphere_velocity = tick_rocket("overworld");
+  const arv::Vec3f space_velocity = tick_rocket("space");
+
+  EXPECT_GT(
+      arv::horizontal_length(space_velocity),
+      arv::horizontal_length(atmosphere_velocity));
 }
 
 TEST(WorldEntityTests, MountedVehiclePhysicsDoesNotAdvanceControllerOwnedVehicle) {
@@ -1472,6 +1601,59 @@ TEST(WorldEntityTests, PersistentEntityRecordsRoundTripThroughWorldRuntime) {
   EXPECT_FLOAT_EQ(loaded_records.front().health_current, 4.0F);
   EXPECT_FLOAT_EQ(loaded_records.front().health_max, 10.0F);
   EXPECT_TRUE(loaded_records.front().health_invulnerable);
+}
+
+TEST(WorldEntityTests, PersistentVehicleFuelRecordsRoundTripThroughWorldRuntime) {
+  const arv::entity::VehicleDefinitionRegistry vehicles =
+      make_test_rocket_vehicle_registry();
+
+  arv::entity::EntityDefinition rocket_type;
+  rocket_type.name = "arvane:test_rocket";
+  rocket_type.components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_rocket"};
+  rocket_type.components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_rocket"};
+  auto entity_registry_result =
+      arv::entity::EntityRegistry::build({std::move(rocket_type)});
+  ASSERT_TRUE(entity_registry_result) << entity_registry_result.error().message;
+  const arv::entity::EntityRegistry entity_registry =
+      std::move(entity_registry_result.value());
+
+  arv::world::WorldRuntime world{arv::WorldID{3}};
+  arv::world::EntityCreateInfo info;
+  info.type_name = "arvane:test_rocket";
+  info.persistent = true;
+  info.persistent_uuid = "rocket-fuel-uuid";
+  info.authored_components =
+      entity_registry.records().front().components;
+  info.vehicle_definitions = &vehicles;
+  const arv::EntityID rocket = world.create_entity(std::move(info));
+  arv::entity::VehiclePhysicsComponent* physics =
+      world.find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  physics->fuel_seconds = 17.5F;
+  physics->fuel_capacity_seconds = 90.0F;
+  physics->fuel_burn_per_second = 1.25F;
+
+  const std::vector<arv::entity::PersistentEntityRecord> records =
+      world.persistent_entity_records();
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_TRUE(records.front().has_vehicle_fuel);
+  EXPECT_EQ(records.front().vehicle_fuel_item, "arvane:rocket_fuel/basic");
+  EXPECT_FLOAT_EQ(records.front().vehicle_fuel_seconds, 17.5F);
+  EXPECT_FLOAT_EQ(records.front().vehicle_fuel_capacity_seconds, 90.0F);
+  EXPECT_FLOAT_EQ(records.front().vehicle_fuel_burn_per_second, 1.25F);
+
+  arv::world::WorldRuntime loaded{arv::WorldID{3}};
+  loaded.restore_persistent_entities(records, &entity_registry, &vehicles);
+  const std::vector<arv::entity::PersistentEntityRecord> loaded_records =
+      loaded.persistent_entity_records();
+  ASSERT_EQ(loaded_records.size(), 1U);
+  ASSERT_TRUE(loaded_records.front().has_vehicle_fuel);
+  EXPECT_EQ(loaded_records.front().vehicle_fuel_item, "arvane:rocket_fuel/basic");
+  EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_seconds, 17.5F);
+  EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_capacity_seconds, 90.0F);
+  EXPECT_FLOAT_EQ(loaded_records.front().vehicle_fuel_burn_per_second, 1.25F);
 }
 
 TEST(WorldEntityTests, DroppedItemsArePersistentEntitiesWithStackPayloads) {

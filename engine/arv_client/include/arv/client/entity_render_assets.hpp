@@ -46,6 +46,7 @@ struct EntityRenderAssets {
   std::vector<render::EntityModelID> block_attached_model_by_variant{};
   std::vector<render::EntityAnimationID> block_attached_animation_by_variant{};
   std::vector<Quatf> block_attached_rotation_by_variant{};
+  render::EntityModelID space_body_model{};
 };
 
 struct ClientEntityRenderAssets {

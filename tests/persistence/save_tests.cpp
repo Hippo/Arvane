@@ -147,7 +147,12 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
        true,
        6.0F,
        10.0F,
-       true},
+       true,
+       true,
+       "arvane:rocket_fuel/basic",
+       22.0F,
+       60.0F,
+       1.5F},
       {"entity-test-uuid-b",
        "arvane:test_entity",
        arv::WorldID{1},
@@ -284,6 +289,11 @@ TEST(SaveTests, PlayerAndWorldSaveRoundTripThroughServerRoot) {
   EXPECT_FLOAT_EQ(entity_a->health_current, 6.0F);
   EXPECT_FLOAT_EQ(entity_a->health_max, 10.0F);
   EXPECT_TRUE(entity_a->health_invulnerable);
+  EXPECT_TRUE(entity_a->has_vehicle_fuel);
+  EXPECT_EQ(entity_a->vehicle_fuel_item, "arvane:rocket_fuel/basic");
+  EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_seconds, 22.0F);
+  EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_capacity_seconds, 60.0F);
+  EXPECT_FLOAT_EQ(entity_a->vehicle_fuel_burn_per_second, 1.5F);
   const auto entity_b = std::find_if(
       loaded.value().entities.begin(),
       loaded.value().entities.end(),

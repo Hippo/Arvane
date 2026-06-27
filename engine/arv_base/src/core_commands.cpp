@@ -710,7 +710,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
   }
   u32 affected = 0U;
   for (const command::EntityCommandTarget& entity : targets) {
-    if (services->kill_entity(entity.entity_id)) {
+    if (services->kill_entity(entity.world_id, entity.entity_id)) {
       ++affected;
     }
   }
@@ -884,6 +884,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
     u32 applied = 0U;
     for (const command::EntityCommandTarget& target : targets) {
       if (services->apply_status_effect(
+              target.world_id,
               target.entity_id,
               effect_id,
               duration_ticks,
@@ -921,7 +922,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
     }
     u32 cleared = 0U;
     for (const command::EntityCommandTarget& target : targets) {
-      cleared += services->clear_status_effects(target.entity_id, effect_id);
+      cleared += services->clear_status_effects(target.world_id, target.entity_id, effect_id);
     }
     return command::CommandResult::success(
         "Cleared " + std::to_string(cleared) + " effects.");
@@ -945,7 +946,7 @@ sender_player_target(command::CommandCtx& ctx, const ServerCommandServices& serv
         "Active effects for " + std::to_string(targets.size()) + " entities:");
     for (const command::EntityCommandTarget& target : targets) {
       const std::vector<command::StatusEffectCommandState> effects =
-          services->list_status_effects(target.entity_id);
+          services->list_status_effects(target.world_id, target.entity_id);
       if (effects.empty()) {
         result.add_message(
             command::CommandMessageKind::Info,

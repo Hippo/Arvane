@@ -1,0 +1,15 @@
+id: arvane:space_body/research_station
+version: 1
+type: station
+display_name: Research Station
+space_world: arvane:space/solar_system
+position: [-900, 80, 1450]
+visual_radius: 35.0
+entry_radius: 55.0
+render:
+  model: arvane:models/space_body/station
+  texture: arvane:textures/space_body/research_station
+  atmosphere_halo: false
+entry:
+  enabled: false
+  mode: disabled

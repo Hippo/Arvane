@@ -56,6 +56,9 @@ void render_remote_world(Vec4f clear_color) {
   render::FramePacket frame =
       g_app.session->build_frame_packet(0.0F, viewport_width, viewport_height);
   client::configure_frame_sky(frame, g_app.world_clock, web_sky_config());
+  if (g_app.session->space_environment()) {
+    client::configure_frame_space_sky(frame);
+  }
 
   append_web_chunk_draws_to_frame(frame);
   if (g_app.entity_assets.ready) {
@@ -63,7 +66,9 @@ void render_remote_world(Vec4f clear_color) {
     append_web_entity_draw_items(frame, animation_time_seconds);
   }
 
-  frame.clear_color = clear_color;
+  if (!g_app.session->space_environment()) {
+    frame.clear_color = clear_color;
+  }
   const auto ui_now = std::chrono::steady_clock::now();
   append_web_gameplay_ui_to_frame(
       frame,

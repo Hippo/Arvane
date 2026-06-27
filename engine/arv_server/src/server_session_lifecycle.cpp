@@ -286,11 +286,26 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
   session.last_keep_alive_received_time = now;
   session.last_keep_alive_id = 0U;
   register_online_profile(session);
-  player::PlayerState& player_state = default_world_.ensure_player(session.player_id);
+
+  if (const std::optional<std::string> saved_world_name =
+          player_saves_.world_name_for(session);
+      saved_world_name.has_value()) {
+    const WorldRecord* saved_world = worlds_.find(saved_world_name.value());
+    if (saved_world != nullptr && world_by_id(saved_world->id) != nullptr) {
+      session.world_id = saved_world->id;
+    }
+  }
+  world::WorldRuntime* runtime = world_for_session(session);
+  if (runtime == nullptr) {
+    session.world_id = DefaultWorldID;
+    runtime = &default_world_;
+  }
+
+  player::PlayerState& player_state = runtime->ensure_player(session.player_id);
   player_state.world_id = session.world_id;
   player_state.fly_speed = player_tuning_.fly_speed;
   if (!apply_saved_player_state(session, player_state)) {
-    const arv::Location spawn = default_world_.spawn_point();
+    const arv::Location spawn = runtime->spawn_point();
     player_state.position = location_position(spawn);
     player_state.velocity = {};
     player_state.yaw_radians = spawn.yaw_radians;
@@ -644,12 +659,26 @@ void ServerRuntimeImpl::send_world_join_result(
   result.effective_view_distance = max_view_distance_;
   const world::WorldRuntime* runtime = world_for_session(session);
   if (runtime != nullptr) {
+    result.environment_sky = runtime->environment().sky;
+    result.space_environment = result.environment_sky == "space";
     const std::optional<EntityID> entity_id =
         runtime->entity_for_player(session.player_id);
     if (entity_id.has_value()) {
       result.local_entity_id =
           runtime->network_id_for_entity(entity_id.value()).value_or(EntityNetID{});
     }
+  }
+  for (const SpaceBodyRuntimeView& body : space_bodies_for_world(session.world_id)) {
+    result.space_bodies.push_back({
+        body.body_id,
+        body.display_name,
+        body.target_world_id,
+        body.render_model,
+        body.render_texture,
+        body.position,
+        body.visual_radius,
+        body.entry_radius,
+        body.entry_enabled});
   }
 
   const net::NetworkResult send_result = send_protocol_message(

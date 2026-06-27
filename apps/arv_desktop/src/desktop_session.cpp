@@ -111,40 +111,13 @@ bool DesktopSessionManager::shutdown_session(std::unique_ptr<DesktopGameSession>
     (void)session->integrated_server->close_player_inventory_menu(server_session->player_id);
   }
 
-  const std::vector<persistence::SavedChunkSection> saved_chunks =
-      capture_saved_chunks(session->integrated_server->voxel_world());
-  const std::vector<persistence::PlayerSaveData> player_saves =
-      capture_player_saves(*session->integrated_server, session->world_save_name);
-  const std::vector<entity::PersistentEntityRecord> entity_saves =
-      capture_saved_entities(session->integrated_server->voxel_world());
-  const persistence::SaveMetadata save_metadata{
-      persistence::CurrentSaveFormatVersion,
-      std::string{persistence::CurrentGameVersion},
-      0U,
-      0U,
-      session->server_save_display_name};
-  persistence::WorldMetadata world_metadata{
-      session->world_save_name,
-      session->world_seed,
-      session->integrated_server->voxel_world().tick_index(),
-      session->generation_config,
-      session->min_chunk_y,
-      session->max_chunk_y,
-      0U,
-      0U,
-      session->integrated_server->voxel_world().clock()};
-  world_metadata.spawn_point = session->integrated_server->voxel_world().spawn_point();
-  auto save_result = persistence::save_server_root(
-      session->server_save_root,
-      save_metadata,
-      world_metadata,
-      saved_chunks,
-      player_saves,
-      entity_saves,
-      dependencies_.block_registry,
-      dependencies_.item_registry);
-  if (!save_result) {
-    core::error("save", save_result.error().message);
+  const arv::command::SaveAllCommandResult save_result =
+      session->integrated_server->save_all_worlds(false);
+  if (!save_result.success) {
+    core::error(
+        "save",
+        save_result.message.empty() ? std::string_view{"failed to save server worlds"}
+                                    : std::string_view{save_result.message});
     return false;
   }
 
@@ -349,6 +322,7 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.chunk_generation = std::move(chunk_generation);
   server_start_info.world_height = session_world_height;
   server_start_info.world_spawn = session_world_spawn;
+  server_start_info.server_save_display_name = session->server_save_display_name;
   server_start_info.max_generation_results_per_tick =
       dependencies_.config.chunk_pipeline.max_generation_results_per_tick;
   server_start_info.max_lighting_results_per_tick =
@@ -366,6 +340,7 @@ std::unique_ptr<DesktopGameSession> DesktopSessionManager::build_singleplayer_se
   server_start_info.entity_registry = &dependencies_.entity_registry;
   server_start_info.vehicle_registry = &dependencies_.vehicle_registry;
   server_start_info.entity_goals = &dependencies_.entity_goals;
+  server_start_info.space_definitions = &dependencies_.space_definitions;
   server_start_info.server_save_root = server_save_root;
   server_start_info.skins = dependencies_.config.skins;
   server_start_info.movement = dependencies_.config.network.movement;
@@ -750,6 +725,48 @@ void DesktopSessionManager::refresh_inventory_slots(DesktopGameSession& session)
   session.inventory_slots = std::move(projection.inventory_slots);
   session.container_slots = std::move(projection.container_slots);
   session.carried_inventory_stack = std::move(projection.carried_stack);
+}
+
+void DesktopSessionManager::sync_client_world_context(DesktopGameSession& session) const {
+  if (session.client == nullptr ||
+      session.client->connection_state() != net::ConnectionState::InGame) {
+    return;
+  }
+
+  const WorldID world_id = session.client->camera().world_id();
+  if (world_id.value == 0U || world_id == session.client_world.id()) {
+    return;
+  }
+
+  cancel_chunk_view_mesh_jobs(dependencies_.client_tasks, session.chunk_view);
+  remove_session_chunk_meshes(session);
+  session.chunk_view = ChunkViewState{};
+  session.client_world = world::WorldRuntime{world_id};
+  session.client_world.bind_owner_thread();
+
+  if (session.integrated_server != nullptr) {
+    if (const world::WorldRuntime* server_world =
+            session.integrated_server->world_runtime(world_id);
+        server_world != nullptr) {
+      const world::WorldHeightSettings height = server_world->height_settings();
+      session.min_chunk_y = height.min_chunk_y;
+      session.max_chunk_y = height.max_chunk_y;
+      session.client_world.configure_height(height);
+      if (const world::WorldGenerationConfig* generation =
+              server_world->generation_config();
+          generation != nullptr) {
+        session.client_world.set_generation_context(
+            server_world->generation_seed(),
+            *generation);
+      }
+      session.client_world.set_clock(
+          server_world->clock(),
+          session.client->server_tick_rate());
+      return;
+    }
+  }
+
+  session.client_world.configure_height({session.min_chunk_y, session.max_chunk_y});
 }
 
 void DesktopSessionManager::collect_client_chunk_stream(DesktopGameSession& session) const {

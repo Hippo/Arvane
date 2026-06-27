@@ -585,14 +585,18 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
       continue;
     }
 
-    player::PlayerState* player_state = default_world_.find_player(session->player_id);
+    world::WorldRuntime* runtime = world_for_session(*session);
+    if (runtime == nullptr) {
+      continue;
+    }
+    player::PlayerState* player_state = runtime->find_player(session->player_id);
     if (player_state == nullptr || item_registry_ == nullptr) {
       continue;
     }
 
     PlayerCombatState& combat_state = combat_states_[session->session_id];
     const AttackResult result = validate_and_apply_entity_attack(
-        default_world_,
+        *runtime,
         *player_state,
         *item_registry_,
         combat_,
@@ -611,6 +615,7 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
     }
     if (result.damage_applied && result.damaged_entity.has_value()) {
       handle_vehicle_damage_result(
+          *runtime,
           result.damaged_entity.value(),
           result.damage,
           {0.0F, 1.0F, 0.0F},
@@ -622,15 +627,15 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
     }
     if (result.critical_hit) {
       const std::optional<EntityID> target_entity =
-          entity_for_net_id(default_world_, pending.attack.target_entity);
+          entity_for_net_id(*runtime, pending.attack.target_entity);
       if (target_entity.has_value()) {
         const std::optional<Vec3f> target_position =
-            authoritative_entity_position(default_world_, target_entity.value());
+            authoritative_entity_position(*runtime, target_entity.value());
         if (target_position.has_value()) {
           const Aabb3f target_bounds =
-              entity_attack_bounds_at(default_world_, target_entity.value(), target_position.value());
+              entity_attack_bounds_at(*runtime, target_entity.value(), target_position.value());
           protocol::ClientboundSpawnParticles particles;
-          particles.world_id = player_state->world_id;
+          particles.world_id = runtime->id();
           particles.particle_type = "arvane:critical_hit";
           particles.position = aabb_center(target_bounds);
           particles.normal = {0.0F, 1.0F, 0.0F};
@@ -646,7 +651,7 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
           sessions_.for_each_session([&](const ServerSession& recipient) {
             if (!recipient.authenticated ||
                 recipient.connection_state != net::ConnectionState::InGame ||
-                recipient.world_id != player_state->world_id) {
+                recipient.world_id != runtime->id()) {
               return;
             }
             (void)send_protocol_message(
@@ -663,14 +668,15 @@ void ServerRuntimeImpl::process_pending_entity_attacks() {
     if (result.knockback_player_id.has_value()) {
       const PlayerID target_player_id = result.knockback_player_id.value();
       const player::PlayerState* target_player =
-          default_world_.find_player(target_player_id);
+          runtime->find_player(target_player_id);
       if (target_player == nullptr) {
         continue;
       }
       sessions_.for_each_session([&](const ServerSession& target_session) {
         if (!target_session.authenticated ||
             target_session.connection_state != net::ConnectionState::InGame ||
-            target_session.player_id != target_player_id) {
+            target_session.player_id != target_player_id ||
+            target_session.world_id != runtime->id()) {
           return;
         }
         send_player_velocity(target_session, *target_player);

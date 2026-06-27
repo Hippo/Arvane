@@ -147,6 +147,239 @@ bool entity_name_less(const EntityDefinition& lhs, const EntityDefinition& rhs) 
   return Expected<std::string, EntityRegistryError>::success(std::move(text));
 }
 
+[[nodiscard]] bool valid_resource_namespace_char(char value, bool first) noexcept {
+  const bool alpha = value >= 'a' && value <= 'z';
+  const bool digit = value >= '0' && value <= '9';
+  return alpha || (!first && digit) || value == '_' || value == '-' || value == '.';
+}
+
+[[nodiscard]] bool valid_resource_path_char(char value) noexcept {
+  const bool alpha = value >= 'a' && value <= 'z';
+  const bool digit = value >= '0' && value <= '9';
+  return alpha || digit || value == '_' || value == '-' || value == '.' || value == '/';
+}
+
+[[nodiscard]] bool resource_path_has_unsafe_segment(std::string_view path) noexcept {
+  usize segment_start = 0U;
+  while (segment_start <= path.size()) {
+    const usize separator = path.find('/', segment_start);
+    const usize segment_end = separator == std::string_view::npos ? path.size() : separator;
+    const std::string_view segment =
+        path.substr(segment_start, segment_end - segment_start);
+    if (segment.empty() || segment == "." || segment == "..") {
+      return true;
+    }
+    if (separator == std::string_view::npos) {
+      break;
+    }
+    segment_start = separator + 1U;
+  }
+  return false;
+}
+
+[[nodiscard]] bool valid_resource_id_syntax(std::string_view value) noexcept {
+  const usize separator = value.find(':');
+  if (separator == std::string_view::npos || separator == 0U ||
+      separator + 1U >= value.size() ||
+      value.find(':', separator + 1U) != std::string_view::npos) {
+    return false;
+  }
+  const std::string_view name_space = value.substr(0U, separator);
+  const std::string_view path = value.substr(separator + 1U);
+  for (usize index = 0U; index < name_space.size(); ++index) {
+    if (!valid_resource_namespace_char(name_space[index], index == 0U)) {
+      return false;
+    }
+  }
+  return !resource_path_has_unsafe_segment(path) &&
+         std::all_of(path.begin(), path.end(), valid_resource_path_char);
+}
+
+[[nodiscard]] Expected<std::vector<std::string>, EntityRegistryError>
+read_optional_resource_id_array(
+    const io::DataValue& object,
+    std::string_view field,
+    std::string_view path) {
+  std::vector<std::string> out;
+  const io::DataValue* value = object.get(field);
+  if (value == nullptr) {
+    return Expected<std::vector<std::string>, EntityRegistryError>::success(std::move(out));
+  }
+  const io::DataValue::Array* array = value->array_if();
+  if (array == nullptr) {
+    return Expected<std::vector<std::string>, EntityRegistryError>::failure(
+        {std::string{path} + "." + std::string{field} + " must be an array"});
+  }
+  out.reserve(array->size());
+  for (usize index = 0U; index < array->size(); ++index) {
+    const io::DataValue& entry = (*array)[index];
+    if (entry.kind() != io::DataKind::String) {
+      return Expected<std::vector<std::string>, EntityRegistryError>::failure(
+          {std::string{path} + "." + std::string{field} + "[" +
+           std::to_string(index) + "] must be a string"});
+    }
+    std::string id{entry.as_string_or({})};
+    if (!valid_resource_id_syntax(id)) {
+      return Expected<std::vector<std::string>, EntityRegistryError>::failure(
+          {std::string{path} + "." + std::string{field} + "[" +
+           std::to_string(index) + "] must be a valid resource ID"});
+    }
+    out.push_back(std::move(id));
+  }
+  return Expected<std::vector<std::string>, EntityRegistryError>::success(std::move(out));
+}
+
+[[nodiscard]] Expected<AircraftMovementDefinition, EntityRegistryError>
+read_aircraft_movement_definition(
+    const io::DataValue& movement,
+    const std::string& path) {
+  if (movement.kind() != io::DataKind::Object) {
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(
+        {path + " must be an object"});
+  }
+  auto min_speed = read_required_f32(movement, "min_speed", path);
+  auto max_speed = read_required_f32(movement, "max_speed", path);
+  auto acceleration = read_required_f32(movement, "acceleration", path);
+  auto brake_deceleration = read_required_f32(movement, "brake_deceleration", path);
+  auto drag = read_required_f32(movement, "drag", path);
+  auto pitch_rate = read_required_f32(movement, "pitch_rate", path);
+  auto yaw_rate = read_required_f32(movement, "yaw_rate", path);
+  auto roll_rate = read_required_f32(movement, "roll_rate", path);
+  auto roll_auto_level_rate = read_required_f32(movement, "roll_auto_level_rate", path);
+  auto lift_strength = read_required_f32(movement, "lift_strength", path);
+  auto stall_speed = read_required_f32(movement, "stall_speed", path);
+  auto stall_gravity_scale = read_required_f32(movement, "stall_gravity_scale", path);
+  auto gravity_scale = read_required_f32(movement, "gravity_scale", path);
+  auto max_climb_rate = read_required_f32(movement, "max_climb_rate", path);
+  auto max_descent_rate = read_required_f32(movement, "max_descent_rate", path);
+  auto ground_takeoff_speed = read_required_f32(movement, "ground_takeoff_speed", path);
+  auto ground_drag = read_required_f32(movement, "ground_drag", path);
+  auto vertical_thrust = read_optional_bool(movement, "vertical_thrust", path, false);
+  if (!min_speed)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(min_speed.error());
+  if (!max_speed)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(max_speed.error());
+  if (!acceleration)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(acceleration.error());
+  if (!brake_deceleration)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(brake_deceleration.error());
+  if (!drag)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(drag.error());
+  if (!pitch_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(pitch_rate.error());
+  if (!yaw_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(yaw_rate.error());
+  if (!roll_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(roll_rate.error());
+  if (!roll_auto_level_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(roll_auto_level_rate.error());
+  if (!lift_strength)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(lift_strength.error());
+  if (!stall_speed)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(stall_speed.error());
+  if (!stall_gravity_scale)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(stall_gravity_scale.error());
+  if (!gravity_scale)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(gravity_scale.error());
+  if (!max_climb_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(max_climb_rate.error());
+  if (!max_descent_rate)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(max_descent_rate.error());
+  if (!ground_takeoff_speed)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(ground_takeoff_speed.error());
+  if (!ground_drag)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(ground_drag.error());
+  if (!vertical_thrust)
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(vertical_thrust.error());
+  if (min_speed.value() < 0.0F || max_speed.value() <= 0.0F ||
+      min_speed.value() > max_speed.value()) {
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(
+        {path + " must satisfy 0 <= min_speed <= max_speed"});
+  }
+  if (acceleration.value() < 0.0F || brake_deceleration.value() < 0.0F ||
+      lift_strength.value() < 0.0F || stall_speed.value() < 0.0F ||
+      stall_gravity_scale.value() < 0.0F || gravity_scale.value() < 0.0F ||
+      max_climb_rate.value() < 0.0F || max_descent_rate.value() < 0.0F ||
+      ground_takeoff_speed.value() < 0.0F) {
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(
+        {path + " aircraft speeds and forces must be non-negative"});
+  }
+  if (drag.value() < 0.0F || drag.value() > 1.0F ||
+      ground_drag.value() < 0.0F || ground_drag.value() > 1.0F) {
+    return Expected<AircraftMovementDefinition, EntityRegistryError>::failure(
+        {path + " aircraft drag values must be between 0 and 1"});
+  }
+  return Expected<AircraftMovementDefinition, EntityRegistryError>::success({min_speed.value(),
+                                                                             max_speed.value(),
+                                                                             acceleration.value(),
+                                                                             brake_deceleration.value(),
+                                                                             drag.value(),
+                                                                             degrees_to_radians(pitch_rate.value()),
+                                                                             degrees_to_radians(yaw_rate.value()),
+                                                                             degrees_to_radians(roll_rate.value()),
+                                                                             degrees_to_radians(roll_auto_level_rate.value()),
+                                                                             lift_strength.value(),
+                                                                             stall_speed.value(),
+                                                                             stall_gravity_scale.value(),
+                                                                             gravity_scale.value(),
+                                                                             max_climb_rate.value(),
+                                                                             max_descent_rate.value(),
+                                                                             ground_takeoff_speed.value(),
+                                                                             ground_drag.value(),
+                                                                             vertical_thrust.value()});
+}
+
+[[nodiscard]] Expected<VehicleFuelDefinition, EntityRegistryError> read_vehicle_fuel_definition(
+    const io::DataValue& root,
+    const std::string& path) {
+  if (root.kind() != io::DataKind::Object) {
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(
+        {path + " must be an object"});
+  }
+  VehicleFuelDefinition fuel;
+  auto item = read_required_string(root, "item", path);
+  if (!item) {
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(item.error());
+  }
+  if (!valid_resource_id_syntax(item.value())) {
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(
+        {path + ".item must be a valid resource ID"});
+  }
+  fuel.item = std::move(item.value());
+  auto capacity = read_required_f32(root, "capacity_seconds", path);
+  if (!capacity) {
+    capacity = read_required_f32(root, "max_fuel_seconds", path);
+  }
+  auto initial = read_optional_f32(root, "initial_seconds", path, -1.0F);
+  auto burn = read_optional_f32(root, "burn_per_second", path, fuel.burn_per_second);
+  auto min_launch =
+      read_optional_f32(root, "min_fuel_for_launch_seconds", path, fuel.min_fuel_for_launch_seconds);
+  if (!min_launch) {
+    min_launch =
+        read_optional_f32(root, "min_fuel_for_launch_secs", path, fuel.min_fuel_for_launch_seconds);
+  }
+  if (!capacity)
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(capacity.error());
+  if (!initial)
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(initial.error());
+  if (!burn)
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(burn.error());
+  if (!min_launch)
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(min_launch.error());
+  if (capacity.value() <= 0.0F || burn.value() <= 0.0F ||
+      min_launch.value() < 0.0F) {
+    return Expected<VehicleFuelDefinition, EntityRegistryError>::failure(
+        {path + " capacity and burn rate must be positive, and launch fuel must be non-negative"});
+  }
+  fuel.capacity_seconds = capacity.value();
+  fuel.initial_seconds = initial.value() < 0.0F ? fuel.capacity_seconds : initial.value();
+  fuel.initial_seconds = std::clamp(fuel.initial_seconds, 0.0F, fuel.capacity_seconds);
+  fuel.burn_per_second = burn.value();
+  fuel.min_fuel_for_launch_seconds =
+      std::min(min_launch.value(), fuel.capacity_seconds);
+  return Expected<VehicleFuelDefinition, EntityRegistryError>::success(std::move(fuel));
+}
+
 [[nodiscard]] Expected<Quatf, EntityRegistryError> read_quat(
     const io::DataValue& node,
     std::string_view field) {
@@ -584,6 +817,34 @@ VehicleDefinitionRegistry::Result VehicleDefinitionRegistry::build(
     }
     if (definition.seats.empty()) {
       return Result::failure({"vehicle " + definition.name + " must define at least one seat"});
+    }
+
+    HashSet<std::string> tag_ids;
+    for (const std::string& tag : definition.tags) {
+      if (!valid_resource_id_syntax(tag)) {
+        return Result::failure({"vehicle " + definition.name + " has invalid tag " + tag});
+      }
+      if (!tag_ids.insert(tag).second) {
+        return Result::failure({"vehicle " + definition.name + " has duplicate tag " + tag});
+      }
+    }
+
+    if (definition.fuel.has_value()) {
+      const VehicleFuelDefinition& fuel = definition.fuel.value();
+      if (!valid_resource_id_syntax(fuel.item)) {
+        return Result::failure({"vehicle " + definition.name + " has invalid fuel item"});
+      }
+      if (fuel.capacity_seconds <= 0.0F || !std::isfinite(fuel.capacity_seconds) ||
+          fuel.initial_seconds < 0.0F || !std::isfinite(fuel.initial_seconds) ||
+          fuel.burn_per_second <= 0.0F || !std::isfinite(fuel.burn_per_second) ||
+          fuel.min_fuel_for_launch_seconds < 0.0F ||
+          !std::isfinite(fuel.min_fuel_for_launch_seconds)) {
+        return Result::failure({"vehicle " + definition.name + " has invalid fuel values"});
+      }
+      if (fuel.initial_seconds > fuel.capacity_seconds ||
+          fuel.min_fuel_for_launch_seconds > fuel.capacity_seconds) {
+        return Result::failure({"vehicle " + definition.name + " fuel values exceed capacity"});
+      }
     }
 
     HashSet<std::string> seat_ids;
@@ -1160,6 +1421,12 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
     }
     definition.physics = parsed_physics.value();
 
+    auto tags = read_optional_resource_id_array(vehicle_json, "tags", path);
+    if (!tags) {
+      return Expected<VehicleDefinition, EntityRegistryError>::failure(tags.error());
+    }
+    definition.tags = std::move(tags.value());
+
     const io::DataValue* collision = vehicle_json.get("collision");
     if (collision == nullptr || collision->kind() != io::DataKind::Object) {
       return Expected<VehicleDefinition, EntityRegistryError>::failure(
@@ -1310,93 +1577,13 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
           gravity_scale.value(),
           max_step_height.value()};
     } else if (definition.physics == VehiclePhysicsKind::Aircraft) {
-      auto min_speed = read_required_f32(*movement, "min_speed", path + ".movement");
-      auto max_speed = read_required_f32(*movement, "max_speed", path + ".movement");
-      auto acceleration = read_required_f32(*movement, "acceleration", path + ".movement");
-      auto brake_deceleration = read_required_f32(*movement, "brake_deceleration", path + ".movement");
-      auto drag = read_required_f32(*movement, "drag", path + ".movement");
-      auto pitch_rate = read_required_f32(*movement, "pitch_rate", path + ".movement");
-      auto yaw_rate = read_required_f32(*movement, "yaw_rate", path + ".movement");
-      auto roll_rate = read_required_f32(*movement, "roll_rate", path + ".movement");
-      auto roll_auto_level_rate = read_required_f32(*movement, "roll_auto_level_rate", path + ".movement");
-      auto lift_strength = read_required_f32(*movement, "lift_strength", path + ".movement");
-      auto stall_speed = read_required_f32(*movement, "stall_speed", path + ".movement");
-      auto stall_gravity_scale = read_required_f32(*movement, "stall_gravity_scale", path + ".movement");
-      auto gravity_scale = read_required_f32(*movement, "gravity_scale", path + ".movement");
-      auto max_climb_rate = read_required_f32(*movement, "max_climb_rate", path + ".movement");
-      auto max_descent_rate = read_required_f32(*movement, "max_descent_rate", path + ".movement");
-      auto ground_takeoff_speed = read_required_f32(*movement, "ground_takeoff_speed", path + ".movement");
-      auto ground_drag = read_required_f32(*movement, "ground_drag", path + ".movement");
-      if (!min_speed)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(min_speed.error());
-      if (!max_speed)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_speed.error());
-      if (!acceleration)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(acceleration.error());
-      if (!brake_deceleration)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(brake_deceleration.error());
-      if (!drag)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(drag.error());
-      if (!pitch_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(pitch_rate.error());
-      if (!yaw_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(yaw_rate.error());
-      if (!roll_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(roll_rate.error());
-      if (!roll_auto_level_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(roll_auto_level_rate.error());
-      if (!lift_strength)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(lift_strength.error());
-      if (!stall_speed)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(stall_speed.error());
-      if (!stall_gravity_scale)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(stall_gravity_scale.error());
-      if (!gravity_scale)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(gravity_scale.error());
-      if (!max_climb_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_climb_rate.error());
-      if (!max_descent_rate)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(max_descent_rate.error());
-      if (!ground_takeoff_speed)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(ground_takeoff_speed.error());
-      if (!ground_drag)
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(ground_drag.error());
-      if (min_speed.value() < 0.0F || max_speed.value() <= 0.0F ||
-          min_speed.value() > max_speed.value()) {
+      auto parsed_aircraft =
+          read_aircraft_movement_definition(*movement, path + ".movement");
+      if (!parsed_aircraft) {
         return Expected<VehicleDefinition, EntityRegistryError>::failure(
-            {path + ".movement must satisfy 0 <= min_speed <= max_speed"});
+            parsed_aircraft.error());
       }
-      if (acceleration.value() < 0.0F || brake_deceleration.value() < 0.0F ||
-          lift_strength.value() < 0.0F || stall_speed.value() < 0.0F ||
-          stall_gravity_scale.value() < 0.0F || gravity_scale.value() < 0.0F ||
-          max_climb_rate.value() < 0.0F || max_descent_rate.value() < 0.0F ||
-          ground_takeoff_speed.value() < 0.0F) {
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(
-            {path + ".movement aircraft speeds and forces must be non-negative"});
-      }
-      if (drag.value() < 0.0F || drag.value() > 1.0F ||
-          ground_drag.value() < 0.0F || ground_drag.value() > 1.0F) {
-        return Expected<VehicleDefinition, EntityRegistryError>::failure(
-            {path + ".movement aircraft drag values must be between 0 and 1"});
-      }
-      definition.aircraft = {
-          min_speed.value(),
-          max_speed.value(),
-          acceleration.value(),
-          brake_deceleration.value(),
-          drag.value(),
-          degrees_to_radians(pitch_rate.value()),
-          degrees_to_radians(yaw_rate.value()),
-          degrees_to_radians(roll_rate.value()),
-          degrees_to_radians(roll_auto_level_rate.value()),
-          lift_strength.value(),
-          stall_speed.value(),
-          stall_gravity_scale.value(),
-          gravity_scale.value(),
-          max_climb_rate.value(),
-          max_descent_rate.value(),
-          ground_takeoff_speed.value(),
-          ground_drag.value()};
+      definition.aircraft = parsed_aircraft.value();
     } else if (definition.physics == VehiclePhysicsKind::Submersible) {
       auto max_forward_speed = read_required_f32(*movement, "max_forward_speed", path + ".movement");
       auto max_reverse_speed = read_required_f32(*movement, "max_reverse_speed", path + ".movement");
@@ -1477,6 +1664,29 @@ Expected<std::vector<VehicleDefinition>, EntityRegistryError> parse_vehicle_defi
           min_water_occupancy.value(),
           preferred_water_occupancy.value(),
           surface_float_offset.value()};
+    }
+
+    if (const io::DataValue* space_movement = vehicle_json.get("space_movement");
+        space_movement != nullptr) {
+      if (definition.physics != VehiclePhysicsKind::Aircraft) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            {path + ".space_movement is only supported for aircraft vehicles"});
+      }
+      auto parsed_space_aircraft =
+          read_aircraft_movement_definition(*space_movement, path + ".space_movement");
+      if (!parsed_space_aircraft) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(
+            parsed_space_aircraft.error());
+      }
+      definition.space_aircraft = parsed_space_aircraft.value();
+    }
+
+    if (const io::DataValue* fuel = vehicle_json.get("fuel"); fuel != nullptr) {
+      auto parsed_fuel = read_vehicle_fuel_definition(*fuel, path + ".fuel");
+      if (!parsed_fuel) {
+        return Expected<VehicleDefinition, EntityRegistryError>::failure(parsed_fuel.error());
+      }
+      definition.fuel = std::move(parsed_fuel.value());
     }
 
     const io::DataValue* authority = vehicle_json.get("authority");

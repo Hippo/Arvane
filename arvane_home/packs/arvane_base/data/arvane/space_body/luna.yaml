@@ -1,0 +1,22 @@
+id: arvane:space_body/luna
+version: 1
+type: moon
+display_name: Luna
+space_world: arvane:space/solar_system
+target_world: arvane:world/luna
+position: [2200, 0, 700]
+visual_radius: 90.0
+entry_radius: 130.0
+render:
+  model: arvane:models/space_body/moon
+  texture: arvane:textures/space_body/luna
+  atmosphere_halo: false
+entry:
+  enabled: true
+  mode: fixed_spawn
+  require_vehicle_tags:
+    - arvane:space_capable
+  spawn_position: [0, 640, 0]
+  spawn_velocity: [0, -10, 0]
+  spawn_rotation: [0, 0, 0]
+  effect: arvane:moon_entry

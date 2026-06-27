@@ -1,21 +1,28 @@
 #include "arv/base/base_ids.hpp"
+#include "arv/base/base_commands.hpp"
 #include "arv/base/base_module.hpp"
+#include "arv/asset/pack.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/crafting/crafting.hpp"
 #include "arv/entity/components.hpp"
 #include "arv/io/data_document.hpp"
 #include "arv/net/in_process_transport.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
 #include "arv/server/server_combat.hpp"
+#include "arv/server/server_commands.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "support/entity_animation.hpp"
 #include "support/server_harness.hpp"
+#include "support/temp_dir.hpp"
+#include "support/temp_files.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -213,6 +220,70 @@ arv::client::ParticleRegistry make_vehicle_smoke_particle_registry() {
   return registry;
 }
 
+void write_crafting_test_pack_manifest(
+    const std::filesystem::path& packs_root,
+    std::string_view id) {
+  arv::testsupport::write_text(
+      packs_root / std::string{id} / "pack.yaml",
+      "schema_version: 1\n"
+      "id: \"" +
+          std::string{id} + "\"\n"
+                            "display_name: \"" +
+          std::string{id} + "\"\n"
+                            "version: \"1.0.0\"\n"
+                            "namespaces:\n"
+                            "  - \"arvane\"\n"
+                            "side: \"both\"\n"
+                            "dependencies: []\n"
+                            "load_after: []\n"
+                            "load_before: []\n"
+                            "capabilities:\n"
+                            "  assets: true\n"
+                            "  data: true\n"
+                            "  native_plugin: false\n");
+}
+
+arv::crafting::CraftingRecipeRegistry make_session_world_crafting_registry(
+    const arv::player::ItemRegistry& item_registry) {
+  arv::testsupport::ScopedTempDir temp("arvane_session_world_crafting_");
+  const std::filesystem::path packs = temp.path / "packs";
+  write_crafting_test_pack_manifest(packs, "arvane_base");
+  arv::testsupport::write_text(
+      packs / "arvane_base/data/arvane/crafting_categories/building.json",
+      R"json({
+        "id": "arvane:building",
+        "name": "Building",
+        "icon": {"item": "arvane:stone"},
+        "sort_order": 100
+      })json");
+  arv::testsupport::write_text(
+      packs / "arvane_base/data/arvane/recipes/dirt_from_stone.json",
+      R"json({
+        "id": "arvane:dirt_from_stone",
+        "type": "arvane:crafting",
+        "category": "arvane:building",
+        "icon": {"item": "arvane:dirt"},
+        "ingredients": [{"item": "arvane:stone", "count": 2}],
+        "result": {"item": "arvane:dirt", "count": 1},
+        "unlock": {"collect_items": ["arvane:stone"]}
+      })json");
+
+  auto manager = arv::asset::PackManager::load_from_packs_root(packs);
+  EXPECT_TRUE(manager) << manager.error().describe();
+  if (!manager) {
+    return {};
+  }
+  auto loaded = arv::crafting::load_crafting_registry_from_packs(
+      manager.value(),
+      item_registry);
+  EXPECT_TRUE(loaded) << loaded.error().message;
+  if (!loaded) {
+    return {};
+  }
+  EXPECT_TRUE(loaded.value().diagnostics.empty());
+  return std::move(loaded.value().registry);
+}
+
 arv::entity::VehicleDefinitionRegistry make_mount_request_vehicle_registry() {
   arv::entity::VehicleDefinition mount;
   mount.name = "arvane:test_mount";
@@ -337,7 +408,7 @@ arv::entity::VehicleDefinitionRegistry make_buggy_request_vehicle_registry(
 }
 
 arv::EntityID create_networked_test_buggy(
-    arv::server::ServerRuntime& server,
+    arv::world::WorldRuntime& world,
     const arv::entity::VehicleDefinitionRegistry& vehicles,
     arv::Vec3f position) {
   arv::entity::EntityComponentSet components;
@@ -354,7 +425,17 @@ arv::EntityID create_networked_test_buggy(
   info.position = position;
   info.authored_components = components;
   info.vehicle_definitions = &vehicles;
-  return server.voxel_world().create_entity(std::move(info));
+  return world.create_entity(std::move(info));
+}
+
+arv::EntityID create_networked_test_buggy(
+    arv::server::ServerRuntime& server,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  return create_networked_test_buggy(
+      server.voxel_world(),
+      vehicles,
+      position);
 }
 
 arv::entity::VehicleDefinitionRegistry make_plane_request_vehicle_registry() {
@@ -415,6 +496,113 @@ arv::EntityID create_networked_test_plane(
   arv::world::EntityCreateInfo info;
   info.type_id = arv::EntityTypeID{4};
   info.type_name = "arvane:test_plane";
+  info.position = position;
+  info.authored_components = components;
+  info.vehicle_definitions = &vehicles;
+  return server.voxel_world().create_entity(std::move(info));
+}
+
+arv::entity::VehicleDefinitionRegistry make_rocket_request_vehicle_registry() {
+  arv::entity::VehicleDefinition rocket;
+  rocket.name = "arvane:test_rocket";
+  rocket.kind = arv::entity::VehicleKind::Vehicle;
+  rocket.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  rocket.tags = {"arvane:vehicle", "arvane:rocket", "arvane:space_capable"};
+  rocket.collision_size = {1.2F, 3.0F, 1.2F};
+  rocket.seats.push_back({"pilot",
+                          "pilot",
+                          arv::entity::SeatRole::Driver,
+                          {0.0F, 1.4F, 0.0F},
+                          {},
+                          true,
+                          arv::entity::CameraMode::VehicleChase});
+  rocket.aircraft = {
+      0.0F,
+      60.0F,
+      24.0F,
+      16.0F,
+      0.98F,
+      arv::degrees_to_radians(70.0F),
+      arv::degrees_to_radians(60.0F),
+      arv::degrees_to_radians(90.0F),
+      arv::degrees_to_radians(45.0F),
+      30.0F,
+      8.0F,
+      1.2F,
+      0.75F,
+      30.0F,
+      36.0F,
+      8.0F,
+      0.90F};
+  rocket.space_aircraft = arv::entity::AircraftMovementDefinition{
+      0.0F,
+      96.0F,
+      20.0F,
+      12.0F,
+      0.997F,
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(120.0F),
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      96.0F,
+      96.0F,
+      0.0F,
+      0.997F};
+  rocket.fuel = arv::entity::VehicleFuelDefinition{
+      "arvane:rocket_fuel/basic",
+      10.0F,
+      2.0F,
+      1.0F,
+      1.0F};
+  rocket.authority.max_speed = 120.0F;
+  rocket.authority.max_acceleration = 60.0F;
+  rocket.authority.max_deceleration = 60.0F;
+  rocket.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  rocket.authority.max_vertical_speed = 120.0F;
+  rocket.authority.requires_swept_collision = false;
+  auto registry = arv::entity::VehicleDefinitionRegistry::build({std::move(rocket)});
+  EXPECT_TRUE(registry);
+  return std::move(registry.value());
+}
+
+arv::player::ItemRegistry make_rocket_fuel_item_registry(
+    const arv::voxel::BlockRegistry& block_registry) {
+  std::vector<arv::player::ItemDefinition> items;
+  arv::player::ItemDefinition rocket_fuel;
+  rocket_fuel.name = "arvane:rocket_fuel/basic";
+  rocket_fuel.display_name = "Basic Rocket Fuel";
+  rocket_fuel.category = "resources";
+  rocket_fuel.tags.push_back("arvane:rocket_fuel");
+  rocket_fuel.max_stack_size = 64U;
+  rocket_fuel.explicit_render_type = arv::player::ItemRenderType::Texture;
+  rocket_fuel.texture_asset = "arvane:texture/item/coal";
+  items.push_back(std::move(rocket_fuel));
+
+  auto result =
+      arv::player::ItemRegistry::build_from_blocks_and_items(block_registry, std::move(items));
+  EXPECT_TRUE(result);
+  return std::move(result.value());
+}
+
+arv::EntityID create_networked_test_rocket(
+    arv::server::ServerRuntime& server,
+    const arv::entity::VehicleDefinitionRegistry& vehicles,
+    arv::Vec3f position) {
+  arv::entity::EntityComponentSet components;
+  components.collision =
+      arv::entity::AuthoredCollisionComponent{{1.2F, 3.0F, 1.2F}};
+  components.rideable =
+      arv::entity::AuthoredRideableComponent{"arvane:test_rocket"};
+  components.vehicle_physics =
+      arv::entity::AuthoredVehiclePhysicsComponent{"arvane:test_rocket"};
+
+  arv::world::EntityCreateInfo info;
+  info.type_id = arv::EntityTypeID{5};
+  info.type_name = "arvane:test_rocket";
   info.position = position;
   info.authored_components = components;
   info.vehicle_definitions = &vehicles;
@@ -902,6 +1090,167 @@ TEST(PlayerInteractionTests, PlaneDismountRequestWorksInMidair) {
   EXPECT_NEAR(dismounted_player.position.z, plane_position.z, 0.0001F);
 }
 
+TEST(PlayerInteractionTests, RocketVehicleMoveBurnsFuelAndRejectsEmptyThrust) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_rocket_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.0F, 1.0F, 0.0F};
+  player_state.velocity = {};
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  place_server_test_floor(server.voxel_world(), stone, -4, 4, -6, 2);
+
+  constexpr arv::f32 VehicleFloorY = 1.51F;
+  const arv::EntityID rocket = create_networked_test_rocket(
+      server,
+      vehicle_registry,
+      {2.0F, VehicleFloorY, 0.0F});
+  const std::optional<arv::EntityNetID> rocket_net =
+      server.voxel_world().network_id_for_entity(rocket);
+  ASSERT_TRUE(rocket_net.has_value());
+
+  ASSERT_TRUE(client.request_ride_entity(rocket_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      server.voxel_world().mounted_rideable(player_entity.value()),
+      std::optional<arv::EntityID>{rocket});
+
+  arv::entity::VehiclePhysicsComponent* physics =
+      server.voxel_world().find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_FLOAT_EQ(physics->fuel_seconds, 2.0F);
+
+  arv::protocol::ServerboundVehicleMove move;
+  move.vehicle_id = rocket_net.value();
+  move.sequence = 1U;
+  move.client_tick = server.tick_index();
+  move.dt_seconds = 0.5;
+  move.position = {2.0F, VehicleFloorY, -0.05F};
+  move.velocity = {0.0F, 0.0F, -0.9F};
+  move.rotation = {};
+  move.throttle = 1.0F;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  physics = server.voxel_world().find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_FLOAT_EQ(physics->fuel_seconds, 1.5F);
+  const arv::entity::EntityTransform* accepted_transform =
+      server.voxel_world().find_entity_transform(rocket);
+  ASSERT_NE(accepted_transform, nullptr);
+  EXPECT_NEAR(accepted_transform->position.z, -0.05F, 0.0001F);
+
+  physics->fuel_seconds = 0.0F;
+  move.sequence = 2U;
+  move.client_tick = server.tick_index();
+  move.position = {2.0F, VehicleFloorY, -0.20F};
+  move.velocity = {0.0F, 0.0F, -1.8F};
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  accepted_transform = server.voxel_world().find_entity_transform(rocket);
+  ASSERT_NE(accepted_transform, nullptr);
+  EXPECT_NEAR(accepted_transform->position.z, -0.05F, 0.0001F);
+  physics = server.voxel_world().find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_FLOAT_EQ(physics->fuel_seconds, 0.0F);
+}
+
+TEST(PlayerInteractionTests, SecondaryFuelItemFillsTargetedRocketTank) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      make_rocket_fuel_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_rocket_request_vehicle_registry();
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::player::PlayerState& player_state = connected_player(server);
+  player_state.position = {0.5F, 0.0F, 0.5F};
+  player_state.velocity = {};
+  player_state.yaw_radians = std::numbers::pi_v<float> * 0.5F;
+  player_state.pitch_radians = 0.0F;
+  player_state.selected_hotbar_slot = 0U;
+  ASSERT_TRUE(player_state.inventory.set_slot(
+      0U,
+      arv::player::ItemStack{
+          item_registry.find_item("arvane:rocket_fuel/basic").value(),
+          2U}));
+  const std::optional<arv::EntityID> player_entity =
+      server.voxel_world().entity_for_player(player_state.player_id);
+  ASSERT_TRUE(player_entity.has_value());
+  ASSERT_TRUE(server.voxel_world().set_entity_position(
+      player_entity.value(),
+      player_state.position));
+
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  const arv::EntityID rocket = create_networked_test_rocket(
+      server,
+      vehicle_registry,
+      {2.0F, 0.0F, 0.5F});
+  arv::entity::VehiclePhysicsComponent* physics =
+      server.voxel_world().find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  physics->fuel_seconds = 0.0F;
+  physics->fuel_capacity_seconds = 10.0F;
+  physics->fuel_burn_per_second = 1.0F;
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  physics = server.voxel_world().find_entity_vehicle_physics(rocket);
+  ASSERT_NE(physics, nullptr);
+  EXPECT_FLOAT_EQ(physics->fuel_seconds, 10.0F);
+  ASSERT_TRUE(player_state.inventory.slot(0U).has_value());
+  EXPECT_EQ(player_state.inventory.slot(0U)->count, 1U);
+  const arv::entity::EntityAnimationState* animation =
+      server.voxel_world().find_entity_animation_state(player_entity.value());
+  ASSERT_NE(animation, nullptr);
+  EXPECT_NE(find_active_animation(*animation, "hit_right"), nullptr);
+}
+
 TEST(PlayerInteractionTests, MountDismountRequestWorksInMidairWithoutSafeGround) {
   const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
   const arv::player::ItemRegistry item_registry =
@@ -1040,6 +1389,326 @@ TEST(PlayerInteractionTests, AcceptedBuggyVehicleMoveUpdatesDrivingAndReverseAni
   ASSERT_NE(animation, nullptr);
   EXPECT_NE(find_active_animation(*animation, "reverse"), nullptr);
   EXPECT_EQ(find_active_animation(*animation, "driving"), nullptr);
+}
+
+TEST(PlayerInteractionTests, VehicleRideAndMovePacketsUseSessionWorldAfterTeleport) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_buggy_request_vehicle_registry();
+  arv::testsupport::ScopedTempDir temp("arvane_vehicle_world_");
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = temp.path / "save";
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.configure_vehicles(&vehicle_registry);
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  const arv::EntityID default_buggy = create_networked_test_buggy(
+      server.voxel_world(),
+      vehicle_registry,
+      {20.0F, 0.0F, 0.0F});
+  const std::optional<arv::EntityNetID> default_buggy_net =
+      server.voxel_world().network_id_for_entity(default_buggy);
+  ASSERT_TRUE(default_buggy_net.has_value());
+
+  arv::command::CommandResult result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_test --seed 9876");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_test");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      server.worlds().find("orbit_test");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_test local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    client.fixed_tick(server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world = server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  runtime_player->position = {0.0F, 0.0F, 0.0F};
+  runtime_player->velocity = {};
+  const std::optional<arv::EntityID> runtime_player_entity =
+      runtime_world->entity_for_player(session->player_id);
+  ASSERT_TRUE(runtime_player_entity.has_value());
+  ASSERT_TRUE(runtime_world->set_entity_position(
+      runtime_player_entity.value(),
+      runtime_player->position));
+
+  const arv::EntityID runtime_buggy = create_networked_test_buggy(
+      *runtime_world,
+      vehicle_registry,
+      {2.0F, 0.0F, 0.0F});
+  const std::optional<arv::EntityNetID> runtime_buggy_net =
+      runtime_world->network_id_for_entity(runtime_buggy);
+  ASSERT_TRUE(runtime_buggy_net.has_value());
+  ASSERT_EQ(runtime_buggy_net.value(), default_buggy_net.value());
+
+  (void)runtime_world->ensure_chunk({{0, 0, 0}});
+  (void)runtime_world->ensure_chunk({{0, 0, -1}});
+  (void)server.voxel_world().ensure_chunk({{1, 0, 0}});
+
+  ASSERT_TRUE(client.request_ride_entity(runtime_buggy_net.value()));
+  server.tick();
+  ASSERT_EQ(
+      runtime_world->mounted_rideable(runtime_player_entity.value()),
+      std::optional<arv::EntityID>{runtime_buggy});
+
+  arv::protocol::ServerboundVehicleMove move;
+  move.vehicle_id = runtime_buggy_net.value();
+  move.sequence = 1U;
+  move.client_tick = server.tick_index();
+  move.dt_seconds = 1.0 / static_cast<arv::Seconds>(arv::DefaultBaseTps);
+  move.position = {2.0F, 0.0F, -0.01F};
+  move.velocity = {0.0F, 0.0F, -0.2F};
+  move.rotation = {};
+  move.throttle = 1.0F;
+  move.flags = arv::protocol::VehicleMoveFlags::OnGround;
+  ASSERT_TRUE(client.send_vehicle_move(move));
+  server.tick();
+
+  const arv::entity::EntityTransform* runtime_transform =
+      runtime_world->find_entity_transform(runtime_buggy);
+  ASSERT_NE(runtime_transform, nullptr);
+  EXPECT_NEAR(runtime_transform->position.z, -0.01F, 0.0001F);
+
+  const arv::entity::EntityTransform* default_transform =
+      server.voxel_world().find_entity_transform(default_buggy);
+  ASSERT_NE(default_transform, nullptr);
+  EXPECT_NEAR(default_transform->position.x, 20.0F, 0.0001F);
+  EXPECT_NEAR(default_transform->position.z, 0.0F, 0.0001F);
+}
+
+TEST(PlayerInteractionTests, AttackPacketsUseSessionWorldAfterTeleport) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::entity::VehicleDefinitionRegistry vehicle_registry =
+      make_buggy_request_vehicle_registry();
+  arv::testsupport::ScopedTempDir temp("arvane_attack_world_");
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.vehicle_registry = &vehicle_registry;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = temp.path / "save";
+  start_info.combat.critical_chance = 0.0F;
+  start_info.combat.base_horizontal_knockback = 0.0F;
+  start_info.combat.sprint_horizontal_bonus = 0.0F;
+  start_info.combat.base_vertical_knockback = 0.0F;
+  start_info.combat.airborne_vertical_knockback = 0.0F;
+  start_info.combat.vertical_knockback_cap = 0.0F;
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  const arv::EntityID default_buggy = create_networked_test_buggy(
+      server.voxel_world(),
+      vehicle_registry,
+      {20.0F, 1.01F, 0.0F});
+  const std::optional<arv::EntityNetID> default_buggy_net =
+      server.voxel_world().network_id_for_entity(default_buggy);
+  ASSERT_TRUE(default_buggy_net.has_value());
+
+  arv::command::CommandResult result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_attack --seed 9877");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_attack");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      server.worlds().find("orbit_attack");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_attack local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    client.fixed_tick(server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world = server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  runtime_player->position = {0.0F, 1.0F, 0.0F};
+  runtime_player->velocity = {};
+  runtime_player->selected_hotbar_slot = 0U;
+  runtime_player->resolved_permissions.core.can_interact = true;
+  const std::optional<arv::player::ItemID> sword =
+      item_registry.find_item("arvane:iron_sword");
+  ASSERT_TRUE(sword.has_value());
+  ASSERT_TRUE(runtime_player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{sword.value(), 1U}));
+  const std::optional<arv::EntityID> runtime_player_entity =
+      runtime_world->entity_for_player(session->player_id);
+  ASSERT_TRUE(runtime_player_entity.has_value());
+  ASSERT_TRUE(runtime_world->set_entity_position(
+      runtime_player_entity.value(),
+      runtime_player->position));
+
+  const arv::EntityID runtime_buggy = create_networked_test_buggy(
+      *runtime_world,
+      vehicle_registry,
+      {2.0F, 1.01F, 0.0F});
+  const std::optional<arv::EntityNetID> runtime_buggy_net =
+      runtime_world->network_id_for_entity(runtime_buggy);
+  ASSERT_TRUE(runtime_buggy_net.has_value());
+  ASSERT_EQ(runtime_buggy_net.value(), default_buggy_net.value());
+
+  ASSERT_TRUE(client.request_attack_entity(runtime_buggy_net.value()));
+  tick_integrated(server, client);
+
+  const arv::entity::EntityHealth* runtime_health =
+      runtime_world->find_entity_health(runtime_buggy);
+  ASSERT_NE(runtime_health, nullptr);
+  EXPECT_FLOAT_EQ(runtime_health->current, 25.0F);
+
+  const arv::entity::EntityHealth* default_health =
+      server.voxel_world().find_entity_health(default_buggy);
+  ASSERT_NE(default_health, nullptr);
+  EXPECT_FLOAT_EQ(default_health->current, 30.0F);
+}
+
+TEST(PlayerInteractionTests, CraftRecipeUsesSessionWorldAfterTeleport) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::crafting::CraftingRecipeRegistry crafting_registry =
+      make_session_world_crafting_registry(item_registry);
+  arv::testsupport::ScopedTempDir temp("arvane_craft_world_");
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.crafting_registry = &crafting_registry;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = temp.path / "save";
+  ASSERT_TRUE(server.start(start_info));
+
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::command::CommandResult result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_craft --seed 9878");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_craft");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      server.worlds().find("orbit_craft");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_craft local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    client.fixed_tick(server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world = server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  const std::optional<arv::player::ItemID> stone =
+      item_registry.find_item("arvane:stone");
+  const std::optional<arv::player::ItemID> dirt =
+      item_registry.find_item("arvane:dirt");
+  ASSERT_TRUE(stone.has_value());
+  ASSERT_TRUE(dirt.has_value());
+  runtime_player->selected_hotbar_slot = 0U;
+  runtime_player->unlocked_recipe_ids = {"arvane:dirt_from_stone"};
+  ASSERT_TRUE(runtime_player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{stone.value(), 2U}));
+
+  ASSERT_TRUE(client.request_craft_recipe("arvane:dirt_from_stone", 1U));
+  tick_integrated(server, client);
+
+  const std::optional<arv::protocol::ClientboundCraftRecipeResult> craft_result =
+      client.take_craft_recipe_result();
+  ASSERT_TRUE(craft_result.has_value());
+  EXPECT_EQ(craft_result->result, arv::protocol::CraftRecipeResult::Success);
+  EXPECT_EQ(craft_result->crafted_count, 1U);
+  const std::optional<arv::player::ItemStack> crafted_stack =
+      runtime_player->inventory.slot(0);
+  ASSERT_TRUE(crafted_stack.has_value());
+  EXPECT_EQ(crafted_stack->item, dirt.value());
+  EXPECT_EQ(crafted_stack->count, 1U);
 }
 
 TEST(PlayerInteractionTests, BuggyCollisionCorrectionStopsAtResolvedSafePosition) {
@@ -2027,6 +2696,95 @@ TEST(PlayerInteractionTests, SecondaryPlaceFlowsThroughServerAuthorityAndConsume
   const arv::player::PlayerState& player_state = connected_player(server);
   ASSERT_TRUE(player_state.inventory.slot(0).has_value());
   EXPECT_EQ(player_state.inventory.slot(0)->count, 1U);
+}
+
+TEST(PlayerInteractionTests, SecondaryPlaceUsesSessionWorldAfterTeleport) {
+  const arv::voxel::BlockRegistry block_registry = arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID dirt = block_registry.find_variant("arvane:dirt").value();
+  const arv::voxel::BlockVariantID stone = block_registry.find_variant("arvane:stone").value();
+  arv::testsupport::ScopedTempDir temp("arvane_place_world_");
+  auto transports = arv::net::make_in_process_transport_pair();
+
+  arv::server::ServerRuntime server(std::move(transports.server));
+  arv::server::ServerStartInfo start_info;
+  start_info.mode = arv::server::ServerMode::Integrated;
+  start_info.base_tps = arv::DefaultBaseTps;
+  start_info.listen_address = {"in-process", 0};
+  start_info.block_registry = &block_registry;
+  start_info.item_registry = &item_registry;
+  start_info.register_commands = arv::base::register_server_commands;
+  start_info.world_name = "default";
+  start_info.server_save_root = temp.path / "save";
+  ASSERT_TRUE(server.start(start_info));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  ASSERT_TRUE(client.connect_integrated());
+  complete_integrated_handshake(server, client);
+
+  arv::command::CommandResult result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_place --seed 9879");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_place");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      server.worlds().find("orbit_place");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_place local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    client.fixed_tick(server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids = server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session = server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world = server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  (void)server.voxel_world().ensure_chunk({{0, 0, 0}});
+  (void)runtime_world->ensure_chunk({{0, 0, 0}});
+  ASSERT_TRUE(server.voxel_world().set_block({{3, 1, 0}}, dirt));
+  ASSERT_TRUE(runtime_world->set_block({{3, 1, 0}}, dirt));
+
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  runtime_player->position = {0.5F, 0.0F, 0.5F};
+  runtime_player->velocity = {};
+  runtime_player->yaw_radians = std::numbers::pi_v<float> * 0.5F;
+  runtime_player->pitch_radians = 0.0F;
+  runtime_player->grounded = false;
+  runtime_player->selected_hotbar_slot = 0U;
+  runtime_player->resolved_permissions.core.can_modify_world = true;
+  ASSERT_TRUE(runtime_player->inventory.set_slot(
+      0,
+      arv::player::ItemStack{item_registry.find_item("arvane:stone").value(), 2U}));
+  const std::optional<arv::EntityID> runtime_player_entity =
+      runtime_world->entity_for_player(session->player_id);
+  ASSERT_TRUE(runtime_player_entity.has_value());
+  ASSERT_TRUE(runtime_world->set_entity_position(
+      runtime_player_entity.value(),
+      runtime_player->position));
+
+  client.submit_input(arv::client::InputFrame{.secondary_pressed = true});
+  client.fixed_tick(server.tick_index());
+  server.tick();
+
+  EXPECT_EQ(runtime_world->get_block({{2, 1, 0}}), stone);
+  EXPECT_EQ(server.voxel_world().get_block({{2, 1, 0}}), arv::voxel::AirBlockVariantID);
+  ASSERT_TRUE(runtime_player->inventory.slot(0).has_value());
+  EXPECT_EQ(runtime_player->inventory.slot(0)->count, 1U);
 }
 
 TEST(PlayerInteractionTests, MasonMarkerClicksSetSelectionWithoutEditingBlocks) {

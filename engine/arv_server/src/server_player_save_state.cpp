@@ -56,6 +56,21 @@ bool ServerPlayerSaveCache::apply_to_player(
   return true;
 }
 
+std::optional<std::string> ServerPlayerSaveCache::world_name_for(
+    const ServerSession& session) const {
+  const auto found = std::find_if(
+      states_.rbegin(),
+      states_.rend(),
+      [&](const ServerPlayerSaveState& save) {
+        return !session.profile_id.empty()
+                   ? save.profile_id == session.profile_id
+                   : save.profile_name == session.profile_name;
+      });
+  return found == states_.rend()
+             ? std::nullopt
+             : std::optional<std::string>{found->world_name};
+}
+
 void ServerPlayerSaveCache::record(
     std::string_view world_name,
     const ServerSession& session,
@@ -77,15 +92,26 @@ void ServerPlayerSaveCache::record(
   save.inventory = player_state.inventory;
   save.unlocked_recipe_ids = player_state.unlocked_recipe_ids;
 
+  const auto profile_matches = [&](const ServerPlayerSaveState& existing) {
+    return !save.profile_id.empty()
+               ? existing.profile_id == save.profile_id
+               : existing.profile_name == save.profile_name;
+  };
+  states_.erase(
+      std::remove_if(
+          states_.begin(),
+          states_.end(),
+          [&](const ServerPlayerSaveState& existing) {
+            return profile_matches(existing) &&
+                   existing.world_name != save.world_name;
+          }),
+      states_.end());
+
   const auto found = std::find_if(
       states_.begin(),
       states_.end(),
       [&](const ServerPlayerSaveState& existing) {
-        const bool profile_matches =
-            !save.profile_id.empty()
-                ? existing.profile_id == save.profile_id
-                : existing.profile_name == save.profile_name;
-        return profile_matches && existing.world_name == save.world_name;
+        return profile_matches(existing) && existing.world_name == save.world_name;
       });
   if (found == states_.end()) {
     states_.emplace_back(std::move(save));

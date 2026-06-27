@@ -879,11 +879,17 @@ ArvResult require_persistent_entity(
   if (ctx == nullptr || ctx->impl->runtime.default_world == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
-  if (!ctx->impl->runtime.default_world->entity_exists(EntityID{entity})) {
+  const EntityID entity_id{entity};
+  world::WorldRuntime* world = nullptr;
+  if (ctx->impl->runtime.entity_world) {
+    world = ctx->impl->runtime.entity_world(entity_id);
+  } else if (ctx->impl->runtime.default_world->entity_exists(entity_id)) {
+    world = ctx->impl->runtime.default_world;
+  }
+  if (world == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
-  out_uuid =
-      ctx->impl->runtime.default_world->persistent_entity_uuid(EntityID{entity});
+  out_uuid = world->persistent_entity_uuid(entity_id);
   if (!out_uuid.has_value()) {
     return make_result(
         ctx,

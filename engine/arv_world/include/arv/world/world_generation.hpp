@@ -18,6 +18,8 @@
 
 namespace arv::world {
 
+inline constexpr std::string_view VoidWorldGenerationID = "arvane:worldgen/void";
+
 struct WorldGenerationError {
   std::string message{};
 };
@@ -44,6 +46,7 @@ struct WorldGenerationConfig {
   f32 terrain_amplitude{1.0F};
   f32 terrain_lacunarity{2.0F};
   f32 terrain_gain{0.5F};
+  bool void_world{};
   std::vector<SurfaceLayerDefinition> surface_layers{};
   std::shared_ptr<const worldgen::ResolvedDimension> resolved_dimension{};
 };
@@ -96,6 +99,8 @@ using GeneratedChunkResult = Expected<GeneratedChunk, WorldGenerationError>;
 
 [[nodiscard]] WorldGenerationConfig config_from_resolved_dimension(
     std::shared_ptr<const worldgen::ResolvedDimension> dimension);
+
+[[nodiscard]] WorldGenerationConfig make_void_world_generation_config();
 
 [[nodiscard]] WorldGenerationConfig refresh_generation_config_for_current_dimension(
     WorldGenerationConfig saved_config,

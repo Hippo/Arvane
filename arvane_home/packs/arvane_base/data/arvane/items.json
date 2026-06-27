@@ -142,6 +142,17 @@
           "play_when": "placement_succeeds"
         }
       }
+    },
+    {
+      "name": "arvane:rocket_fuel/basic",
+      "category": "resources",
+      "tags": [
+        "arvane:rocket_fuel"
+      ],
+      "max_stack_size": 64,
+      "buoyancy": 1.0,
+      "render_type": "texture",
+      "texture": "arvane:texture/item/coal"
     }
   ]
 }

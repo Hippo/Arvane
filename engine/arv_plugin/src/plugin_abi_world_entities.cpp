@@ -3,6 +3,20 @@
 namespace arv::plugin {
 namespace {
 
+[[nodiscard]] world::WorldRuntime* world_for_legacy_entity(
+    PluginCallContext* ctx,
+    ArvEntityHandle entity) {
+  if (ctx == nullptr) {
+    return nullptr;
+  }
+  const EntityID entity_id{entity};
+  if (ctx->impl->runtime.entity_world) {
+    return ctx->impl->runtime.entity_world(entity_id);
+  }
+  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  return world != nullptr && world->entity_exists(entity_id) ? world : nullptr;
+}
+
 ArvResult api_world_get_block(
     void* context,
     ArvWorldHandle world_handle,
@@ -194,7 +208,7 @@ ArvResult api_entity_destroy(void* context, ArvEntityHandle entity) {
       sync.code != ARV_RESULT_OK) {
     return sync;
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr || !world->destroy_entity(EntityID{entity})) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
@@ -203,9 +217,8 @@ ArvResult api_entity_destroy(void* context, ArvEntityHandle entity) {
 
 bool api_entity_exists(void* context, ArvEntityHandle entity) {
   PluginCallContext* ctx = call_context(context);
-  return ctx != nullptr && ctx->impl->runtime.default_world != nullptr &&
-         tls_thread_context == PluginThreadContext::Sync &&
-         ctx->impl->runtime.default_world->entity_exists(EntityID{entity});
+  return tls_thread_context == PluginThreadContext::Sync &&
+         world_for_legacy_entity(ctx, entity) != nullptr;
 }
 
 ArvResult api_entity_world(
@@ -220,7 +233,7 @@ ArvResult api_entity_world(
   if (out_world == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_world is null");
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr || !world->entity_exists(EntityID{entity})) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
@@ -240,7 +253,7 @@ ArvResult api_entity_position(
   if (out_position == nullptr) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, "out_position is null");
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "world not found");
   }
@@ -265,7 +278,7 @@ ArvResult api_entity_set_position(
       sync.code != ARV_RESULT_OK) {
     return sync;
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr ||
       !world->set_entity_position(EntityID{entity}, {position.x, position.y, position.z})) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
@@ -287,7 +300,7 @@ ArvResult api_entity_add_tag(
       error.has_value()) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr || !world->add_entity_tag(EntityID{entity}, tag_id)) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
@@ -308,7 +321,7 @@ ArvResult api_entity_remove_tag(
       error.has_value()) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr || !world->remove_entity_tag(EntityID{entity}, tag_id)) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }
@@ -334,7 +347,7 @@ ArvResult api_entity_has_tag(
       error.has_value()) {
     return make_result(ctx, ARV_RESULT_INVALID_ARGUMENT, error.value());
   }
-  world::WorldRuntime* world = ctx->impl->runtime.default_world;
+  world::WorldRuntime* world = world_for_legacy_entity(ctx, entity);
   if (world == nullptr || !world->entity_exists(EntityID{entity})) {
     return make_result(ctx, ARV_RESULT_NOT_FOUND, "entity not found");
   }

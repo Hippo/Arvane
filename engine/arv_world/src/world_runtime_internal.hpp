@@ -465,6 +465,7 @@ struct WorldRuntime::Impl {
   TickIndex tick_index{};
   WorldClock clock{make_world_clock()};
   std::string weather{"clear"};
+  WorldEnvironmentState environment{};
   WorldDifficulty difficulty{WorldDifficulty::Normal};
   std::vector<GameRuleState> game_rules{};
   HashMap<EntityID, std::vector<StatusEffectInstance>> status_effects{};

@@ -25,6 +25,7 @@ constexpr u32 FirstPersonPlayerSlimSkinEntityModelID = 5'000'003U;
 constexpr u32 ChunkBoundsEntityModelID = 6'000'000U;
 constexpr u32 BlockAttachedEntityModelIDBase = 7'000'000U;
 constexpr u32 BlockAttachedEntityAnimationIDBase = 8'000'000U;
+constexpr u32 SpaceBodyEntityModelID = 9'000'000U;
 constexpr std::string_view WhiteTextureAsset = "arvane:texture/generated_white";
 constexpr std::string_view DefaultPlayerSkinTextureAsset =
     "arvane:texture/default_skin/default";
@@ -77,6 +78,10 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
 
 [[nodiscard]] render::EntityModelID chunk_bounds_model_id() noexcept {
   return render::EntityModelID{ChunkBoundsEntityModelID};
+}
+
+[[nodiscard]] render::EntityModelID space_body_model_id() noexcept {
+  return render::EntityModelID{SpaceBodyEntityModelID};
 }
 
 [[nodiscard]] render::EntityModelID break_overlay_model_id(
@@ -155,6 +160,38 @@ void translate_entity_model_asset(
   for (render::EntityModelMeshVertex& vertex : asset.vertices) {
     vertex.position = vertex.position + offset;
   }
+}
+
+[[nodiscard]] render::EntityModelAssetResult build_space_body_model(
+    const asset::TextureAtlasEntry& white_entry) {
+  render::EntityModelDefinition definition;
+  definition.name = "generated#space_body";
+  definition.texture_assets.push_back(std::string{WhiteTextureAsset});
+  definition.texture_sizes.push_back({1, 1});
+  definition.bones.emplace("root", render::EntityModelBoneDefinition{});
+
+  render::EntityModelBoxDefinition box;
+  box.bone = "root";
+  box.min = {-8.0F, -8.0F, -8.0F};
+  box.max = {8.0F, 8.0F, 8.0F};
+  box.origin = {};
+  for (std::optional<render::EntityModelFaceDefinition>& face : box.faces) {
+    face = render::EntityModelFaceDefinition{0, {0, 0, 1, 1}, 0.0F};
+  }
+  definition.boxes.push_back(std::move(box));
+
+  const std::array<render::EntityModelTextureBinding, 1> bindings{{
+      {std::string{WhiteTextureAsset},
+       white_entry.unpadded_pixel_min,
+       white_entry.unpadded_pixel_max,
+       white_entry.width,
+       white_entry.height,
+       render::TextureAtlasDomain::Entities,
+       static_cast<u16>(white_entry.page)}}};
+  return render::build_entity_model_asset(
+      space_body_model_id(),
+      definition,
+      std::span<const render::EntityModelTextureBinding>{bindings});
 }
 
 [[nodiscard]] render::EntityModelDefinition make_first_person_player_definition(
@@ -1009,6 +1046,16 @@ EntityRenderAssetsResult build_entity_render_assets(
   chunk_bounds_input.inflate_sixteenths = 0.01F;
   assets.chunk_bounds_model = chunk_bounds_input.id;
   assets.models.push_back(render::build_block_outline_model(chunk_bounds_input));
+
+  auto space_body_model = build_space_body_model(*white_entry);
+  if (!space_body_model) {
+    return EntityRenderAssetsResult::failure({"generated#space_body",
+                                              {},
+                                              "build space body model",
+                                              space_body_model.error().message});
+  }
+  assets.space_body_model = space_body_model_id();
+  assets.models.push_back(std::move(space_body_model.value()));
 
   for (u32 variant_value = 0; variant_value < block_registry.variant_count(); ++variant_value) {
     const voxel::BlockVariantID variant_id{variant_value};

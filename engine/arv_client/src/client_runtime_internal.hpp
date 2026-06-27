@@ -117,6 +117,11 @@ struct ClientRuntimeContext {
   ClientPackSyncState& pack_sync;
   ClientRecipeBookRuntime& recipe_book;
   std::optional<protocol::ClientboundWorldTime>& world_time_update;
+  std::string& world_environment_sky;
+  bool& space_environment;
+  std::vector<protocol::ClientboundSpaceBodyView>& space_bodies;
+  ClientWorldTransitionStatus& world_transition_status;
+  Seconds& world_transition_fade_remaining_seconds;
   const arv::text::LanguageCatalog* language{};
   const arv::entity::VehicleDefinitionRegistry* vehicle_registry{};
   const physics::ICollisionQuery* collision_query{};

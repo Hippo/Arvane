@@ -182,6 +182,7 @@ Expected<server::ServerStartInfo, DedicatedError> make_server_start_info(
   server_start_info.entity_registry = &registries.entity_registry;
   server_start_info.vehicle_registry = &registries.vehicle_registry;
   server_start_info.entity_goals = &runtime_config.entity_goals;
+  server_start_info.space_definitions = &registries.space_definitions;
   server_start_info.skins = config.skins;
   server_start_info.movement = config.network.movement;
   server_start_info.keep_alive = config.network.keep_alive;

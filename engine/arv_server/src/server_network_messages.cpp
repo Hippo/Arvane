@@ -661,6 +661,43 @@ void apply_vehicle_accepted_state_to_world(
   }
 }
 
+void ensure_vehicle_fuel_state(
+    entity::VehiclePhysicsComponent& physics,
+    const entity::VehicleDefinition& definition) noexcept {
+  if (!definition.fuel.has_value() || physics.fuel_capacity_seconds > 0.0F) {
+    return;
+  }
+  physics.fuel_item = definition.fuel->item;
+  physics.fuel_capacity_seconds = definition.fuel->capacity_seconds;
+  physics.fuel_seconds = definition.fuel->initial_seconds;
+  physics.fuel_burn_per_second = definition.fuel->burn_per_second;
+}
+
+[[nodiscard]] bool vehicle_has_fuel_tank(
+    const entity::VehiclePhysicsComponent& physics) noexcept {
+  return physics.fuel_capacity_seconds > 0.0F && physics.fuel_burn_per_second > 0.0F;
+}
+
+[[nodiscard]] bool vehicle_move_requests_fuel_burning_thrust(
+    const protocol::ServerboundVehicleMove& move) noexcept {
+  return std::abs(move.throttle) > 0.01F;
+}
+
+void burn_vehicle_fuel_for_move(
+    entity::VehiclePhysicsComponent& physics,
+    const protocol::ServerboundVehicleMove& move) noexcept {
+  if (!vehicle_has_fuel_tank(physics) ||
+      !vehicle_move_requests_fuel_burning_thrust(move)) {
+    return;
+  }
+  const f32 elapsed = std::clamp(static_cast<f32>(move.dt_seconds), 0.0F, 1.0F);
+  physics.fuel_seconds =
+      std::clamp(
+          physics.fuel_seconds - physics.fuel_burn_per_second * elapsed,
+          0.0F,
+          std::max(0.0F, physics.fuel_capacity_seconds));
+}
+
 [[nodiscard]] VehicleMovementValidationContext make_vehicle_validation_context(
     const world::WorldRuntime& world,
     const voxel::BlockRegistry& block_registry,
@@ -1372,10 +1409,11 @@ void ServerRuntimeImpl::refresh_builtin_text_variables() {
     const std::string display_name =
         session.display_name.empty() ? session.profile_name : session.display_name;
     text_variables_.set_player(session.player_id, "player_name", display_name);
+    const world::WorldRuntime* runtime = world_for_session(session);
     const std::optional<EntityID> entity_id =
-        default_world_.entity_for_player(session.player_id);
+        runtime == nullptr ? std::nullopt : runtime->entity_for_player(session.player_id);
     const entity::EntityHealth* health =
-        entity_id.has_value() ? default_world_.find_entity_health(entity_id.value()) : nullptr;
+        entity_id.has_value() ? runtime->find_entity_health(entity_id.value()) : nullptr;
     if (health == nullptr) {
       (void)text_variables_.clear_player_value(session.player_id, "player_health");
       (void)text_variables_.clear_player_value(session.player_id, "player_max_health");
@@ -1952,21 +1990,25 @@ void ServerRuntimeImpl::handle_ride_entity_request(
   if (session == nullptr || !session->authenticated) {
     return;
   }
+  world::WorldRuntime* runtime = world_for_session(*session);
+  if (runtime == nullptr) {
+    return;
+  }
   const std::optional<EntityID> passenger_entity =
-      default_world_.entity_for_player(session->player_id);
+      runtime->entity_for_player(session->player_id);
   const std::optional<EntityID> rideable_entity =
-      default_world_.entity_for_network_id(request.rideable_id);
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+      runtime->entity_for_network_id(request.rideable_id);
+  player::PlayerState* player_state = runtime->find_player(session->player_id);
   if (!passenger_entity.has_value() || !rideable_entity.has_value() ||
       player_state == nullptr) {
     return;
   }
   const entity::EntityTransform* passenger_transform =
-      default_world_.find_entity_transform(passenger_entity.value());
+      runtime->find_entity_transform(passenger_entity.value());
   const entity::EntityTransform* rideable_transform =
-      default_world_.find_entity_transform(rideable_entity.value());
+      runtime->find_entity_transform(rideable_entity.value());
   if (passenger_transform == nullptr || rideable_transform == nullptr ||
-      default_world_.find_entity_rideable(rideable_entity.value()) == nullptr) {
+      runtime->find_entity_rideable(rideable_entity.value()) == nullptr) {
     return;
   }
   const f32 max_mount_distance =
@@ -1987,7 +2029,7 @@ void ServerRuntimeImpl::handle_ride_entity_request(
   if (!request.seat_id.empty()) {
     requested_seat = request.seat_id;
   }
-  if (!default_world_.mount_entity(
+  if (!runtime->mount_entity(
           rideable_entity.value(),
           passenger_entity.value(),
           requested_seat)) {
@@ -1995,32 +2037,33 @@ void ServerRuntimeImpl::handle_ride_entity_request(
   }
 
   if (const entity::EntityTransform* mounted_transform =
-          default_world_.find_entity_transform(passenger_entity.value());
+          runtime->find_entity_transform(passenger_entity.value());
       mounted_transform != nullptr) {
     player_state->position = mounted_transform->position;
     player_state->velocity = {};
   }
 
   const std::optional<std::string> seat_id =
-      default_world_.mounted_seat(passenger_entity.value());
+      runtime->mounted_seat(passenger_entity.value());
   const entity::RideableComponent* rideable =
-      default_world_.find_entity_rideable(rideable_entity.value());
+      runtime->find_entity_rideable(rideable_entity.value());
   const bool controls_vehicle =
       rideable != nullptr && rideable->controller == passenger_entity.value();
   if (const std::optional<EntityNetID> rideable_net =
-          default_world_.network_id_for_entity(rideable_entity.value());
+          runtime->network_id_for_entity(rideable_entity.value());
       rideable_net.has_value() &&
-      accepted_vehicle_movement_.find(rideable_net.value()) ==
+      accepted_vehicle_movement_.find({runtime->id(), rideable_net.value()}) ==
           accepted_vehicle_movement_.end()) {
-    accepted_vehicle_movement_[rideable_net.value()] =
+    accepted_vehicle_movement_[{runtime->id(), rideable_net.value()}] =
         accepted_vehicle_state_from_world(
-            default_world_,
+            *runtime,
             rideable_entity.value(),
             rideable_net.value(),
             tick_index_,
             base_tps_);
   }
   broadcast_ride_started(
+      *runtime,
       passenger_entity.value(),
       rideable_entity.value(),
       seat_id.value_or(std::string{}),
@@ -2034,18 +2077,22 @@ void ServerRuntimeImpl::handle_dismount_request(
   if (session == nullptr || !session->authenticated) {
     return;
   }
+  world::WorldRuntime* runtime = world_for_session(*session);
+  if (runtime == nullptr) {
+    return;
+  }
   const std::optional<EntityID> passenger_entity =
-      default_world_.entity_for_player(session->player_id);
+      runtime->entity_for_player(session->player_id);
   if (!passenger_entity.has_value()) {
     return;
   }
   const std::optional<EntityID> rideable_entity =
-      default_world_.mounted_rideable(passenger_entity.value());
+      runtime->mounted_rideable(passenger_entity.value());
   if (!rideable_entity.has_value()) {
     return;
   }
   const std::optional<EntityID> requested_rideable =
-      default_world_.entity_for_network_id(request.rideable_id);
+      runtime->entity_for_network_id(request.rideable_id);
   if (requested_rideable.has_value() && requested_rideable.value() != rideable_entity.value()) {
     return;
   }
@@ -2053,7 +2100,7 @@ void ServerRuntimeImpl::handle_dismount_request(
   std::optional<Vec3f> dismount_position;
   if (block_registry_ != nullptr) {
     dismount_position =
-        default_world_.find_safe_dismount_position(
+        runtime->find_safe_dismount_position(
             rideable_entity.value(),
             *block_registry_,
             player_tuning_);
@@ -2061,7 +2108,7 @@ void ServerRuntimeImpl::handle_dismount_request(
   if (!dismount_position.has_value()) {
     dismount_position =
         fallback_rideable_dismount_position(
-            default_world_,
+            *runtime,
             rideable_entity.value(),
             player_tuning_);
   }
@@ -2069,22 +2116,23 @@ void ServerRuntimeImpl::handle_dismount_request(
     return;
   }
 
-  if (!default_world_.dismount_entity(passenger_entity.value())) {
+  if (!runtime->dismount_entity(passenger_entity.value())) {
     return;
   }
   if (const std::optional<EntityNetID> rideable_net =
-          default_world_.network_id_for_entity(rideable_entity.value());
+          runtime->network_id_for_entity(rideable_entity.value());
       rideable_net.has_value()) {
-    accepted_vehicle_movement_.erase(rideable_net.value());
+    accepted_vehicle_movement_.erase({runtime->id(), rideable_net.value()});
   }
-  (void)default_world_.set_entity_position(passenger_entity.value(), dismount_position.value());
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  (void)runtime->set_entity_position(passenger_entity.value(), dismount_position.value());
+  player::PlayerState* player_state = runtime->find_player(session->player_id);
   if (player_state != nullptr) {
     player_state->position = dismount_position.value();
     player_state->velocity = {};
     player_state->grounded = false;
   }
   broadcast_ride_ended(
+      *runtime,
       passenger_entity.value(),
       rideable_entity.value(),
       dismount_position.value());
@@ -2103,16 +2151,18 @@ void ServerRuntimeImpl::handle_vehicle_action(
 void ServerRuntimeImpl::tick_vehicle_damage_effects() {
   for (auto it = vehicle_smoke_states_.begin();
        it != vehicle_smoke_states_.end();) {
+    world::WorldRuntime* runtime = world_by_id(it->first.world_id);
     const std::optional<EntityID> entity =
-        default_world_.entity_for_network_id(it->first);
-    if (!entity.has_value() || !default_world_.entity_exists(entity.value()) ||
-        default_world_.find_entity_vehicle_physics(entity.value()) == nullptr) {
+        runtime == nullptr ? std::nullopt : runtime->entity_for_network_id(it->first.vehicle_id);
+    if (runtime == nullptr || !entity.has_value() ||
+        !runtime->entity_exists(entity.value()) ||
+        runtime->find_entity_vehicle_physics(entity.value()) == nullptr) {
       const auto stale = it++;
       vehicle_smoke_states_.erase(stale);
       continue;
     }
     const VehicleDamageStage stage =
-        vehicle_damage_stage(default_world_.find_entity_health(entity.value()));
+        vehicle_damage_stage(runtime->find_entity_health(entity.value()));
     if (stage == VehicleDamageStage::Healthy ||
         stage == VehicleDamageStage::Destroyed) {
       const auto stale = it++;
@@ -2122,63 +2172,72 @@ void ServerRuntimeImpl::tick_vehicle_damage_effects() {
     ++it;
   }
 
-  for (const EntityID entity : default_world_.entity_ids()) {
-    if (default_world_.find_entity_vehicle_physics(entity) == nullptr) {
+  for (world::WorldRuntime* runtime : loaded_worlds()) {
+    if (runtime == nullptr) {
       continue;
     }
-    const std::optional<EntityNetID> net_id =
-        default_world_.network_id_for_entity(entity);
-    if (!net_id.has_value()) {
-      continue;
-    }
-    const VehicleDamageStage stage =
-        vehicle_damage_stage(default_world_.find_entity_health(entity));
-    if (stage == VehicleDamageStage::Healthy ||
-        stage == VehicleDamageStage::Destroyed) {
-      vehicle_smoke_states_.erase(net_id.value());
-      continue;
-    }
+    for (const EntityID entity : runtime->entity_ids()) {
+      if (runtime->find_entity_vehicle_physics(entity) == nullptr) {
+        continue;
+      }
+      const std::optional<EntityNetID> net_id =
+          runtime->network_id_for_entity(entity);
+      if (!net_id.has_value()) {
+        continue;
+      }
+      const VehicleEntityKey key{runtime->id(), net_id.value()};
+      const VehicleDamageStage stage =
+          vehicle_damage_stage(runtime->find_entity_health(entity));
+      if (stage == VehicleDamageStage::Healthy ||
+          stage == VehicleDamageStage::Destroyed) {
+        vehicle_smoke_states_.erase(key);
+        continue;
+      }
 
-    VehicleSmokeState& state = vehicle_smoke_states_[net_id.value()];
-    if (state.stage != stage) {
+      VehicleSmokeState& state = vehicle_smoke_states_[key];
+      if (state.stage != stage) {
+        state.stage = stage;
+        state.next_smoke_tick = tick_index_;
+      }
+      if (tick_index_ < state.next_smoke_tick) {
+        continue;
+      }
+      broadcast_vehicle_smoke_particles(
+          runtime->id(),
+          vehicle_effect_position(*runtime, entity) + Vec3f{0.0F, 0.08F, 0.0F},
+          stage,
+          static_cast<u32>(
+              net_id->value ^
+              (static_cast<u64>(runtime->id().value) << 16U) ^
+              (static_cast<u64>(tick_index_) << 8U) ^
+              (stage == VehicleDamageStage::Critical ? 0x9e3779b9ULL : 0x85ebca6bULL)));
       state.stage = stage;
-      state.next_smoke_tick = tick_index_;
+      state.next_smoke_tick =
+          tick_index_ + vehicle_smoke_interval_ticks(stage);
     }
-    if (tick_index_ < state.next_smoke_tick) {
-      continue;
-    }
-    broadcast_vehicle_smoke_particles(
-        vehicle_effect_position(default_world_, entity) + Vec3f{0.0F, 0.08F, 0.0F},
-        stage,
-        static_cast<u32>(
-            net_id->value ^
-            (static_cast<u64>(tick_index_) << 8U) ^
-            (stage == VehicleDamageStage::Critical ? 0x9e3779b9ULL : 0x85ebca6bULL)));
-    state.stage = stage;
-    state.next_smoke_tick =
-        tick_index_ + vehicle_smoke_interval_ticks(stage);
   }
 }
 
 bool ServerRuntimeImpl::destroy_vehicle_from_damage(
+    world::WorldRuntime& runtime,
     EntityID vehicle_entity,
     Vec3f normal,
     u32 seed,
     bool broadcast_explosion) {
-  if (!default_world_.entity_exists(vehicle_entity)) {
+  if (!runtime.entity_exists(vehicle_entity)) {
     return false;
   }
   const std::optional<EntityNetID> vehicle_net_id =
-      default_world_.network_id_for_entity(vehicle_entity);
+      runtime.network_id_for_entity(vehicle_entity);
   const Vec3f effect_position =
-      vehicle_effect_position(default_world_, vehicle_entity);
+      vehicle_effect_position(runtime, vehicle_entity);
 
   if (block_registry_ != nullptr) {
     const std::vector<EntityID> occupants =
-        vehicle_occupants(default_world_, vehicle_entity);
+        vehicle_occupants(runtime, vehicle_entity);
     const std::optional<Vec3f> ejection_position =
         crash_ejection_position(
-            default_world_,
+            runtime,
             *block_registry_,
             vehicle_entity,
             player_tuning_);
@@ -2186,22 +2245,22 @@ bool ServerRuntimeImpl::destroy_vehicle_from_damage(
       bool dismounted_any = false;
       for (const EntityID occupant : occupants) {
         const std::optional<PlayerID> player_id =
-            default_world_.player_for_entity(occupant);
-        if (!default_world_.dismount_entity(occupant)) {
+            runtime.player_for_entity(occupant);
+        if (!runtime.dismount_entity(occupant)) {
           continue;
         }
         dismounted_any = true;
-        (void)default_world_.set_entity_position(
+        (void)runtime.set_entity_position(
             occupant,
             ejection_position.value());
         if (entity::EntityVelocity* velocity =
-                default_world_.find_entity_velocity(occupant);
+                runtime.find_entity_velocity(occupant);
             velocity != nullptr) {
           velocity->linear = {0.0F, 3.0F, 0.0F};
         }
         if (player_id.has_value()) {
           player::PlayerState* player_state =
-              default_world_.find_player(player_id.value());
+              runtime.find_player(player_id.value());
           if (player_state != nullptr) {
             player_state->position = ejection_position.value();
             player_state->velocity = {0.0F, 3.0F, 0.0F};
@@ -2210,7 +2269,8 @@ bool ServerRuntimeImpl::destroy_vehicle_from_damage(
                 std::max<u32>(player_state->knockback_control_suppression_ticks, 4U);
             sessions_.for_each_session([&](const ServerSession& occupant_session) {
               if (!occupant_session.authenticated ||
-                  occupant_session.player_id != player_id.value()) {
+                  occupant_session.player_id != player_id.value() ||
+                  occupant_session.world_id != runtime.id()) {
                 return;
               }
               send_player_velocity(occupant_session, *player_state);
@@ -2218,56 +2278,60 @@ bool ServerRuntimeImpl::destroy_vehicle_from_damage(
           }
         }
         broadcast_ride_ended(
+            runtime,
             occupant,
             vehicle_entity,
             ejection_position.value());
       }
       if (dismounted_any) {
         if (vehicle_net_id.has_value()) {
-          accepted_vehicle_movement_.erase(vehicle_net_id.value());
+          accepted_vehicle_movement_.erase({runtime.id(), vehicle_net_id.value()});
         }
-        broadcast_entity_passengers(vehicle_entity);
+        broadcast_entity_passengers(runtime, vehicle_entity);
       }
     }
   }
 
   if (broadcast_explosion) {
     world::ExplosionRequest explosion;
-    explosion.world_id = default_world_.id();
+    explosion.world_id = runtime.id();
     explosion.origin = effect_position;
     explosion.profile_id = "arvane:vehicle";
     explosion.source_entity = vehicle_entity;
     explosion.seed = seed;
     (void)execute_explosion_request(std::move(explosion));
   }
-  if (!default_world_.destroy_entity(
+  if (!runtime.destroy_entity(
           vehicle_entity,
           world::EntityDespawnReason::Removed)) {
     return false;
   }
   if (vehicle_net_id.has_value()) {
-    accepted_vehicle_movement_.erase(vehicle_net_id.value());
-    vehicle_crash_cooldowns_.erase(vehicle_net_id.value());
-    vehicle_smoke_states_.erase(vehicle_net_id.value());
+    const VehicleEntityKey key{runtime.id(), vehicle_net_id.value()};
+    accepted_vehicle_movement_.erase(key);
+    vehicle_crash_cooldowns_.erase(key);
+    vehicle_smoke_states_.erase(key);
   }
-  default_world_.flush_entity_despawns();
+  runtime.flush_entity_despawns();
   broadcast_pending_ride_ended_events();
   return true;
 }
 
 void ServerRuntimeImpl::handle_vehicle_damage_result(
+    world::WorldRuntime& runtime,
     EntityID vehicle_entity,
     const world::DamageResult& damage,
     Vec3f normal,
     u32 seed) {
   if (!damage.applied ||
-      default_world_.find_entity_vehicle_physics(vehicle_entity) == nullptr) {
+      runtime.find_entity_vehicle_physics(vehicle_entity) == nullptr) {
     return;
   }
   const std::optional<EntityNetID> net_id =
-      default_world_.network_id_for_entity(vehicle_entity);
+      runtime.network_id_for_entity(vehicle_entity);
   if (damage.killed) {
     (void)destroy_vehicle_from_damage(
+        runtime,
         vehicle_entity,
         normal,
         seed,
@@ -2277,14 +2341,15 @@ void ServerRuntimeImpl::handle_vehicle_damage_result(
   if (!net_id.has_value()) {
     return;
   }
+  const VehicleEntityKey key{runtime.id(), net_id.value()};
   const VehicleDamageStage stage =
-      vehicle_damage_stage(default_world_.find_entity_health(vehicle_entity));
+      vehicle_damage_stage(runtime.find_entity_health(vehicle_entity));
   if (stage == VehicleDamageStage::Healthy ||
       stage == VehicleDamageStage::Destroyed) {
-    vehicle_smoke_states_.erase(net_id.value());
+    vehicle_smoke_states_.erase(key);
     return;
   }
-  VehicleSmokeState& state = vehicle_smoke_states_[net_id.value()];
+  VehicleSmokeState& state = vehicle_smoke_states_[key];
   if (state.stage != stage) {
     state.stage = VehicleDamageStage::Healthy;
     state.next_smoke_tick = tick_index_;
@@ -2292,6 +2357,7 @@ void ServerRuntimeImpl::handle_vehicle_damage_result(
 }
 
 bool ServerRuntimeImpl::apply_vehicle_crash(
+    world::WorldRuntime& runtime,
     EntityID vehicle_entity,
     EntityNetID vehicle_net_id,
     const entity::VehicleDefinition& definition,
@@ -2304,7 +2370,8 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
       !contact.resolved_safe) {
     return false;
   }
-  if (const auto cooldown = vehicle_crash_cooldowns_.find(vehicle_net_id);
+  const VehicleEntityKey key{runtime.id(), vehicle_net_id};
+  if (const auto cooldown = vehicle_crash_cooldowns_.find(key);
       cooldown != vehicle_crash_cooldowns_.end()) {
     if (tick_index_ < cooldown->second) {
       if (debug != nullptr) {
@@ -2327,7 +2394,7 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
     debug->consequence_applied = true;
     debug->damage_applied = damage;
   }
-  vehicle_crash_cooldowns_[vehicle_net_id] =
+  vehicle_crash_cooldowns_[key] =
       tick_index_ + std::max<TickIndex>(1U, definition.crash.event_cooldown_ticks);
 
   if (has_non_bump_consequence) {
@@ -2335,7 +2402,7 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
     accepted.angular_velocity =
         accepted.angular_velocity * definition.crash.velocity_retention;
     apply_vehicle_accepted_state_to_world(
-        default_world_,
+        runtime,
         vehicle_entity,
         definition,
         accepted);
@@ -2343,7 +2410,7 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
 
   world::DamageResult crash_damage;
   if (damage > 0.0F) {
-    crash_damage = default_world_.apply_damage(
+    crash_damage = runtime.apply_damage(
         {vehicle_entity,
          vehicle_entity,
          damage,
@@ -2354,10 +2421,10 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
   if (crash_severity_at_least(assessment.severity, entity::CrashSeverity::Ejection) &&
       block_registry_ != nullptr) {
     const std::vector<EntityID> occupants =
-        vehicle_occupants(default_world_, vehicle_entity);
+        vehicle_occupants(runtime, vehicle_entity);
     const std::optional<Vec3f> ejection_position =
         crash_ejection_position(
-            default_world_,
+            runtime,
             *block_registry_,
             vehicle_entity,
             player_tuning_);
@@ -2368,21 +2435,21 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
       u32 ejected_count = 0U;
       for (const EntityID occupant : occupants) {
         const std::optional<PlayerID> player_id =
-            default_world_.player_for_entity(occupant);
-        if (!default_world_.dismount_entity(occupant)) {
+            runtime.player_for_entity(occupant);
+        if (!runtime.dismount_entity(occupant)) {
           continue;
         }
         ejected_any = true;
         ++ejected_count;
-        (void)default_world_.set_entity_position(occupant, ejection_position.value());
+        (void)runtime.set_entity_position(occupant, ejection_position.value());
         if (entity::EntityVelocity* velocity =
-                default_world_.find_entity_velocity(occupant);
+                runtime.find_entity_velocity(occupant);
             velocity != nullptr) {
           velocity->linear = launch;
         }
         if (player_id.has_value()) {
           player::PlayerState* player_state =
-              default_world_.find_player(player_id.value());
+              runtime.find_player(player_id.value());
           if (player_state != nullptr) {
             player_state->position = ejection_position.value();
             player_state->velocity = launch;
@@ -2395,7 +2462,8 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
             }
             sessions_.for_each_session([&](const ServerSession& occupant_session) {
               if (!occupant_session.authenticated ||
-                  occupant_session.player_id != player_id.value()) {
+                  occupant_session.player_id != player_id.value() ||
+                  occupant_session.world_id != runtime.id()) {
                 return;
               }
               send_player_velocity(occupant_session, *player_state);
@@ -2403,30 +2471,32 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
           }
         }
         broadcast_ride_ended(
+            runtime,
             occupant,
             vehicle_entity,
             ejection_position.value());
       }
       if (ejected_any) {
-        accepted_vehicle_movement_.erase(vehicle_net_id);
+        accepted_vehicle_movement_.erase(key);
       }
       if (debug != nullptr) {
         debug->ejected_occupants = ejected_count;
       }
-      if (default_world_.entity_exists(vehicle_entity)) {
-        broadcast_entity_passengers(vehicle_entity);
+      if (runtime.entity_exists(vehicle_entity)) {
+        broadcast_entity_passengers(runtime, vehicle_entity);
       }
     }
   }
 
   if (crash_damage.applied) {
     handle_vehicle_damage_result(
+        runtime,
         vehicle_entity,
         crash_damage,
         contact.normal,
         static_cast<u32>(
             vehicle_net_id.value ^ static_cast<u64>(tick_index_) ^ 0x51ed2705ULL));
-    if (!default_world_.entity_exists(vehicle_entity)) {
+    if (!runtime.entity_exists(vehicle_entity)) {
       if (debug != nullptr) {
         debug->explosion_broadcast = true;
         debug->vehicle_destroyed = true;
@@ -2440,6 +2510,7 @@ bool ServerRuntimeImpl::apply_vehicle_crash(
     const bool explode = crash_should_explode(definition.crash, assessment);
     if (definition.crash.destroy_on_destruction &&
         destroy_vehicle_from_damage(
+            runtime,
             vehicle_entity,
             contact.normal,
             static_cast<u32>(
@@ -2466,16 +2537,20 @@ void ServerRuntimeImpl::handle_vehicle_move(
   if (session == nullptr || !session->authenticated || block_registry_ == nullptr) {
     return;
   }
+  world::WorldRuntime* runtime = world_for_session(*session);
+  if (runtime == nullptr) {
+    return;
+  }
   const std::optional<EntityID> vehicle_entity =
-      default_world_.entity_for_network_id(move.vehicle_id);
+      runtime->entity_for_network_id(move.vehicle_id);
   const std::optional<EntityID> passenger_entity =
-      default_world_.entity_for_player(session->player_id);
+      runtime->entity_for_player(session->player_id);
   if (!vehicle_entity.has_value() || !passenger_entity.has_value()) {
     return;
   }
 
-  const entity::VehiclePhysicsComponent* vehicle_physics =
-      default_world_.find_entity_vehicle_physics(vehicle_entity.value());
+  entity::VehiclePhysicsComponent* vehicle_physics =
+      runtime->find_entity_vehicle_physics(vehicle_entity.value());
   const entity::VehicleDefinition* definition =
       vehicle_physics != nullptr && vehicle_registry_ != nullptr
           ? vehicle_registry_->find(vehicle_physics->definition)
@@ -2484,20 +2559,35 @@ void ServerRuntimeImpl::handle_vehicle_move(
     return;
   }
 
+  const VehicleEntityKey vehicle_key{runtime->id(), move.vehicle_id};
   AcceptedVehicleMovementState& previous =
-      accepted_vehicle_movement_[move.vehicle_id];
+      accepted_vehicle_movement_[vehicle_key];
   if (!previous.has_accepted_move) {
     previous = accepted_vehicle_state_from_world(
-        default_world_,
+        *runtime,
         vehicle_entity.value(),
         move.vehicle_id,
         tick_index_,
         base_tps_);
   }
 
+  ensure_vehicle_fuel_state(*vehicle_physics, *definition);
+  const bool fuel_burning_thrust =
+      vehicle_move_requests_fuel_burning_thrust(move) &&
+      vehicle_has_fuel_tank(*vehicle_physics);
+  if (fuel_burning_thrust && vehicle_physics->fuel_seconds <= 0.0F) {
+    send_vehicle_correction(
+        *session,
+        move.vehicle_id,
+        previous,
+        move.sequence,
+        protocol::VehicleCorrectionReason::TooMuchAcceleration);
+    return;
+  }
+
   const VehicleMovementValidationContext context =
       make_vehicle_validation_context(
-          default_world_,
+          *runtime,
           *block_registry_,
           passenger_entity.value(),
           vehicle_entity.value(),
@@ -2515,7 +2605,7 @@ void ServerRuntimeImpl::handle_vehicle_move(
     if (validation.reason == protocol::VehicleCorrectionReason::Collision) {
       previous = validation.accepted_state;
       apply_vehicle_accepted_state_to_world(
-          default_world_,
+          *runtime,
           vehicle_entity.value(),
           *definition,
           previous);
@@ -2533,6 +2623,7 @@ void ServerRuntimeImpl::handle_vehicle_move(
               crash,
               previous);
       if (apply_vehicle_crash(
+              *runtime,
               vehicle_entity.value(),
               move.vehicle_id,
               *definition,
@@ -2540,13 +2631,13 @@ void ServerRuntimeImpl::handle_vehicle_move(
               context.collision_contact,
               previous,
               &debug)) {
-        last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
+        last_vehicle_crash_debug_[vehicle_key] = std::move(debug);
         return;
       }
-      last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
-      broadcast_vehicle_state(move.vehicle_id, previous);
+      last_vehicle_crash_debug_[vehicle_key] = std::move(debug);
+      broadcast_vehicle_state(runtime->id(), move.vehicle_id, previous);
     } else {
-      last_vehicle_crash_debug_[move.vehicle_id] =
+      last_vehicle_crash_debug_[vehicle_key] =
           make_vehicle_crash_debug_info(
               move.vehicle_id,
               *definition,
@@ -2569,10 +2660,17 @@ void ServerRuntimeImpl::handle_vehicle_move(
 
   previous = validation.accepted_state;
   apply_vehicle_accepted_state_to_world(
-      default_world_,
+      *runtime,
       vehicle_entity.value(),
       *definition,
       previous);
+  if (fuel_burning_thrust) {
+    if (entity::VehiclePhysicsComponent* physics =
+            runtime->find_entity_vehicle_physics(vehicle_entity.value());
+        physics != nullptr) {
+      burn_vehicle_fuel_for_move(*physics, move);
+    }
+  }
   const VehicleCrashAssessment crash =
       context.has_collision_contact
           ? assess_vehicle_crash(definition->crash, context.collision_contact)
@@ -2587,6 +2685,7 @@ void ServerRuntimeImpl::handle_vehicle_move(
           crash,
           previous);
   if (apply_vehicle_crash(
+          *runtime,
           vehicle_entity.value(),
           move.vehicle_id,
           *definition,
@@ -2594,11 +2693,11 @@ void ServerRuntimeImpl::handle_vehicle_move(
           context.collision_contact,
           previous,
           &debug)) {
-    last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
+    last_vehicle_crash_debug_[vehicle_key] = std::move(debug);
     return;
   }
-  last_vehicle_crash_debug_[move.vehicle_id] = std::move(debug);
-  broadcast_vehicle_state(move.vehicle_id, previous);
+  last_vehicle_crash_debug_[vehicle_key] = std::move(debug);
+  broadcast_vehicle_state(runtime->id(), move.vehicle_id, previous);
 }
 
 void ServerRuntimeImpl::handle_chat_message(
@@ -2683,7 +2782,9 @@ void ServerRuntimeImpl::handle_chat_message(
     return;
   }
 
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  world::WorldRuntime* runtime = world_for_session(*session);
+  player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
   if (player_state == nullptr) {
     send_error_message(
         *session,
@@ -3104,7 +3205,9 @@ void ServerRuntimeImpl::handle_skin_upload_begin(
     send_deny(protocol::SkinUploadDenyReason::NotAuthenticated);
     return;
   }
-  player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  world::WorldRuntime* runtime = world_for_session(*session);
+  player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
   if (player_state == nullptr) {
     send_deny(protocol::SkinUploadDenyReason::NotAuthenticated);
     return;

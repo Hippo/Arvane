@@ -234,6 +234,111 @@
       }
     },
     {
+      "name": "arvane:rocket",
+      "kind": "vehicle",
+      "physics": "aircraft",
+      "tags": [
+        "arvane:vehicle",
+        "arvane:rocket",
+        "arvane:rocket/basic",
+        "arvane:space_capable"
+      ],
+      "collision": {
+        "type": "aabb",
+        "size": [1.2, 3.0, 1.2]
+      },
+      "seats": [
+        {
+          "id": "pilot",
+          "role": "driver",
+          "local_position": [0.0, 3.2, 0.0],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": true,
+          "camera_mode": "vehicle_chase"
+        },
+        {
+          "id": "passenger",
+          "role": "passenger",
+          "local_position": [0.0, 0.75, 0.0],
+          "local_rotation": [0.0, 0.0, 0.0, 1.0],
+          "controls_vehicle": false,
+          "camera_mode": "vehicle_chase"
+        }
+      ],
+      "movement": {
+        "min_speed": 0.0,
+        "max_speed": 58.0,
+        "acceleration": 30.0,
+        "brake_deceleration": 18.0,
+        "drag": 0.975,
+        "pitch_rate": 68.0,
+        "yaw_rate": 44.0,
+        "roll_rate": 70.0,
+        "roll_auto_level_rate": 45.0,
+        "lift_strength": 90.0,
+        "stall_speed": 0.0,
+        "stall_gravity_scale": 0.0,
+        "gravity_scale": 0.35,
+        "max_climb_rate": 52.0,
+        "max_descent_rate": 32.0,
+        "ground_takeoff_speed": 0.0,
+        "ground_drag": 0.90,
+        "vertical_thrust": true
+      },
+      "space_movement": {
+        "min_speed": 0.0,
+        "max_speed": 95.0,
+        "acceleration": 24.0,
+        "brake_deceleration": 12.0,
+        "drag": 0.997,
+        "pitch_rate": 95.0,
+        "yaw_rate": 95.0,
+        "roll_rate": 120.0,
+        "roll_auto_level_rate": 0.0,
+        "lift_strength": 120.0,
+        "stall_speed": 0.0,
+        "stall_gravity_scale": 0.0,
+        "gravity_scale": 0.0,
+        "max_climb_rate": 95.0,
+        "max_descent_rate": 95.0,
+        "ground_takeoff_speed": 0.0,
+        "ground_drag": 0.997,
+        "vertical_thrust": true
+      },
+      "authority": {
+        "max_speed": 105.0,
+        "max_acceleration": 42.0,
+        "max_deceleration": 54.0,
+        "max_angular_speed": 180.0,
+        "max_vertical_speed": 100.0,
+        "requires_ground": false,
+        "requires_water": false,
+        "requires_swept_collision": true,
+        "max_unloaded_chunk_entry_distance": 0.0
+      },
+      "crash": {
+        "bump_threshold": 10.0,
+        "hard_impact_threshold": 24.0,
+        "ejection_threshold": 42.0,
+        "destruction_threshold": 58.0,
+        "explosion_threshold": 58.0,
+        "min_direct_impact_dot": 0.35,
+        "event_cooldown_ticks": 30,
+        "velocity_retention": 0.03,
+        "ejection_velocity_scale": 0.45,
+        "ejection_upward_velocity": 7.0,
+        "ejection_min_horizontal_speed": 8.0,
+        "ejection_max_horizontal_speed": 24.0,
+        "ejection_max_vertical_speed": 14.0,
+        "remount_cooldown_ticks": 80,
+        "damage": {
+          "hard_impact": 5.0,
+          "ejection": 12.0,
+          "destruction": 30.0
+        }
+      }
+    },
+    {
       "name": "arvane:submarine",
       "kind": "vehicle",
       "physics": "submersible",

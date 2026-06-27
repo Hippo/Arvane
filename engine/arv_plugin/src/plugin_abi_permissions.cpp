@@ -110,8 +110,11 @@ void refresh_online_players(PluginManagerImpl& impl) {
     return;
   }
   for (const PlayerID player_id : impl.runtime.online_players()) {
+    world::WorldRuntime* world = impl.runtime.player_world
+                                     ? impl.runtime.player_world(player_id)
+                                     : impl.runtime.default_world;
     if (player::PlayerState* player_state =
-            impl.runtime.default_world->find_player(player_id);
+            world == nullptr ? nullptr : world->find_player(player_id);
         player_state != nullptr) {
       refresh_plugin_player_permissions(impl, *player_state);
     }
@@ -397,8 +400,11 @@ ArvResult api_permission_remove_registered_group(
   }
   if (ctx->impl->runtime.online_players && ctx->impl->runtime.default_world != nullptr) {
     for (const PlayerID player_id : ctx->impl->runtime.online_players()) {
+      world::WorldRuntime* world = ctx->impl->runtime.player_world
+                                       ? ctx->impl->runtime.player_world(player_id)
+                                       : ctx->impl->runtime.default_world;
       player::PlayerState* player_state =
-          ctx->impl->runtime.default_world->find_player(player_id);
+          world == nullptr ? nullptr : world->find_player(player_id);
       if (player_state == nullptr) {
         continue;
       }

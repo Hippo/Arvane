@@ -928,6 +928,14 @@ std::vector<entity::PersistentEntityRecord> WorldEntityStore::persistent_records
       record.health_max = health->max;
       record.health_invulnerable = health->invulnerable;
     }
+    if (const auto* vehicle = registry_.try_get<entity::VehiclePhysicsComponent>(entity_handle);
+        vehicle != nullptr && vehicle->fuel_capacity_seconds > 0.0F) {
+      record.has_vehicle_fuel = true;
+      record.vehicle_fuel_item = vehicle->fuel_item;
+      record.vehicle_fuel_seconds = vehicle->fuel_seconds;
+      record.vehicle_fuel_capacity_seconds = vehicle->fuel_capacity_seconds;
+      record.vehicle_fuel_burn_per_second = vehicle->fuel_burn_per_second;
+    }
     records.push_back(std::move(record));
   }
   return records;
@@ -981,6 +989,26 @@ void WorldEntityStore::restore_persistent_entities(
                 0.0F,
                 health->max);
         health->invulnerable = record.health_invulnerable;
+      }
+    }
+    if (record.has_vehicle_fuel) {
+      entity::VehiclePhysicsComponent* vehicle = find_vehicle_physics(entity_id);
+      if (vehicle != nullptr &&
+          std::isfinite(record.vehicle_fuel_capacity_seconds) &&
+          record.vehicle_fuel_capacity_seconds > 0.0F) {
+        vehicle->fuel_item = record.vehicle_fuel_item;
+        vehicle->fuel_capacity_seconds = record.vehicle_fuel_capacity_seconds;
+        vehicle->fuel_seconds =
+            std::clamp(
+                std::isfinite(record.vehicle_fuel_seconds)
+                    ? record.vehicle_fuel_seconds
+                    : vehicle->fuel_seconds,
+                0.0F,
+                vehicle->fuel_capacity_seconds);
+        if (std::isfinite(record.vehicle_fuel_burn_per_second) &&
+            record.vehicle_fuel_burn_per_second > 0.0F) {
+          vehicle->fuel_burn_per_second = record.vehicle_fuel_burn_per_second;
+        }
       }
     }
   }

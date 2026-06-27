@@ -184,6 +184,50 @@ struct VehicleSmokeState {
   TickIndex next_smoke_tick{};
 };
 
+struct VehicleEntityKey {
+  WorldID world_id{};
+  EntityNetID vehicle_id{};
+
+  constexpr bool operator==(const VehicleEntityKey&) const = default;
+};
+
+struct VehicleEntityKeyHash {
+  [[nodiscard]] usize operator()(VehicleEntityKey key) const noexcept {
+    const usize world_hash = static_cast<usize>(key.world_id.value);
+    const usize entity_hash = static_cast<usize>(key.vehicle_id.value);
+    return (world_hash * 16777619U) ^ entity_hash;
+  }
+};
+
+enum class WorldTransitionReason : u8 {
+  Command,
+  Portal,
+  SpaceExit,
+  PlanetEntry,
+  Respawn,
+  AdminWorldMove,
+};
+
+struct WorldTransitionRequest {
+  EntityID root_entity{};
+  WorldID source_world{};
+  WorldID target_world{};
+  Vec3f target_position{};
+  Vec3f target_velocity{};
+  Quatf target_rotation{};
+  f32 target_yaw_radians{};
+  f32 target_pitch_radians{};
+  WorldTransitionReason reason{WorldTransitionReason::Command};
+  std::optional<PlayerID> primary_player{};
+};
+
+struct WorldTransitionResult {
+  bool success{};
+  std::string message{};
+  std::vector<PlayerID> moved_players{};
+  EntityID moved_root_entity{};
+};
+
 class ServerWorldJobRuntime {
 public:
   ServerWorldJobRuntime();
@@ -274,6 +318,8 @@ public:
       std::string_view world_name,
       const ServerSession& session,
       player::PlayerState& player_state) const;
+  [[nodiscard]] std::optional<std::string> world_name_for(
+      const ServerSession& session) const;
   void record(
       std::string_view world_name,
       const ServerSession& session,
@@ -344,6 +390,13 @@ struct ServerRuntimeImpl {
   [[nodiscard]] std::vector<const world::WorldRuntime*> loaded_worlds() const noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
   [[nodiscard]] const entity::VehicleDefinitionRegistry* vehicle_registry() const noexcept;
+  [[nodiscard]] const world::SpaceDefinitionRegistry* space_definitions() const noexcept;
+  [[nodiscard]] std::vector<SpaceBodyRuntimeView> space_bodies_for_world(
+      WorldID world_id) const;
+  [[nodiscard]] std::vector<SpaceBodyRuntimeView> space_bodies_near(
+      WorldID world_id,
+      Vec3f position,
+      f32 extra_radius) const;
   [[nodiscard]] const player::GameModeRegistry& game_modes() const noexcept;
   [[nodiscard]] player::GameModeRegistry& game_modes() noexcept;
   [[nodiscard]] const player::PermissionGroupRegistry& permission_groups() const noexcept;
@@ -414,6 +467,8 @@ struct ServerRuntimeImpl {
   [[nodiscard]] command::WorldOperationCommandResult teleport_player_to_world_spawn_from_command(
       PlayerID player_id,
       std::string_view name);
+  [[nodiscard]] WorldTransitionResult execute_world_transition(
+      const WorldTransitionRequest& request);
   [[nodiscard]] command::ExplosionCommandResult create_explosion_from_command(
       const command::ExplosionCommandRequest& request);
   [[nodiscard]] std::optional<world::ExplosionResult> execute_explosion_request(
@@ -444,6 +499,7 @@ struct ServerRuntimeImpl {
       net::ConnectionID connection_id,
       const protocol::ServerboundVehicleAction& action);
   [[nodiscard]] bool apply_vehicle_crash(
+      world::WorldRuntime& runtime,
       EntityID vehicle_entity,
       EntityNetID vehicle_net_id,
       const entity::VehicleDefinition& definition,
@@ -501,6 +557,13 @@ struct ServerRuntimeImpl {
   void cleanup_connection(net::ConnectionID connection_id);
   void tick_keep_alive();
   void send_keep_alive(ServerSession& session, std::chrono::steady_clock::time_point now);
+  void tick_space_exit_transitions();
+  void tick_planet_entry_transitions();
+  void send_space_transition_feedback(
+      world::WorldRuntime& runtime,
+      EntityID vehicle,
+      std::string_view message,
+      bool error);
   [[nodiscard]] bool profile_is_online_for_another_session(
       const ServerSession& session) const;
   void register_online_profile(const ServerSession& session);
@@ -512,6 +575,7 @@ struct ServerRuntimeImpl {
   void apply_player_action_command(player::PlayerState& player_state, const player::PlayerCommand& command);
 
   void apply_player_interaction_command(
+      world::WorldRuntime& runtime,
       player::PlayerState& player_state,
       const player::PlayerCommand& command,
       const physics::ICollisionQuery& interaction_query,
@@ -521,6 +585,7 @@ struct ServerRuntimeImpl {
       Seconds tick_seconds);
   void clear_block_break_attempt(PlayerID player_id);
   void tick_block_break_attempt(
+      world::WorldRuntime& runtime,
       player::PlayerState& player_state,
       const player::PlayerCommand& command,
       const physics::ICollisionQuery& interaction_query,
@@ -556,11 +621,13 @@ struct ServerRuntimeImpl {
   void expire_timed_out_skin_uploads();
   void tick_vehicle_damage_effects();
   void handle_vehicle_damage_result(
+      world::WorldRuntime& runtime,
       EntityID vehicle_entity,
       const world::DamageResult& damage,
       Vec3f normal,
       u32 seed);
   [[nodiscard]] bool destroy_vehicle_from_damage(
+      world::WorldRuntime& runtime,
       EntityID vehicle_entity,
       Vec3f normal,
       u32 seed,
@@ -569,9 +636,15 @@ struct ServerRuntimeImpl {
   void tick_chunk_streaming();
   void tick_chunk_streaming_maintenance();
   void send_queued_chunk_stream_messages();
-  void broadcast_explosion_event(const world::ExplosionResult& result);
-  void spawn_explosion_drops(const world::ExplosionResult& result);
-  void send_explosion_player_velocities(const world::ExplosionResult& result);
+  void broadcast_explosion_event(
+      world::WorldRuntime& runtime,
+      const world::ExplosionResult& result);
+  void spawn_explosion_drops(
+      world::WorldRuntime& runtime,
+      const world::ExplosionResult& result);
+  void send_explosion_player_velocities(
+      world::WorldRuntime& runtime,
+      const world::ExplosionResult& result);
 
   void send_player_move_correction(
       const ServerSession& session,
@@ -588,23 +661,28 @@ struct ServerRuntimeImpl {
       u32 rejected_sequence,
       protocol::VehicleCorrectionReason reason);
   void broadcast_vehicle_state(
+      WorldID world_id,
       EntityNetID vehicle_net_id,
       const AcceptedVehicleMovementState& accepted);
   void broadcast_vehicle_smoke_particles(
+      WorldID world_id,
       Vec3f position,
       VehicleDamageStage stage,
       u32 seed);
-  void broadcast_entity_passengers(EntityID rideable_id);
+  void broadcast_entity_passengers(world::WorldRuntime& runtime, EntityID rideable_id);
   void broadcast_ride_started(
+      world::WorldRuntime& runtime,
       EntityID passenger_id,
       EntityID rideable_id,
       std::string_view seat_id,
       bool controls_vehicle);
   void broadcast_ride_ended(
+      world::WorldRuntime& runtime,
       EntityID passenger_id,
       EntityID rideable_id,
       Vec3f position);
   void broadcast_ride_ended(
+      WorldID world_id,
       EntityNetID passenger_net_id,
       EntityNetID rideable_net_id,
       Vec3f position);
@@ -718,6 +796,7 @@ struct ServerRuntimeImpl {
   const entity::EntityRegistry* entity_registry_{};
   const entity::VehicleDefinitionRegistry* vehicle_registry_{};
   const world::EntityGoalRegistry* entity_goals_{};
+  const world::SpaceDefinitionRegistry* space_definitions_{};
   player::PlayerTuning player_tuning_{};
   BlockBreakingConfig block_breaking_{};
   const BlockBreakBehaviorRegistry* block_break_behaviors_{};
@@ -737,15 +816,22 @@ struct ServerRuntimeImpl {
   player::GameModeRegistry game_modes_{};
   player::PermissionGroupRegistry permission_groups_{};
   std::filesystem::path server_save_root_{};
+  std::string server_save_display_name_{};
   u64 permission_registry_revision_{};
   HashMap<PlayerID, PlayerPermissionCache> permission_caches_;
   HashMap<PlayerID, player::PlayerCommand> pending_player_commands_;
   std::vector<PendingEntityAttack> pending_entity_attacks_;
   HashMap<PlayerID, AcceptedPlayerMovementState> accepted_player_movement_;
-  HashMap<EntityNetID, AcceptedVehicleMovementState> accepted_vehicle_movement_;
-  HashMap<EntityNetID, TickIndex> vehicle_crash_cooldowns_;
-  HashMap<EntityNetID, VehicleCrashDebugInfo> last_vehicle_crash_debug_;
-  HashMap<EntityNetID, VehicleSmokeState> vehicle_smoke_states_;
+  HashMap<VehicleEntityKey, AcceptedVehicleMovementState, VehicleEntityKeyHash>
+      accepted_vehicle_movement_;
+  HashMap<VehicleEntityKey, TickIndex, VehicleEntityKeyHash>
+      vehicle_crash_cooldowns_;
+  HashMap<VehicleEntityKey, VehicleCrashDebugInfo, VehicleEntityKeyHash>
+      last_vehicle_crash_debug_;
+  HashMap<VehicleEntityKey, VehicleSmokeState, VehicleEntityKeyHash>
+      vehicle_smoke_states_;
+  HashMap<VehicleEntityKey, TickIndex, VehicleEntityKeyHash>
+      space_transition_feedback_cooldowns_;
   HashMap<PlayerID, TickIndex> crash_remount_cooldowns_;
   HashMap<PlayerID, double> last_player_move_correction_seconds_;
   HashMap<PlayerID, protocol::BlockBreakProgress> last_sent_block_break_progress_;

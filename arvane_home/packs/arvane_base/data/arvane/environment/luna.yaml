@@ -1,0 +1,12 @@
+id: arvane:environment/luna
+version: 1
+gravity_scale: 0.18
+has_atmosphere: false
+has_oxygen: false
+sky: space
+ambient_light: 0.08
+fog: none
+reentry:
+  enabled: false
+  drag_scale: 0.4
+  heat_damage: false

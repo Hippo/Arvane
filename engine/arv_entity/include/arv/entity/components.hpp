@@ -290,6 +290,15 @@ struct AircraftMovementDefinition {
   f32 max_descent_rate{};
   f32 ground_takeoff_speed{};
   f32 ground_drag{};
+  bool vertical_thrust{};
+};
+
+struct VehicleFuelDefinition {
+  std::string item{};
+  f32 capacity_seconds{};
+  f32 initial_seconds{};
+  f32 burn_per_second{1.0F};
+  f32 min_fuel_for_launch_seconds{};
 };
 
 struct SubmersibleMovementDefinition {
@@ -313,13 +322,16 @@ struct VehicleDefinition {
   std::string name{};
   VehicleKind kind{VehicleKind::Vehicle};
   VehiclePhysicsKind physics{VehiclePhysicsKind::GroundVehicle};
+  std::vector<std::string> tags{};
   Vec3f collision_size{1.0F, 1.0F, 1.0F};
   std::vector<VehicleSeatDefinition> seats{};
   LivingMountMovementDefinition living_mount{};
   SurfaceWaterVehicleMovementDefinition surface_water{};
   GroundVehicleMovementDefinition ground{};
   AircraftMovementDefinition aircraft{};
+  std::optional<AircraftMovementDefinition> space_aircraft{};
   SubmersibleMovementDefinition submersible{};
+  std::optional<VehicleFuelDefinition> fuel{};
   VehicleAuthorityDefinition authority{};
   VehicleCrashDefinition crash{};
 };
@@ -404,6 +416,10 @@ struct VehiclePhysicsComponent {
   std::string definition{};
   Vec3f linear_velocity{};
   Vec3f angular_velocity{};
+  std::string fuel_item{};
+  f32 fuel_seconds{};
+  f32 fuel_capacity_seconds{};
+  f32 fuel_burn_per_second{};
   bool grounded{};
   bool in_water{};
   bool submerged{};
@@ -556,6 +572,11 @@ struct PersistentEntityRecord {
   f32 health_current{};
   f32 health_max{};
   bool health_invulnerable{};
+  bool has_vehicle_fuel{};
+  std::string vehicle_fuel_item{};
+  f32 vehicle_fuel_seconds{};
+  f32 vehicle_fuel_capacity_seconds{};
+  f32 vehicle_fuel_burn_per_second{};
 };
 
 struct DroppedItemEntitySnapshot {

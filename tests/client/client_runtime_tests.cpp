@@ -1,5 +1,5 @@
-#include "arv/client/command_chat.hpp"
 #include "arv/client/client_runtime.hpp"
+#include "arv/client/command_chat.hpp"
 #include "arv/command/command.hpp"
 #include "arv/core/text_edit.hpp"
 #include "arv/entity/components.hpp"
@@ -12,8 +12,8 @@
 #include "arv/protocol/handshake.hpp"
 #include "arv/protocol/inventory_sync.hpp"
 #include "arv/protocol/message_envelope.hpp"
-#include "arv/protocol/particles.hpp"
 #include "arv/protocol/pack_sync.hpp"
+#include "arv/protocol/particles.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/session_control.hpp"
 #include "arv/protocol/text_variables.hpp"
@@ -320,6 +320,7 @@ arv::entity::VehicleDefinitionRegistry make_client_air_vehicle_registry() {
   plane.name = "arvane:test_plane";
   plane.kind = arv::entity::VehicleKind::Vehicle;
   plane.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  plane.tags.push_back("arvane:test_plane/basic");
   plane.collision_size = {4.0F, 1.5F, 3.0625F};
   plane.seats.push_back({"pilot",
                          "pilot",
@@ -353,6 +354,46 @@ arv::entity::VehicleDefinitionRegistry make_client_air_vehicle_registry() {
   plane.authority.max_vertical_speed = 36.0F;
   plane.authority.requires_swept_collision = true;
   plane.authority.max_unloaded_chunk_entry_distance = 0.0F;
+
+  arv::entity::VehicleDefinition rocket;
+  rocket.name = "arvane:test_rocket";
+  rocket.kind = arv::entity::VehicleKind::Vehicle;
+  rocket.physics = arv::entity::VehiclePhysicsKind::Aircraft;
+  rocket.tags = {"arvane:test_rocket/basic", "arvane:rocket", "arvane:space_capable"};
+  rocket.collision_size = {1.2F, 3.0F, 1.2F};
+  rocket.seats.push_back({"pilot",
+                          "pilot",
+                          arv::entity::SeatRole::Driver,
+                          {0.0F, 3.2F, 0.0F},
+                          {},
+                          true,
+                          arv::entity::CameraMode::VehicleChase});
+  rocket.aircraft = {
+      0.0F,
+      58.0F,
+      30.0F,
+      18.0F,
+      0.975F,
+      arv::degrees_to_radians(68.0F),
+      arv::degrees_to_radians(44.0F),
+      arv::degrees_to_radians(70.0F),
+      arv::degrees_to_radians(45.0F),
+      90.0F,
+      0.0F,
+      0.0F,
+      0.35F,
+      52.0F,
+      32.0F,
+      0.0F,
+      0.90F,
+      true};
+  rocket.authority.max_speed = 105.0F;
+  rocket.authority.max_acceleration = 42.0F;
+  rocket.authority.max_deceleration = 54.0F;
+  rocket.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
+  rocket.authority.max_vertical_speed = 100.0F;
+  rocket.authority.requires_swept_collision = true;
+  rocket.authority.max_unloaded_chunk_entry_distance = 0.0F;
 
   arv::entity::VehicleDefinition submarine;
   submarine.name = "arvane:test_submarine";
@@ -389,7 +430,8 @@ arv::entity::VehicleDefinitionRegistry make_client_air_vehicle_registry() {
   submarine.authority.min_water_occupancy = 0.35F;
 
   auto registry =
-      arv::entity::VehicleDefinitionRegistry::build({std::move(plane), std::move(submarine)});
+      arv::entity::VehicleDefinitionRegistry::build(
+          {std::move(plane), std::move(rocket), std::move(submarine)});
   EXPECT_TRUE(registry);
   return std::move(registry.value());
 }
@@ -1634,6 +1676,87 @@ TEST(ClientRuntimeTests, AircraftPredictionRoutesInputToFlightMove) {
   EXPECT_FALSE(arv::protocol::has_vehicle_move_flag(
       last.flags,
       arv::protocol::VehicleMoveFlags::InWater));
+}
+
+TEST(ClientRuntimeTests, VehicleAliasUsesTaggedDefinitionForSeatAndMovement) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 4.0F, 0.0F});
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_plane/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F});
+
+  EXPECT_NEAR(client.player_position().y, 4.75F, 0.0001F);
+
+  for (arv::TickIndex tick = 3; tick < 12; ++tick) {
+    client.submit_input(
+        arv::client::InputFrame{
+            .move_forward = true,
+            .jump_held = true});
+    client.fixed_tick(tick);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  EXPECT_GT(arv::length(moves.back().velocity), 0.1F);
+}
+
+TEST(ClientRuntimeTests, RocketVerticalThrustClimbsWithoutPitchRotation) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 4.0F, 0.0F});
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_rocket/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F});
+
+  EXPECT_NEAR(client.player_position().y, 7.2F, 0.0001F);
+
+  for (arv::TickIndex tick = 3; tick < 45; ++tick) {
+    client.submit_input(
+        arv::client::InputFrame{
+            .move_forward = true,
+            .jump_held = true});
+    client.fixed_tick(tick);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  arv::f32 max_y = moves.front().position.y;
+  arv::f32 max_vertical_speed = moves.front().velocity.y;
+  for (const arv::protocol::ServerboundVehicleMove& move : moves) {
+    max_y = std::max(max_y, move.position.y);
+    max_vertical_speed = std::max(max_vertical_speed, move.velocity.y);
+    EXPECT_NEAR(move.angular_velocity.x, 0.0F, 0.0001F);
+  }
+  EXPECT_GT(max_y, 8.0F);
+  EXPECT_GT(max_vertical_speed, 24.0F);
+  EXPECT_GT(moves.back().velocity.y, 24.0F);
 }
 
 TEST(ClientRuntimeTests, AircraftTakeoffAssistClimbsFromGroundedRoll) {
@@ -2911,6 +3034,65 @@ TEST(ClientRuntimeTests, WorldLeaveClearsActiveWorldMirrors) {
   EXPECT_FALSE(client.local_player_id().has_value());
   EXPECT_FALSE(client.local_entity_id().has_value());
   EXPECT_TRUE(client.drain_received_block_updates().empty());
+}
+
+TEST(ClientRuntimeTests, WorldLeaveExposesTransitionStatusUntilJoinFadeCompletes) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value());
+
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldLeave,
+      arv::protocol::serialize_clientbound_world_leave({arv::WorldID{1}, 0}));
+  client.fixed_tick(2);
+
+  const arv::client::ClientWorldTransitionStatus& leaving =
+      client.world_transition_status();
+  ASSERT_TRUE(leaving.active);
+  EXPECT_EQ(
+      leaving.phase,
+      arv::client::ClientWorldTransitionPhase::LeavingWorld);
+  EXPECT_EQ(leaving.world_id, arv::WorldID{1});
+  EXPECT_FLOAT_EQ(leaving.fade_alpha, 1.0F);
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::WorldJoin);
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{2};
+  join.player_id = arv::PlayerID{1};
+  join.local_entity_id = arv::EntityNetID{7};
+  join.spawn_position = {4.0F, 60.0F, 8.0F};
+  join.initial_tick = 20;
+  join.tick_rate = arv::DefaultBaseTps;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+  client.fixed_tick(3);
+
+  const arv::client::ClientWorldTransitionStatus& entering =
+      client.world_transition_status();
+  ASSERT_TRUE(entering.active);
+  EXPECT_EQ(
+      entering.phase,
+      arv::client::ClientWorldTransitionPhase::EnteringWorld);
+  EXPECT_EQ(entering.world_id, arv::WorldID{2});
+  EXPECT_GT(entering.fade_alpha, 0.0F);
+  EXPECT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(client.camera().world_id(), arv::WorldID{2});
+
+  for (arv::TickIndex tick = 4; tick < 40; ++tick) {
+    client.fixed_tick(tick);
+  }
+  EXPECT_FALSE(client.world_transition_status().active);
+  EXPECT_FLOAT_EQ(client.world_transition_status().fade_alpha, 0.0F);
 }
 
 TEST(ClientRuntimeTests, RegistrySnapshotMismatchReportsFailureAndBlocksJoin) {

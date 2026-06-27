@@ -7,6 +7,7 @@ set(ARV_WORLD_HEADERS
   include/arv/world/natural_spawn_types.hpp
   include/arv/world/natural_spawning.hpp
   include/arv/world/regions.hpp
+  include/arv/world/space_definition.hpp
   include/arv/world/world_lighting.hpp
   include/arv/world/world_generation.hpp
   include/arv/world/worldgen/biome.hpp
@@ -52,6 +53,7 @@ add_library(arv_world STATIC
   src/fluid_solver.cpp
   src/natural_spawning.cpp
   src/regions.cpp
+  src/space_definition.cpp
   src/world_lighting.cpp
   src/world_generation.cpp
   src/worldgen/blueprint_placement.cpp

@@ -45,6 +45,9 @@ using PluginPlayerStableIDFn =
 using PluginPlayerDisplayNameFn =
     std::function<std::optional<std::string>(PlayerID)>;
 using PluginOnlinePlayersFn = std::function<std::vector<PlayerID>()>;
+using PluginWorldByIDFn = std::function<world::WorldRuntime*(WorldID)>;
+using PluginEntityWorldFn = std::function<world::WorldRuntime*(EntityID)>;
+using PluginPlayerWorldFn = std::function<world::WorldRuntime*(PlayerID)>;
 
 enum class PluginExtensionRegistryKind : u8 {
   EntityBehavior,
@@ -77,6 +80,9 @@ struct PluginRuntimeContext {
   PluginNetworkSendFn network_send{};
   text::TextVariableStore* text_variables{};
   PluginChatMessageSendFn chat_message_send{};
+  PluginWorldByIDFn world_by_id{};
+  PluginEntityWorldFn entity_world{};
+  PluginPlayerWorldFn player_world{};
 };
 
 } // namespace arv::plugin

@@ -26,3 +26,17 @@ TEST(SkyRenderingTests, ConfiguresFrameSkyFromClockAndRenderSettings) {
   EXPECT_FLOAT_EQ(frame.sky.cumulus_amount, 0.75F);
   EXPECT_FLOAT_EQ(frame.sky.cloud_time_seconds, expected.cloud_time_seconds);
 }
+
+TEST(SkyRenderingTests, ConfiguresSpaceSkyAsDarkStarField) {
+  arv::render::FramePacket frame;
+  arv::client::configure_frame_space_sky(frame);
+
+  EXPECT_TRUE(frame.sky.enabled);
+  EXPECT_GT(frame.sky.star_visibility, 2.0F);
+  EXPECT_FLOAT_EQ(frame.sky.cloud_intensity, 0.0F);
+  EXPECT_FLOAT_EQ(frame.sky.cirrus_amount, 0.0F);
+  EXPECT_FLOAT_EQ(frame.sky.cumulus_amount, 0.0F);
+  EXPECT_LT(frame.clear_color.x, 0.01F);
+  EXPECT_LT(frame.clear_color.y, 0.01F);
+  EXPECT_LT(frame.clear_color.z, 0.02F);
+}

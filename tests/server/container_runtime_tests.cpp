@@ -1,3 +1,4 @@
+#include "arv/base/base_commands.hpp"
 #include "arv/client/client_runtime.hpp"
 #include "arv/crafting/smelting.hpp"
 #include "arv/net/in_process_transport.hpp"
@@ -5,9 +6,11 @@
 #include "arv/player/container.hpp"
 #include "arv/player/item.hpp"
 #include "arv/player/player_state.hpp"
+#include "arv/server/server_commands.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/world/block_container.hpp"
 #include "support/server_harness.hpp"
+#include "support/temp_dir.hpp"
 #include "support/test_registries.hpp"
 
 #include <gtest/gtest.h>
@@ -458,6 +461,7 @@ struct ContainerRuntimeFixture {
   arv::player::ContainerTypeRegistry container_types{make_container_type_registry()};
   arv::player::ContainerUiLayoutRegistry container_layouts{
       make_container_layout_registry()};
+  arv::testsupport::ScopedTempDir temp{"arvane_container_runtime_"};
   arv::net::InProcessTransportPair transports{
       arv::net::make_in_process_transport_pair()};
   arv::server::ServerRuntime server{std::move(transports.server)};
@@ -476,6 +480,9 @@ struct ContainerRuntimeFixture {
     start_info.container_types = &container_types;
     start_info.container_layouts = &container_layouts;
     start_info.block_breaking.base_seconds_per_hardness = 0.0F;
+    start_info.register_commands = arv::base::register_server_commands;
+    start_info.world_name = "default";
+    start_info.server_save_root = temp.path / "save";
     EXPECT_TRUE(server.start(start_info));
     EXPECT_TRUE(client.connect_integrated());
     arv::testsupport::complete_integrated_handshake(server, client);
@@ -763,6 +770,72 @@ TEST(ContainerRuntimeTests, OpensFurnaceAsThreeSlotContainer) {
   EXPECT_EQ(fixture.client.active_container_title(), "Furnace");
   EXPECT_EQ(fixture.client.active_container_layout(), "arvane:furnace");
   EXPECT_EQ(fixture.client.active_container_inventory().slot_count(), 3U);
+}
+
+TEST(ContainerRuntimeTests, OpensContainerBlockInSessionWorldAfterTeleport) {
+  ContainerRuntimeFixture fixture;
+
+  arv::command::CommandResult result = fixture.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world create orbit_container --seed 6791");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  result = fixture.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world load orbit_container");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+
+  const arv::server::WorldRecord* runtime_record =
+      fixture.server.worlds().find("orbit_container");
+  ASSERT_NE(runtime_record, nullptr);
+  const arv::WorldID runtime_world_id = runtime_record->id;
+
+  result = fixture.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp orbit_container local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  for (int i = 0; i < 3; ++i) {
+    fixture.client.fixed_tick(fixture.server.tick_index());
+  }
+
+  const std::vector<arv::SessionID> session_ids =
+      fixture.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      fixture.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(session->world_id, runtime_world_id);
+
+  arv::world::WorldRuntime* runtime_world =
+      fixture.server.world_runtime(runtime_world_id);
+  ASSERT_NE(runtime_world, nullptr);
+  (void)runtime_world->ensure_chunk({{0, 0, 0}});
+  const arv::voxel::BlockVariantID chest =
+      fixture.block_registry.find_variant("arvane:chest[facing=north]").value();
+  ASSERT_TRUE(runtime_world->set_block(fixture.chest_pos, chest));
+
+  arv::player::PlayerState* runtime_player =
+      runtime_world->find_player(session->player_id);
+  ASSERT_NE(runtime_player, nullptr);
+  runtime_player->position = {0.5F, 0.0F, 0.5F};
+  runtime_player->velocity = {};
+  runtime_player->yaw_radians = std::numbers::pi_v<float> * 0.5F;
+  runtime_player->pitch_radians = 0.0F;
+  const std::optional<arv::EntityID> runtime_player_entity =
+      runtime_world->entity_for_player(session->player_id);
+  ASSERT_TRUE(runtime_player_entity.has_value());
+  ASSERT_TRUE(runtime_world->set_entity_position(
+      runtime_player_entity.value(),
+      runtime_player->position));
+
+  ASSERT_TRUE(fixture.client.request_open_container_block(
+      runtime_world_id,
+      fixture.chest_pos));
+  fixture.tick_round_trip();
+
+  ASSERT_TRUE(fixture.client.container_open());
+  EXPECT_EQ(fixture.client.active_container_type(), "arvane:chest");
+  EXPECT_EQ(fixture.client.active_container_inventory().slot_count(), 27U);
+  EXPECT_NE(runtime_world->find_block_container(fixture.chest_pos), nullptr);
 }
 
 TEST(ContainerRuntimeTests, FurnaceStartsCycleAndDoesNotOutputBeforeDuration) {

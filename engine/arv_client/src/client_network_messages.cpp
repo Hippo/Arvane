@@ -31,12 +31,45 @@
 #include <filesystem>
 #include <fstream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 
 namespace arv::client::detail {
 namespace {
+
+[[nodiscard]] std::string_view world_transition_message(u32 reason) noexcept {
+  switch (reason) {
+    case 2U:
+      return "Launching to space";
+    case 3U:
+      return "Entering world";
+    default:
+      return "Loading world";
+  }
+}
+
+[[nodiscard]] const entity::VehicleDefinition* vehicle_definition_for_entity(
+    const entity::VehicleDefinitionRegistry* registry,
+    std::string_view entity_type_name) noexcept {
+  if (registry == nullptr) {
+    return nullptr;
+  }
+  if (const entity::VehicleDefinition* direct = registry->find(entity_type_name);
+      direct != nullptr) {
+    return direct;
+  }
+  for (const entity::VehicleDefinition& definition : registry->records()) {
+    if (std::find(
+            definition.tags.begin(),
+            definition.tags.end(),
+            entity_type_name) != definition.tags.end()) {
+      return &definition;
+    }
+  }
+  return nullptr;
+}
 
 void apply_world_join_result(
     ClientRuntimeContext& runtime,
@@ -55,6 +88,17 @@ void apply_world_join_result(
       result.spawn_position,
       result.initial_tick,
       result.tick_rate);
+  runtime.world_environment_sky = result.environment_sky;
+  runtime.space_environment =
+      result.space_environment || result.environment_sky == "space";
+  runtime.space_bodies = result.space_bodies;
+  if (runtime.world_transition_status.active) {
+    runtime.world_transition_status.phase = ClientWorldTransitionPhase::EnteringWorld;
+    runtime.world_transition_status.world_id = result.world_id;
+    runtime.world_transition_status.fade_alpha = 1.0F;
+    runtime.world_transition_status.message = "Entering world";
+    runtime.world_transition_fade_remaining_seconds = 0.45;
+  }
   runtime.entities.prune_except_world(result.world_id);
   runtime.chunk_interest.set_world_id(result.world_id);
   runtime.connection.set_state(net::ConnectionState::InGame);
@@ -66,6 +110,12 @@ void apply_world_leave(
   if (leave.world_id != runtime.player_controller.camera().world_id()) {
     return;
   }
+  runtime.world_transition_status.active = true;
+  runtime.world_transition_status.phase = ClientWorldTransitionPhase::LeavingWorld;
+  runtime.world_transition_status.world_id = leave.world_id;
+  runtime.world_transition_status.fade_alpha = 1.0F;
+  runtime.world_transition_status.message = std::string{world_transition_message(leave.reason)};
+  runtime.world_transition_fade_remaining_seconds = 0.45;
   runtime.entities.clear();
   runtime.dropped_items.clear();
   runtime.chunks.clear();
@@ -73,6 +123,9 @@ void apply_world_leave(
   runtime.recipe_book.clear();
   runtime.pack_sync.clear();
   runtime.world_time_update.reset();
+  runtime.world_environment_sky.clear();
+  runtime.space_environment = false;
+  runtime.space_bodies.clear();
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.ui.clear_text_variables();
@@ -86,6 +139,11 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.inventory.reset();
   runtime.recipe_book.clear();
   runtime.world_time_update.reset();
+  runtime.world_environment_sky.clear();
+  runtime.space_environment = false;
+  runtime.space_bodies.clear();
+  runtime.world_transition_status = {};
+  runtime.world_transition_fade_remaining_seconds = 0.0;
   runtime.player_controller.leave_world();
   runtime.chunk_interest.set_world_id(WorldID{});
   runtime.ui.close_ui();
@@ -381,7 +439,7 @@ void handle_registry_snapshot(
     return nullptr;
   }
   const entity::VehicleDefinition* definition =
-      runtime.vehicle_registry->find(mirror->entity_type_name);
+      vehicle_definition_for_entity(runtime.vehicle_registry, mirror->entity_type_name);
   if (definition == nullptr) {
     return nullptr;
   }

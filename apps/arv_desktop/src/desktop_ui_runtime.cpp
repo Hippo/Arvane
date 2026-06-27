@@ -582,6 +582,20 @@ void DesktopFrameLoop::build_ui(
               std::chrono::duration<f32>(now - app_start_time_).count(),
           .sync_font_atlas = sync_font_atlas,
       });
+  if (has_active_session &&
+      active_session != nullptr &&
+      active_session->client != nullptr) {
+    const client::ClientWorldTransitionStatus& transition =
+        active_session->client->world_transition_status();
+    if (transition.active && transition.fade_alpha > 0.0F) {
+      render::UIRectDrawItem fade;
+      fade.min = {0.0F, 0.0F};
+      fade.max = ui_metrics_.framebuffer_size;
+      fade.color = {0.0F, 0.0F, 0.0F, std::clamp(transition.fade_alpha, 0.0F, 1.0F) * 0.88F};
+      fade.layer = 240U;
+      frame.ui_rects.push_back(fade);
+    }
+  }
 }
 
 void DesktopFrameLoop::update_gameplay_ui_snapshots(

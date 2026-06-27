@@ -650,3 +650,41 @@ TEST(ClientFrameComposerTests, RequireLocalEntitySkipsWorldOnlyLayers) {
   ASSERT_EQ(frame.entities.size(), 1U);
   EXPECT_EQ(frame.entities.front().model_id, (arv::render::EntityModelID{10U}));
 }
+
+TEST(ClientFrameComposerTests, AppendsSpaceBodyDrawsWithoutChunkGeometry) {
+  arv::client::EntityRenderAssets assets;
+  assets.space_body_model = arv::render::EntityModelID{77U};
+
+  const std::vector<arv::protocol::ClientboundSpaceBodyView> bodies{{
+      "arvane:space_body/luna",
+      "Luna",
+      "arvane:world/luna",
+      "arvane:models/space_body/moon",
+      "arvane:textures/space_body/luna",
+      {2200.0F, 0.0F, 700.0F},
+      90.0F,
+      130.0F,
+      true}};
+
+  arv::render::FramePacket frame;
+  frame.world_view.world_id = arv::WorldID{2U};
+  frame.camera = make_forward_camera();
+
+  const arv::client::ClientEntityFrameResult result =
+      arv::client::append_client_entity_frame_draws(
+          frame,
+          assets,
+          {.world_id = arv::WorldID{2U},
+           .local_entity_id = arv::EntityNetID{1U},
+           .first_person_camera = frame.camera,
+           .space_bodies =
+               std::span<const arv::protocol::ClientboundSpaceBodyView>{bodies}});
+
+  EXPECT_EQ(result.space_bodies_appended, 1U);
+  EXPECT_TRUE(frame.opaque_chunks.empty());
+  EXPECT_TRUE(frame.transparent_chunks.empty());
+  ASSERT_EQ(frame.entities.size(), 1U);
+  EXPECT_EQ(frame.entities.front().model_id, (arv::render::EntityModelID{77U}));
+  EXPECT_EQ(frame.entities.front().position, (arv::Vec3f{2200.0F, 0.0F, 700.0F}));
+  EXPECT_FLOAT_EQ(frame.entities.front().scale, 180.0F);
+}

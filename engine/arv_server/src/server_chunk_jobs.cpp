@@ -322,13 +322,22 @@ void ServerWorldJobRuntime::schedule_generation_jobs(
     request.coord = coord;
     request.min_chunk_y = height.min_chunk_y;
     request.max_chunk_y = height.max_chunk_y;
-    request.resolved_dimension =
-        chunk_generation->config.resolved_dimension != nullptr
-            ? chunk_generation->config.resolved_dimension
-            : chunk_generation->palette.resolved_dimension;
-    if (request.resolved_dimension == nullptr) {
-      request.config = chunk_generation->config;
-      request.palette = chunk_generation->palette;
+    const world::WorldGenerationConfig* active_config = world.generation_config();
+    const world::WorldGenerationConfig& generation_config =
+        active_config == nullptr ? chunk_generation->config : *active_config;
+    if (generation_config.void_world ||
+        generation_config.id == world::VoidWorldGenerationID ||
+        generation_config.dimension_id == world::VoidWorldGenerationID) {
+      request.config = generation_config;
+    } else {
+      request.resolved_dimension =
+          generation_config.resolved_dimension != nullptr
+              ? generation_config.resolved_dimension
+              : chunk_generation->palette.resolved_dimension;
+      if (request.resolved_dimension == nullptr) {
+        request.config = generation_config;
+        request.palette = chunk_generation->palette;
+      }
     }
     sched::JobDesc desc;
     desc.name = "server_world_generation";

@@ -489,12 +489,16 @@ void ServerRuntimeImpl::handle_open_container_block(
     const protocol::ServerboundOpenContainerBlock& request) {
   ServerSession* session = sessions_.find_by_connection(connection_id);
   if (session == nullptr || !session->authenticated || session->closing ||
-      request.world_id != session->world_id || request.world_id != default_world_.id() ||
+      request.world_id != session->world_id ||
       container_types_ == nullptr || item_registry_ == nullptr) {
     return;
   }
+  world::WorldRuntime* runtime = world_by_id(request.world_id);
+  if (runtime == nullptr) {
+    return;
+  }
 
-  const player::PlayerState* player_state = default_world_.find_player(session->player_id);
+  const player::PlayerState* player_state = runtime->find_player(session->player_id);
   if (player_state == nullptr || player_state->world_id != request.world_id) {
     return;
   }
@@ -507,7 +511,7 @@ void ServerRuntimeImpl::handle_open_container_block(
   }
 
   const voxel::BlockVariantRecord* variant = loaded_container_variant_at(
-      default_world_,
+      *runtime,
       block_registry_,
       request.world_id,
       request.block);
@@ -526,7 +530,7 @@ void ServerRuntimeImpl::handle_open_container_block(
     return;
   }
 
-  world::BlockAttachedContainer* container = default_world_.ensure_block_container(
+  world::BlockAttachedContainer* container = runtime->ensure_block_container(
       request.block,
       container_type->id,
       container_type->slot_count);
@@ -595,10 +599,17 @@ void ServerRuntimeImpl::handle_container_action(
   }
 
   ContainerSession& container_session = session_iter->second;
+  world::WorldRuntime* runtime = world_by_id(container_session.world_id);
+  if (runtime == nullptr) {
+    close_container_session(
+        container_session.session_id,
+        protocol::ContainerCloseReason::InvalidSession);
+    return;
+  }
   const protocol::ContainerCloseReason validation = validate_container_session(
       container_session,
       sessions_,
-      default_world_,
+      *runtime,
       block_registry_,
       container_types_,
       player_tuning_,
@@ -608,9 +619,9 @@ void ServerRuntimeImpl::handle_container_action(
     return;
   }
 
-  player::PlayerState* player_state = default_world_.find_player(container_session.player_id);
+  player::PlayerState* player_state = runtime->find_player(container_session.player_id);
   world::BlockAttachedContainer* container =
-      default_world_.find_block_container(container_session.block);
+      runtime->find_block_container(container_session.block);
   if (player_state == nullptr || container == nullptr) {
     close_container_session(
         container_session.session_id,
@@ -732,10 +743,17 @@ void ServerRuntimeImpl::handle_close_container(
 void ServerRuntimeImpl::tick_container_sessions() {
   std::vector<std::pair<u32, protocol::ContainerCloseReason>> sessions_to_close;
   for (const auto& [session_id, container_session] : container_sessions_) {
+    const world::WorldRuntime* runtime = world_by_id(container_session.world_id);
+    if (runtime == nullptr) {
+      sessions_to_close.emplace_back(
+          session_id,
+          protocol::ContainerCloseReason::InvalidSession);
+      continue;
+    }
     const protocol::ContainerCloseReason validation = validate_container_session(
         container_session,
         sessions_,
-        default_world_,
+        *runtime,
         block_registry_,
         container_types_,
         player_tuning_,
@@ -803,7 +821,8 @@ void ServerRuntimeImpl::close_container_sessions_at(
 }
 
 void ServerRuntimeImpl::drop_and_remove_block_container(WorldID world_id, BlockPos block) {
-  if (world_id != default_world_.id()) {
+  world::WorldRuntime* runtime = world_by_id(world_id);
+  if (runtime == nullptr) {
     return;
   }
 
@@ -812,7 +831,7 @@ void ServerRuntimeImpl::drop_and_remove_block_container(WorldID world_id, BlockP
       block,
       protocol::ContainerCloseReason::ContainerRemoved);
 
-  world::BlockAttachedContainer* container = default_world_.find_block_container(block);
+  world::BlockAttachedContainer* container = runtime->find_block_container(block);
   if (container == nullptr) {
     return;
   }
@@ -823,14 +842,16 @@ void ServerRuntimeImpl::drop_and_remove_block_container(WorldID world_id, BlockP
       spawn_dropped_item_stack(world_id, drop_position, stack.value());
     }
   }
-  (void)default_world_.remove_block_container(block);
+  (void)runtime->remove_block_container(block);
 }
 
 void ServerRuntimeImpl::send_container_content(ContainerSession& session) {
   const ServerSession* player_session = sessions_.find(session.player_session_id);
-  const player::PlayerState* player_state = default_world_.find_player(session.player_id);
+  const world::WorldRuntime* runtime = world_by_id(session.world_id);
+  const player::PlayerState* player_state =
+      runtime == nullptr ? nullptr : runtime->find_player(session.player_id);
   const world::BlockAttachedContainer* container =
-      default_world_.find_block_container(session.block);
+      runtime == nullptr ? nullptr : runtime->find_block_container(session.block);
   if (player_session == nullptr || player_state == nullptr || container == nullptr ||
       player_session->closing || !player_session->authenticated || transport_ == nullptr) {
     return;

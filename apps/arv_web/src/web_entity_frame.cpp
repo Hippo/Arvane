@@ -131,6 +131,7 @@ void append_web_entity_draw_items(
        .active_container_block_source = current_container_source,
        .block_outline_target = outline_target,
        .block_break = g_app.session->block_break_progress(),
+       .space_bodies = g_app.session->space_bodies(),
        .animation_time_seconds = animation_time_seconds,
        .require_local_entity_for_world_draws = true,
        .block_attached_sections =

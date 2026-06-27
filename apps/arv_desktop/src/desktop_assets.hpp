@@ -20,6 +20,7 @@
 #include "arv/ui/core/ui.hpp"
 #include "arv/voxel/block.hpp"
 #include "arv/world/entity_goal_registry.hpp"
+#include "arv/world/space_definition.hpp"
 #include "arv/world/world_generation.hpp"
 
 #include <string>
@@ -49,6 +50,7 @@ struct DesktopLoadedAssets {
   asset::FontSystem font_system{};
   ui::UiFontStacks ui_font_stacks{};
   world::WorldGenerationConfig default_generation_config{};
+  world::SpaceDefinitionRegistry space_definitions{};
 };
 
 struct DesktopAssetLoadError {

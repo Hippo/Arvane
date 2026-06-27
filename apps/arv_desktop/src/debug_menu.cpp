@@ -1013,6 +1013,63 @@ void render_vehicle_debug_overlay(
   ImGui::End();
 }
 
+void render_space_debug_overlay(
+    const DebugMenuState& state,
+    const client::ClientRuntime& client) {
+  if (!state.show_space_debug_overlay) {
+    return;
+  }
+
+  ImGui::SetNextWindowPos(ImVec2{14.0F, 270.0F}, ImGuiCond_Always);
+  ImGui::SetNextWindowBgAlpha(0.68F);
+  constexpr ImGuiWindowFlags Flags =
+      ImGuiWindowFlags_NoDecoration |
+      ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings |
+      ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav |
+      ImGuiWindowFlags_NoInputs;
+  if (!ImGui::Begin("Space Debug Overlay", nullptr, Flags)) {
+    ImGui::End();
+    return;
+  }
+
+  const client::CameraShell& camera = client.camera();
+  ImGui::Text("World #%u", camera.world_id().value);
+  imgui_vec3_line("Position", camera.position());
+  imgui_vec3_line("Velocity", client.player_velocity());
+  ImGui::Text("Altitude Y %.2f", static_cast<double>(camera.position().y));
+  ImGui::Text("Environment %s", client.space_environment() ? "space" : "planet");
+
+  const auto bodies = client.space_bodies();
+  if (bodies.empty()) {
+    ImGui::TextUnformatted("Nearest body: none");
+    ImGui::End();
+    return;
+  }
+
+  const protocol::ClientboundSpaceBodyView* nearest = nullptr;
+  f32 nearest_distance_squared = std::numeric_limits<f32>::max();
+  for (const protocol::ClientboundSpaceBodyView& body : bodies) {
+    const f32 current_distance_squared =
+        distance_squared(camera.position(), body.position);
+    if (current_distance_squared < nearest_distance_squared) {
+      nearest = &body;
+      nearest_distance_squared = current_distance_squared;
+    }
+  }
+  if (nearest != nullptr) {
+    const f32 distance = std::sqrt(nearest_distance_squared);
+    ImGui::Text("Nearest body %s", nearest->display_name.c_str());
+    ImGui::Text(
+        "Distance %.1f  entry %.1f%s",
+        static_cast<double>(distance),
+        static_cast<double>(nearest->entry_radius),
+        nearest->entry_enabled ? "" : " disabled");
+  }
+  ImGui::End();
+}
+
 void render_player_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
@@ -1076,6 +1133,7 @@ void render_player_tab(
 
   ImGui::SeparatorText("Toggles");
   ImGui::Checkbox("Vehicle debug overlay", &state.show_vehicle_debug_overlay);
+  ImGui::Checkbox("Space debug overlay", &state.show_space_debug_overlay);
   ImGui::Checkbox("Chunk boundaries", &state.show_chunk_boundaries);
   ImGui::Checkbox("Collision bounds", &state.show_collision_bounds);
   ImGui::Checkbox("Lighting view", &state.show_lighting_view);
@@ -2344,6 +2402,7 @@ DebugMenuResult render_debug_menu(
     record_snapshot_profile_sample(state);
   }
   render_vehicle_debug_overlay(state, server, client);
+  render_space_debug_overlay(state, client);
   if (!state.open) {
     return result;
   }

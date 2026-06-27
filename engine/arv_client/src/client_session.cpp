@@ -814,7 +814,10 @@ void ClientSession::handle_message(std::span<const u8> payload) {
           join.value().spawn_position,
           join.value().initial_tick,
           join.value().tick_rate,
-          join.value().effective_view_distance};
+          join.value().effective_view_distance,
+          join.value().environment_sky,
+          join.value().space_environment || join.value().environment_sky == "space",
+          join.value().space_bodies};
       block_break_progress_ = {};
       std::erase_if(
           entity_mirrors_,

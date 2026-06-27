@@ -63,6 +63,15 @@ struct WorldTickStats {
   u32 entity_updates_processed{};
 };
 
+struct WorldEnvironmentState {
+  f32 gravity_scale{1.0F};
+  bool has_atmosphere{true};
+  bool has_oxygen{true};
+  std::string sky{"overworld"};
+  f32 ambient_light{0.15F};
+  std::string fog{"none"};
+};
+
 enum class WorldDifficulty : u8 {
   Peaceful,
   Easy,
@@ -351,6 +360,8 @@ public:
   void add_day_time_ticks(u32 delta_ticks) noexcept;
   [[nodiscard]] std::string weather_id() const;
   bool set_weather_id(std::string weather_id);
+  [[nodiscard]] const WorldEnvironmentState& environment() const noexcept;
+  void set_environment(WorldEnvironmentState environment) noexcept;
   [[nodiscard]] WorldDifficulty difficulty() const noexcept;
   void set_difficulty(WorldDifficulty difficulty) noexcept;
   [[nodiscard]] std::span<const GameRuleState> game_rules() const noexcept;

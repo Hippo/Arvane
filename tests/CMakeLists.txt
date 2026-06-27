@@ -119,6 +119,7 @@ add_executable(arv_tests
   server/player_interaction_tests.cpp
   server/registry_tests.cpp
   server/skin_runtime_tests.cpp
+  server/space_multiplayer_tests.cpp
   server/vehicle_movement_validation_tests.cpp
   voxel/block_registry_tests.cpp
   voxel/chunk_storage_tests.cpp
@@ -130,6 +131,7 @@ add_executable(arv_tests
   world/lighting_tests.cpp
   world/natural_spawning_tests.cpp
   world/region_tests.cpp
+  world/space_definition_tests.cpp
   world/world_generation_tests.cpp
   world/world_runtime_tests.cpp
   world/world_time_tests.cpp

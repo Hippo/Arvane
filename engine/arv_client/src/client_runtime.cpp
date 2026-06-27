@@ -6,9 +6,31 @@
 #include "client_frame_builder.hpp"
 #include "client_runtime_internal.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace arv::client {
+namespace {
+
+void configure_runtime_space_sky(render::FramePacket& frame) noexcept {
+  frame.sky.enabled = true;
+  frame.sky.sun_direction = {0.0F, 1.0F, 0.0F};
+  frame.sky.daylight_strength = 0.05F;
+  frame.sky.moon_direction = {0.0F, -1.0F, 0.0F};
+  frame.sky.moonlight_strength = 0.0F;
+  frame.sky.daylight_color = {0.60F, 0.72F, 1.0F};
+  frame.sky.star_visibility = 2.4F;
+  frame.sky.ambient_color = {0.02F, 0.025F, 0.04F};
+  frame.sky.day_fraction = 0.5F;
+  frame.sky.fog_color = {0.0F, 0.0F, 0.0F};
+  frame.sky.cirrus_amount = 0.0F;
+  frame.sky.cumulus_amount = 0.0F;
+  frame.sky.cloud_intensity = 0.0F;
+  frame.sky.exposure = 1.35F;
+  frame.clear_color = {0.003F, 0.004F, 0.010F, 1.0F};
+}
+
+} // namespace
 
 struct ClientRuntime::Impl {
   explicit Impl(std::unique_ptr<net::ITransport> transport) : connection(std::move(transport)),
@@ -36,6 +58,11 @@ struct ClientRuntime::Impl {
         pack_sync,
         recipe_book,
         world_time_update,
+        world_environment_sky,
+        space_environment,
+        space_bodies,
+        world_transition_status,
+        world_transition_fade_remaining_seconds,
         language,
         vehicle_registry,
         collision_query,
@@ -62,6 +89,8 @@ struct ClientRuntime::Impl {
       clear_multiplayer_runtime();
     }
 
+    update_world_transition_fade(tick_seconds);
+
     if (was_in_game && connection.state() == net::ConnectionState::InGame) {
       input.send_fixed_tick_input(
           tick_index,
@@ -70,6 +99,7 @@ struct ClientRuntime::Impl {
           sender,
           entities,
           vehicle_registry,
+          space_environment,
           collision_query,
           tick_seconds);
     }
@@ -94,6 +124,7 @@ struct ClientRuntime::Impl {
     if (connection.tick_timeouts()) {
       clear_multiplayer_runtime();
     }
+    update_world_transition_fade(tick_seconds);
   }
 
   void clear_multiplayer_runtime() {
@@ -105,9 +136,37 @@ struct ClientRuntime::Impl {
     particles.clear();
     pack_sync.clear();
     world_time_update.reset();
+    world_environment_sky.clear();
+    space_environment = false;
+    space_bodies.clear();
+    world_transition_status = {};
+    world_transition_fade_remaining_seconds = 0.0;
     player_controller.leave_world();
     chunk_interest.set_world_id(WorldID{});
     ui.close_ui();
+  }
+
+  void update_world_transition_fade(Seconds tick_seconds) noexcept {
+    if (!world_transition_status.active) {
+      return;
+    }
+    if (connection.state() != net::ConnectionState::InGame) {
+      world_transition_status.fade_alpha = 1.0F;
+      return;
+    }
+    world_transition_fade_remaining_seconds =
+        std::max<Seconds>(0.0, world_transition_fade_remaining_seconds - tick_seconds);
+    constexpr Seconds FadeOutSeconds = 0.45;
+    const f32 alpha = static_cast<f32>(
+        std::clamp(
+            world_transition_fade_remaining_seconds / FadeOutSeconds,
+            0.0F,
+            1.0F));
+    world_transition_status.fade_alpha = alpha;
+    if (alpha <= 0.0F) {
+      world_transition_status = {};
+      world_transition_fade_remaining_seconds = 0.0;
+    }
   }
 
   detail::ClientConnectionRuntime connection;
@@ -129,6 +188,11 @@ struct ClientRuntime::Impl {
   detail::ClientPackSyncState pack_sync{};
   detail::ClientRecipeBookRuntime recipe_book{};
   std::optional<protocol::ClientboundWorldTime> world_time_update{};
+  std::string world_environment_sky{};
+  bool space_environment{};
+  std::vector<protocol::ClientboundSpaceBodyView> space_bodies{};
+  ClientWorldTransitionStatus world_transition_status{};
+  Seconds world_transition_fade_remaining_seconds{};
   u32 next_attack_sequence{1};
   u32 next_craft_action_id{1};
   std::vector<ClientAttackFeedback> attack_feedback{};
@@ -172,6 +236,24 @@ void ClientRuntime::configure_chat(ClientChatSettings settings) {
 
 const LocalPlayerIdentity& ClientRuntime::local_identity() const noexcept {
   return impl_->identity;
+}
+
+const std::string& ClientRuntime::world_environment_sky() const noexcept {
+  return impl_->world_environment_sky;
+}
+
+bool ClientRuntime::space_environment() const noexcept {
+  return impl_->space_environment;
+}
+
+std::span<const protocol::ClientboundSpaceBodyView>
+ClientRuntime::space_bodies() const noexcept {
+  return std::span<const protocol::ClientboundSpaceBodyView>{impl_->space_bodies};
+}
+
+const ClientWorldTransitionStatus& ClientRuntime::world_transition_status()
+    const noexcept {
+  return impl_->world_transition_status;
 }
 
 net::ConnectResult ClientRuntime::connect_integrated() {
@@ -256,6 +338,9 @@ render::FramePacket ClientRuntime::build_frame_packet(
       interpolation_alpha,
       viewport_width,
       viewport_height);
+  if (impl_->space_environment) {
+    configure_runtime_space_sky(packet);
+  }
   impl_->particles.append_render_items(packet.particles);
   return packet;
 }

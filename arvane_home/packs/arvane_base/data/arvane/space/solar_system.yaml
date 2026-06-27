@@ -1,0 +1,18 @@
+id: arvane:space/solar_system
+version: 1
+kind: space
+display_name: Solar System
+environment: arvane:environment/deep_space
+rules:
+  allow_block_placement: false
+  allow_vehicle_launch: false
+  allow_space_entry: true
+  unload_empty_chunks_aggressively: true
+space:
+  coordinate_scale: 1.0
+  default_spawn_position: [0, 0, 0]
+  default_spawn_rotation: [0, 0, 0]
+  bodies:
+    - arvane:space_body/overworld
+    - arvane:space_body/luna
+    - arvane:space_body/research_station

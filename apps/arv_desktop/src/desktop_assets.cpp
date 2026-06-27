@@ -14,6 +14,7 @@
 #include "arv/persistence/save.hpp"
 #include "arv/render/render_commands.hpp"
 #include "arv/text/language.hpp"
+#include "arv/world/space_definition.hpp"
 #include "arv/world/worldgen/loader.hpp"
 
 #include <algorithm>
@@ -313,6 +314,18 @@ DesktopLoadedAssetsResult load_desktop_assets(
     loaded.default_generation_config =
         world::config_from_resolved_dimension(std::move(resolved_worldgen.value()));
   }
+
+  auto space_definitions = world::load_space_definition_registry_from_packs(packs);
+  if (!space_definitions) {
+    return asset_failure("space", space_definitions.error().describe());
+  }
+  loaded.space_definitions = std::move(space_definitions.value());
+  core::info(
+      "assets",
+      "loaded space definitions: worlds={} environments={} bodies={}",
+      loaded.space_definitions.world_count(),
+      loaded.space_definitions.environment_count(),
+      loaded.space_definitions.space_body_count());
 
   return DesktopLoadedAssetsResult::success(std::move(loaded));
 }

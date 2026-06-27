@@ -20,6 +20,7 @@
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/player_input.hpp"
 #include "arv/protocol/player_movement.hpp"
+#include "arv/protocol/world_join.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -48,6 +49,9 @@ struct ClientSessionWorldJoin {
   u64 initial_tick{};
   u32 tick_rate{};
   i32 effective_view_distance{};
+  std::string environment_sky{};
+  bool space_environment{};
+  std::vector<protocol::ClientboundSpaceBodyView> space_bodies{};
 };
 
 struct ClientSessionEntityMirror {

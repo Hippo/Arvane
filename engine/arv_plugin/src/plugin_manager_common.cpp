@@ -466,6 +466,13 @@ void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic) {
   if (context == nullptr || context->impl->runtime.default_world == nullptr) {
     return nullptr;
   }
+  if (context->impl->runtime.world_by_id) {
+    if (handle > static_cast<ArvWorldHandle>(std::numeric_limits<u32>::max())) {
+      return nullptr;
+    }
+    return context->impl->runtime.world_by_id(
+        WorldID{static_cast<u32>(handle)});
+  }
   world::WorldRuntime* world = context->impl->runtime.default_world;
   return world->id().value == handle ? world : nullptr;
 }
@@ -475,6 +482,11 @@ void append_diagnostic(PluginManagerImpl& impl, PluginError diagnostic) {
     ArvPlayerID player_id) {
   if (context == nullptr || context->impl->runtime.default_world == nullptr) {
     return nullptr;
+  }
+  if (context->impl->runtime.player_world) {
+    world::WorldRuntime* world =
+        context->impl->runtime.player_world(PlayerID{player_id});
+    return world == nullptr ? nullptr : world->find_player(PlayerID{player_id});
   }
   return context->impl->runtime.default_world->find_player(PlayerID{player_id});
 }
@@ -512,16 +524,19 @@ void refresh_plugin_player_permissions(
     PluginManagerImpl& impl,
     player::PlayerState& player_state) {
   player::PermissionLayer region_layer;
-  if (impl.runtime.default_world != nullptr) {
+  world::WorldRuntime* world = impl.runtime.world_by_id
+                                   ? impl.runtime.world_by_id(player_state.world_id)
+                                   : impl.runtime.default_world;
+  if (world != nullptr) {
     const world::RegionQuery query{player_state.world_id, player_state.position};
-    (void)impl.runtime.default_world->update_player_region_state(
+    (void)world->update_player_region_state(
         player_state.player_id,
         query);
     if (const world::PlayerRegionState* state =
-            impl.runtime.default_world->player_region_state(player_state.player_id);
+            world->player_region_state(player_state.player_id);
         state != nullptr) {
       region_layer =
-          impl.runtime.default_world->regions().permission_layer_for_regions(
+          world->regions().permission_layer_for_regions(
               state->active_regions);
       }
   }

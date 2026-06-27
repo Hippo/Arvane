@@ -41,6 +41,7 @@ public:
       ClientProtocolSender& sender,
       ClientEntityMirrorStore& entities,
       const arv::entity::VehicleDefinitionRegistry* vehicle_registry,
+      bool space_environment,
       const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds);
 

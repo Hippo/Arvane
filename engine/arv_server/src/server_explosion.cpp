@@ -71,7 +71,8 @@ command::ExplosionCommandResult ServerRuntimeImpl::create_explosion_from_command
   command::ExplosionCommandResult out;
   out.profile_id = request.profile_id;
   out.origin = request.origin;
-  if (request.world_id != default_world_.id()) {
+  world::WorldRuntime* runtime = world_by_id(request.world_id);
+  if (runtime == nullptr) {
     out.message = "Unknown world for explosion.";
     return out;
   }
@@ -84,7 +85,7 @@ command::ExplosionCommandResult ServerRuntimeImpl::create_explosion_from_command
       floor_to_i32(request.origin.y),
       floor_to_i32(request.origin.z),
   }};
-  if (default_world_.find_chunk(block_to_chunk(origin_block)) == nullptr) {
+  if (runtime->find_chunk(block_to_chunk(origin_block)) == nullptr) {
     out.message = "Explosion origin is in an unloaded chunk.";
     return out;
   }
@@ -107,21 +108,24 @@ std::optional<world::ExplosionResult> ServerRuntimeImpl::execute_explosion_reque
   if (request.world_id.value == 0U) {
     request.world_id = default_world_.id();
   }
-  if (request.world_id != default_world_.id() || block_registry_ == nullptr) {
+  world::WorldRuntime* runtime = world_by_id(request.world_id);
+  if (runtime == nullptr || block_registry_ == nullptr) {
     return std::nullopt;
   }
-  auto result = world::execute_explosion(default_world_, *block_registry_, request);
+  auto result = world::execute_explosion(*runtime, *block_registry_, request);
   if (!result) {
     return std::nullopt;
   }
   world::ExplosionResult explosion = std::move(result.value());
-  spawn_explosion_drops(explosion);
-  broadcast_explosion_event(explosion);
-  send_explosion_player_velocities(explosion);
+  spawn_explosion_drops(*runtime, explosion);
+  broadcast_explosion_event(*runtime, explosion);
+  send_explosion_player_velocities(*runtime, explosion);
   return explosion;
 }
 
-void ServerRuntimeImpl::spawn_explosion_drops(const world::ExplosionResult& result) {
+void ServerRuntimeImpl::spawn_explosion_drops(
+    world::WorldRuntime& runtime,
+    const world::ExplosionResult& result) {
   if (!result.drops_enabled || result.max_drops == 0U ||
       block_registry_ == nullptr || item_registry_ == nullptr) {
     return;
@@ -136,7 +140,7 @@ void ServerRuntimeImpl::spawn_explosion_drops(const world::ExplosionResult& resu
     if (!stack.has_value()) {
       continue;
     }
-    (void)default_world_.create_dropped_item(
+    (void)runtime.create_dropped_item(
         stack.value(),
         arv::block_center(hit.pos),
         drop_velocity(result.seed, spawned),
@@ -146,9 +150,11 @@ void ServerRuntimeImpl::spawn_explosion_drops(const world::ExplosionResult& resu
   }
 }
 
-void ServerRuntimeImpl::broadcast_explosion_event(const world::ExplosionResult& result) {
+void ServerRuntimeImpl::broadcast_explosion_event(
+    world::WorldRuntime& runtime,
+    const world::ExplosionResult& result) {
   protocol::ClientboundExplosionEvent packet;
-  packet.world_id = default_world_.id();
+  packet.world_id = runtime.id();
   packet.origin = result.origin;
   packet.profile_id = result.profile_id;
   packet.radius = result.radius;
@@ -163,10 +169,10 @@ void ServerRuntimeImpl::broadcast_explosion_event(const world::ExplosionResult& 
     if (!session.authenticated ||
         session.connection_state != net::ConnectionState::InGame ||
         session.closing ||
-        session.world_id != default_world_.id()) {
+        session.world_id != runtime.id()) {
       return;
     }
-    if (const player::PlayerState* player = default_world_.find_player(session.player_id);
+    if (const player::PlayerState* player = runtime.find_player(session.player_id);
         player != nullptr &&
         distance_squared(player->position, result.origin) > send_radius * send_radius) {
       return;
@@ -182,20 +188,22 @@ void ServerRuntimeImpl::broadcast_explosion_event(const world::ExplosionResult& 
 }
 
 void ServerRuntimeImpl::send_explosion_player_velocities(
+    world::WorldRuntime& runtime,
     const world::ExplosionResult& result) {
   for (const world::ExplosionEntityHit& hit : result.entity_hits) {
     if (!hit.player_id.has_value()) {
       continue;
     }
     const player::PlayerState* player =
-        default_world_.find_player(hit.player_id.value());
+        runtime.find_player(hit.player_id.value());
     if (player == nullptr) {
       continue;
     }
     sessions_.for_each_session([&](const ServerSession& session) {
       if (!session.authenticated ||
           session.connection_state != net::ConnectionState::InGame ||
-          session.player_id != hit.player_id.value()) {
+          session.player_id != hit.player_id.value() ||
+          session.world_id != runtime.id()) {
         return;
       }
       send_player_velocity(session, *player);

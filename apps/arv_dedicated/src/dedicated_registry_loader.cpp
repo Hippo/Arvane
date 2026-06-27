@@ -11,6 +11,7 @@
 #include "arv/io/data_codecs.hpp"
 #include "arv/persistence/save.hpp"
 #include "arv/text/language.hpp"
+#include "arv/world/space_definition.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -493,6 +494,19 @@ Expected<DedicatedRegistries, DedicatedError> load_dedicated_registries(
       "dedicated",
       "loaded vehicle registry: definitions={}",
       registries.vehicle_registry.definition_count());
+
+  auto space_definitions = world::load_space_definition_registry_from_packs(packs);
+  if (!space_definitions) {
+    return Expected<DedicatedRegistries, DedicatedError>::failure(
+        dedicated_error("space", space_definitions.error().describe()));
+  }
+  registries.space_definitions = std::move(space_definitions.value());
+  core::info(
+      "dedicated",
+      "loaded space definitions: worlds={} environments={} bodies={}",
+      registries.space_definitions.world_count(),
+      registries.space_definitions.environment_count(),
+      registries.space_definitions.space_body_count());
 
   auto snapshot_json = make_client_registry_snapshot_json(
       registries.block_registry,

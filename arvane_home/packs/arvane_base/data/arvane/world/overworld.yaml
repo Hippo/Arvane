@@ -1,0 +1,25 @@
+id: arvane:world/overworld
+version: 1
+kind: planet
+display_name: Overworld
+worldgen: arvane:worldgen/dimension/overworld
+environment: arvane:environment/overworld
+rules:
+  allow_block_placement: true
+  allow_vehicle_launch: true
+  allow_space_entry: false
+  unload_empty_chunks_aggressively: false
+space_exit:
+  enabled: true
+  target_space_world: arvane:space/solar_system
+  min_y: 112
+  min_vertical_speed: 24.0
+  require_vehicle_tags:
+    - arvane:space_capable
+  consume_fuel: false
+  transition_spawn:
+    mode: fixed_spawn
+    position: [0, 0, 380]
+    velocity: [0, 0, 0]
+    rotation: [0, 0, 0]
+    velocity_scale: 0.25

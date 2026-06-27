@@ -368,6 +368,14 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
     health.set("invulnerable", entity.health_invulnerable);
     components.set("health", std::move(health));
   }
+  if (entity.has_vehicle_fuel) {
+    io::DataValue fuel = io::DataValue::object();
+    fuel.set("item", entity.vehicle_fuel_item);
+    fuel.set("seconds", static_cast<f64>(entity.vehicle_fuel_seconds));
+    fuel.set("capacity_seconds", static_cast<f64>(entity.vehicle_fuel_capacity_seconds));
+    fuel.set("burn_per_second", static_cast<f64>(entity.vehicle_fuel_burn_per_second));
+    components.set("vehicle_fuel", std::move(fuel));
+  }
 
   io::DataValue node = io::DataValue::object();
   node.set("uuid", entity.uuid);
@@ -422,6 +430,21 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
         record.health_invulnerable = bool_value_or(*health, "invulnerable", false);
       }
     }
+    if (const io::DataValue* fuel = member(*components, "vehicle_fuel");
+        fuel != nullptr && fuel->kind() == io::DataKind::Object) {
+      const io::DataValue* seconds = member(*fuel, "seconds");
+      const io::DataValue* capacity = member(*fuel, "capacity_seconds");
+      if (seconds != nullptr && io::is_number_value(*seconds) &&
+          capacity != nullptr && io::is_number_value(*capacity)) {
+        record.has_vehicle_fuel = true;
+        record.vehicle_fuel_item = string_value_or(*fuel, "item", std::string{});
+        record.vehicle_fuel_seconds = static_cast<f32>(seconds->as_f64_or(0.0));
+        record.vehicle_fuel_capacity_seconds =
+            static_cast<f32>(capacity->as_f64_or(0.0));
+        record.vehicle_fuel_burn_per_second =
+            static_cast<f32>(f64_value_or(*fuel, "burn_per_second", 0.0));
+      }
+    }
   }
   return record;
 }
@@ -460,6 +483,7 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
   node.set("terrain_amplitude", static_cast<f64>(config.terrain_amplitude));
   node.set("terrain_lacunarity", static_cast<f64>(config.terrain_lacunarity));
   node.set("terrain_gain", static_cast<f64>(config.terrain_gain));
+  node.set("void_world", config.void_world);
   node.set("surface_layers", std::move(surface_layers));
   return node;
 }
@@ -512,6 +536,9 @@ Expected<std::vector<Result>, PersistenceError> collect_world_file_jobs(
   config.terrain_amplitude = static_cast<f32>(f64_value_or(node, "terrain_amplitude", 0.0));
   config.terrain_lacunarity = static_cast<f32>(f64_value_or(node, "terrain_lacunarity", 0.0));
   config.terrain_gain = static_cast<f32>(f64_value_or(node, "terrain_gain", 0.0));
+  config.void_world = bool_value_or(node, "void_world", false) ||
+                      config.id == world::VoidWorldGenerationID ||
+                      config.dimension_id == world::VoidWorldGenerationID;
   const io::DataValue* surface_layers = member(node, "surface_layers");
   const io::DataValue::Array* layer_array =
       surface_layers == nullptr ? nullptr : surface_layers->array_if();

@@ -11,6 +11,7 @@
 #include "arv/core/types.hpp"
 #include "arv/player/item.hpp"
 #include "arv/protocol/player_input.hpp"
+#include "arv/protocol/world_join.hpp"
 #include "arv/render/render_types.hpp"
 
 #include <optional>
@@ -95,6 +96,7 @@ struct ClientEntityFrameInput {
   std::optional<protocol::ContainerBlockSource> active_container_block_source{};
   std::optional<BlockOutlineTarget> block_outline_target{};
   protocol::BlockBreakProgress block_break{};
+  std::span<const protocol::ClientboundSpaceBodyView> space_bodies{};
   Seconds animation_time_seconds{};
   bool require_local_entity_for_world_draws{};
   BlockAttachedModelSectionRange block_attached_sections{};
@@ -108,6 +110,7 @@ struct ClientEntityFrameResult {
   usize dropped_items_appended{};
   usize block_attached_models_appended{};
   usize contact_shadows_appended{};
+  usize space_bodies_appended{};
   usize outline_draws_appended{};
   usize break_overlay_draws_appended{};
   bool held_item_appended{};

@@ -4,7 +4,9 @@
 #include "arv/render/render_culling.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
+#include <utility>
 
 namespace arv::client {
 namespace {
@@ -376,6 +378,27 @@ append_block_attached_model_draws_for_visible_sections(
   return summary;
 }
 
+usize append_space_body_draws(
+    render::FramePacket& frame,
+    const EntityRenderAssets& entity_render_assets,
+    std::span<const protocol::ClientboundSpaceBodyView> bodies) {
+  if (entity_render_assets.space_body_model.value == 0U || bodies.empty()) {
+    return 0U;
+  }
+  const usize before = frame.entities.size();
+  for (const protocol::ClientboundSpaceBodyView& body : bodies) {
+    if (!std::isfinite(body.visual_radius) || body.visual_radius <= 0.0F) {
+      continue;
+    }
+    render::EntityDrawItem item;
+    item.model_id = entity_render_assets.space_body_model;
+    item.position = body.position;
+    item.scale = std::max(1.0F, body.visual_radius * 2.0F);
+    frame.entities.push_back(std::move(item));
+  }
+  return frame.entities.size() - before;
+}
+
 ClientEntityFrameResult append_client_entity_frame_draws(
     render::FramePacket& frame,
     const EntityRenderAssets& entity_render_assets,
@@ -421,6 +444,9 @@ ClientEntityFrameResult append_client_entity_frame_draws(
       !input.local_entity_id.has_value()) {
     return result;
   }
+
+  result.space_bodies_appended =
+      append_space_body_draws(frame, entity_render_assets, input.space_bodies);
 
   const usize before_dropped = frame.entities.size();
   append_dropped_item_draws(

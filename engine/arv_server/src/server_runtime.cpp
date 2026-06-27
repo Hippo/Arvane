@@ -7,6 +7,7 @@
 #include "arv/crypto/random.hpp"
 #include "arv/io/data_codecs.hpp"
 #include "arv/io/files.hpp"
+#include "arv/persistence/save.hpp"
 #include "arv/server/server_commands.hpp"
 #include "arv/server/skin_runtime.hpp"
 #include "arv/text/language.hpp"
@@ -41,6 +42,29 @@ namespace {
       player_state.yaw_radians,
       player_state.pitch_radians,
   };
+}
+
+[[nodiscard]] ServerPlayerSaveState server_player_save_from_persistence(
+    const persistence::PlayerSaveData& player) {
+  ServerPlayerSaveState save;
+  save.profile_id = player.profile_id;
+  save.profile_name = player.profile_name;
+  save.display_name = player.display_name;
+  save.world_name = player.world_name;
+  save.position = player.position;
+  save.velocity = player.velocity;
+  save.yaw_radians = player.yaw_radians;
+  save.pitch_radians = player.pitch_radians;
+  save.grounded = player.grounded;
+  save.movement_mode = player.movement_mode;
+  save.game_mode_id = player.game_mode_id;
+  save.selected_skin_hash = player.selected_skin_hash;
+  save.selected_skin_slim_model = player.selected_skin_slim_model;
+  save.respawn_location = player.respawn_location;
+  save.selected_hotbar_slot = player.selected_hotbar_slot;
+  save.inventory = player.inventory;
+  save.unlocked_recipe_ids = player.unlocked_recipe_ids;
+  return save;
 }
 
 [[nodiscard]] std::vector<command::OnlinePlayerCommandTarget> online_players(
@@ -131,6 +155,22 @@ namespace {
       format_game_rule_type(rule.type),
       world::game_rule_value_to_string(rule),
       rule.description};
+}
+
+[[nodiscard]] std::vector<std::string> world_definition_candidates(
+    const WorldRecord& record) {
+  std::vector<std::string> candidates;
+  if (record.name.find(':') != std::string::npos) {
+    candidates.push_back(record.name);
+  }
+  if (record.world_type == "space") {
+    candidates.push_back("arvane:space/" + record.name);
+  }
+  candidates.push_back("arvane:world/" + record.name);
+  if (record.id == DefaultWorldID && record.name != "overworld") {
+    candidates.push_back("arvane:world/overworld");
+  }
+  return candidates;
 }
 
 [[nodiscard]] std::optional<io::DataDocument> parse_stack_metadata(
@@ -496,12 +536,36 @@ world::WorldRuntime& ServerRuntime::voxel_world() noexcept {
   return impl_->voxel_world();
 }
 
+const world::WorldRuntime* ServerRuntime::world_runtime(WorldID world_id) const noexcept {
+  return impl_->world_by_id(world_id);
+}
+
+world::WorldRuntime* ServerRuntime::world_runtime(WorldID world_id) noexcept {
+  return impl_->world_by_id(world_id);
+}
+
 const entity::EntityRegistry* ServerRuntime::entity_registry() const noexcept {
   return impl_->entity_registry();
 }
 
 const entity::VehicleDefinitionRegistry* ServerRuntime::vehicle_registry() const noexcept {
   return impl_->vehicle_registry();
+}
+
+const world::SpaceDefinitionRegistry* ServerRuntime::space_definitions() const noexcept {
+  return impl_->space_definitions();
+}
+
+std::vector<SpaceBodyRuntimeView> ServerRuntime::space_bodies_for_world(
+    WorldID world_id) const {
+  return impl_->space_bodies_for_world(world_id);
+}
+
+std::vector<SpaceBodyRuntimeView> ServerRuntime::space_bodies_near(
+    WorldID world_id,
+    Vec3f position,
+    f32 extra_radius) const {
+  return impl_->space_bodies_near(world_id, position, extra_radius);
 }
 
 const player::GameModeRegistry& ServerRuntime::game_modes() const noexcept {
@@ -555,6 +619,10 @@ const world::NaturalSpawnCounters& ServerRuntime::natural_spawn_counters() const
 std::optional<VehicleCrashDebugInfo> ServerRuntime::last_vehicle_crash_debug(
     EntityNetID vehicle_id) const {
   return impl_->last_vehicle_crash_debug(vehicle_id);
+}
+
+command::SaveAllCommandResult ServerRuntime::save_all_worlds(bool flush) {
+  return impl_->save_all_worlds_from_command(flush);
 }
 
 bool ServerRuntime::set_player_game_mode(PlayerID player_id, std::string_view mode_id) {
@@ -639,10 +707,44 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   tick_index_ = start_info.initial_tick_index;
   world_name_ = start_info.world_name.empty() ? std::string{"default"} : start_info.world_name;
   server_save_root_ = start_info.server_save_root;
+  server_save_display_name_ = start_info.server_save_display_name.empty()
+                                  ? server_save_root_.filename().string()
+                                  : start_info.server_save_display_name;
   permission_caches_.clear();
-  player_saves_.load(start_info.saved_players);
+  std::vector<ServerPlayerSaveState> initial_player_saves(
+      start_info.saved_players.begin(),
+      start_info.saved_players.end());
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
+  if (!server_save_root_.empty() &&
+      block_registry_ != nullptr &&
+      item_registry_ != nullptr) {
+    auto loaded_save_result = persistence::load_server_root(
+        server_save_root_,
+        *block_registry_,
+        *item_registry_);
+    if (loaded_save_result) {
+      std::vector<ServerPlayerSaveState> disk_player_saves;
+      disk_player_saves.reserve(
+          loaded_save_result.value().players.size() +
+          initial_player_saves.size());
+      for (const persistence::PlayerSaveData& player :
+           loaded_save_result.value().players) {
+        disk_player_saves.push_back(server_player_save_from_persistence(player));
+      }
+      disk_player_saves.insert(
+          disk_player_saves.end(),
+          initial_player_saves.begin(),
+          initial_player_saves.end());
+      initial_player_saves = std::move(disk_player_saves);
+    } else {
+      core::warn(
+          "persistence",
+          "failed to load player save cache: {}",
+          loaded_save_result.error().message);
+    }
+  }
+  player_saves_.load(initial_player_saves);
   crafting_registry_ = start_info.crafting_registry;
   smelting_registry_ = start_info.smelting_registry;
   container_types_ = start_info.container_types;
@@ -650,6 +752,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   entity_registry_ = start_info.entity_registry;
   vehicle_registry_ = start_info.vehicle_registry;
   entity_goals_ = start_info.entity_goals;
+  space_definitions_ = start_info.space_definitions;
   game_modes_ = start_info.game_modes == nullptr ? player::GameModeRegistry{}
                                                  : *start_info.game_modes;
   player_tuning_ = start_info.player_tuning;
@@ -668,6 +771,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   accepted_vehicle_movement_.clear();
   vehicle_crash_cooldowns_.clear();
   last_vehicle_crash_debug_.clear();
+  vehicle_smoke_states_.clear();
   crash_remount_cooldowns_.clear();
   if (start_info.register_commands) {
     start_info.register_commands(command_registry_);
@@ -848,6 +952,25 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
         [this](const plugin::PluginChatMessageSendRequest& request) {
           return send_plugin_chat_message(request);
         },
+        [this](WorldID world_id) -> world::WorldRuntime* {
+          return world_by_id(world_id);
+        },
+        [this](EntityID entity_id) -> world::WorldRuntime* {
+          for (world::WorldRuntime* runtime : loaded_worlds()) {
+            if (runtime->entity_exists(entity_id)) {
+              return runtime;
+            }
+          }
+          return nullptr;
+        },
+        [this](PlayerID player_id) -> world::WorldRuntime* {
+          for (world::WorldRuntime* runtime : loaded_worlds()) {
+            if (runtime->find_player(player_id) != nullptr) {
+              return runtime;
+            }
+          }
+          return nullptr;
+        },
     });
   }
   return net::NetworkResult::success();
@@ -966,6 +1089,25 @@ void ServerRuntimeImpl::tick() {
         [this](const plugin::PluginChatMessageSendRequest& request) {
           return send_plugin_chat_message(request);
         },
+        [this](WorldID world_id) -> world::WorldRuntime* {
+          return world_by_id(world_id);
+        },
+        [this](EntityID entity_id) -> world::WorldRuntime* {
+          for (world::WorldRuntime* runtime : loaded_worlds()) {
+            if (runtime->entity_exists(entity_id)) {
+              return runtime;
+            }
+          }
+          return nullptr;
+        },
+        [this](PlayerID player_id) -> world::WorldRuntime* {
+          for (world::WorldRuntime* runtime : loaded_worlds()) {
+            if (runtime->find_player(player_id) != nullptr) {
+              return runtime;
+            }
+          }
+          return nullptr;
+        },
     });
     plugins_->tick(tick_index_);
   }
@@ -998,6 +1140,8 @@ void ServerRuntimeImpl::tick() {
         entity_goals_,
         vehicle_registry_);
   }
+  tick_space_exit_transitions();
+  tick_planet_entry_transitions();
   process_pending_entity_attacks();
   tick_vehicle_damage_effects();
   for (world::WorldRuntime* runtime : active_worlds) {
@@ -1254,6 +1398,68 @@ const entity::VehicleDefinitionRegistry* ServerRuntimeImpl::vehicle_registry() c
   return vehicle_registry_;
 }
 
+const world::SpaceDefinitionRegistry* ServerRuntimeImpl::space_definitions() const noexcept {
+  return space_definitions_;
+}
+
+std::vector<SpaceBodyRuntimeView> ServerRuntimeImpl::space_bodies_for_world(
+    WorldID world_id) const {
+  std::vector<SpaceBodyRuntimeView> out;
+  if (space_definitions_ == nullptr) {
+    return out;
+  }
+  const WorldRecord* record = worlds_.find(world_id);
+  if (record == nullptr) {
+    return out;
+  }
+  const world::WorldDefinition* definition = nullptr;
+  for (const std::string& candidate : world_definition_candidates(*record)) {
+    definition = space_definitions_->find_world(candidate);
+    if (definition != nullptr) {
+      break;
+    }
+  }
+  if (definition == nullptr ||
+      definition->kind != world::WorldDefinitionKind::Space ||
+      !definition->space.has_value()) {
+    return out;
+  }
+  out.reserve(definition->space->bodies.size());
+  for (const std::string& body_id : definition->space->bodies) {
+    const world::SpaceBodyDefinition* body =
+        space_definitions_->find_space_body(body_id);
+    if (body == nullptr) {
+      continue;
+    }
+    out.push_back({
+        body->id,
+        body->display_name,
+        body->target_world,
+        body->render.model,
+        body->render.texture,
+        body->position,
+        body->visual_radius,
+        body->entry_radius,
+        body->entry.enabled});
+  }
+  return out;
+}
+
+std::vector<SpaceBodyRuntimeView> ServerRuntimeImpl::space_bodies_near(
+    WorldID world_id,
+    Vec3f position,
+    f32 extra_radius) const {
+  std::vector<SpaceBodyRuntimeView> out;
+  const f32 radius_margin = std::max(0.0F, extra_radius);
+  for (SpaceBodyRuntimeView body : space_bodies_for_world(world_id)) {
+    const f32 radius = body.entry_radius + radius_margin;
+    if (distance_squared(position, body.position) <= radius * radius) {
+      out.push_back(std::move(body));
+    }
+  }
+  return out;
+}
+
 const player::GameModeRegistry& ServerRuntimeImpl::game_modes() const noexcept {
   return game_modes_;
 }
@@ -1306,9 +1512,24 @@ const world::NaturalSpawnCounters& ServerRuntimeImpl::natural_spawn_counters() c
 
 std::optional<VehicleCrashDebugInfo> ServerRuntimeImpl::last_vehicle_crash_debug(
     EntityNetID vehicle_id) const {
-  const auto found = last_vehicle_crash_debug_.find(vehicle_id);
+  const VehicleEntityKey default_key{default_world_.id(), vehicle_id};
+  const auto found = last_vehicle_crash_debug_.find(default_key);
   if (found == last_vehicle_crash_debug_.end()) {
-    return std::nullopt;
+    auto unique_match = last_vehicle_crash_debug_.end();
+    for (auto it = last_vehicle_crash_debug_.begin();
+         it != last_vehicle_crash_debug_.end();
+         ++it) {
+      if (it->first.vehicle_id != vehicle_id) {
+        continue;
+      }
+      if (unique_match != last_vehicle_crash_debug_.end()) {
+        return std::nullopt;
+      }
+      unique_match = it;
+    }
+    return unique_match == last_vehicle_crash_debug_.end()
+               ? std::nullopt
+               : std::optional<VehicleCrashDebugInfo>{unique_match->second};
   }
   return found->second;
 }
@@ -1804,15 +2025,9 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         }
         return entity_command_target(*runtime, entity_id, sessions_);
       };
-  auto kill_entity = [this](EntityID entity_id) {
-    world::WorldRuntime* runtime = nullptr;
-    for (world::WorldRuntime* candidate : loaded_worlds()) {
-      if (candidate->entity_exists(entity_id)) {
-        runtime = candidate;
-        break;
-      }
-    }
-    if (runtime == nullptr) {
+  auto kill_entity = [this](WorldID world_id, EntityID entity_id) {
+    world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr || !runtime->entity_exists(entity_id)) {
       return false;
     }
     bool affected = false;
@@ -1931,21 +2146,34 @@ command::CommandResult ServerRuntimeImpl::execute_command(
         return out;
       };
   auto apply_status_effect =
-      [this](EntityID entity_id, std::string_view effect_id, u32 duration_ticks, u32 amplifier) {
-        return default_world_.apply_status_effect(
+      [this](
+          WorldID world_id,
+          EntityID entity_id,
+          std::string_view effect_id,
+          u32 duration_ticks,
+          u32 amplifier) {
+        world::WorldRuntime* runtime = world_by_id(world_id);
+        return runtime != nullptr && runtime->apply_status_effect(
             entity_id,
             std::string{effect_id},
             duration_ticks,
             amplifier);
       };
   auto clear_status_effects =
-      [this](EntityID entity_id, std::optional<std::string_view> effect_id) {
-        return default_world_.clear_status_effects(entity_id, effect_id);
+      [this](
+          WorldID world_id,
+          EntityID entity_id,
+          std::optional<std::string_view> effect_id) {
+        world::WorldRuntime* runtime = world_by_id(world_id);
+        return runtime == nullptr ? 0U : runtime->clear_status_effects(entity_id, effect_id);
       };
-  auto list_status_effects = [this](EntityID entity_id) {
+  auto list_status_effects = [this](WorldID world_id, EntityID entity_id) {
     std::vector<command::StatusEffectCommandState> out;
-    for (const world::StatusEffectInstance& effect :
-         default_world_.status_effects(entity_id)) {
+    const world::WorldRuntime* runtime = world_by_id(world_id);
+    if (runtime == nullptr) {
+      return out;
+    }
+    for (const world::StatusEffectInstance& effect : runtime->status_effects(entity_id)) {
       out.push_back({effect.effect_id, effect.remaining_ticks, effect.amplifier});
     }
     return out;

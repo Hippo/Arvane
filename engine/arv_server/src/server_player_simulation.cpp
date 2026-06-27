@@ -427,8 +427,10 @@ void ServerRuntimeImpl::apply_player_action_command(
           ? command.selected_hotbar_slot
           : player_state.selected_hotbar_slot;
 
-  const physics::KinematicConfig physics_config =
+  physics::KinematicConfig physics_config =
       physics::kinematic_config_from_tuning(player_tuning_);
+  physics_config.gravity_per_second *=
+      std::max(0.0F, runtime->environment().gravity_scale);
   const Seconds tick_seconds = tick_duration_seconds(base_tps_);
 
   if (command.primary_pressed) {
@@ -450,6 +452,7 @@ void ServerRuntimeImpl::apply_player_action_command(
   const Vec3f eye_position = player_eye_position(player_state, player_tuning_);
   const Vec3f look_direction = player_look_direction(player_state);
   apply_player_interaction_command(
+      *runtime,
       player_state,
       command,
       interaction_query,

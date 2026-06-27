@@ -980,6 +980,18 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   result.initial_tick = 99;
   result.tick_rate = 20;
   result.effective_view_distance = 6;
+  result.environment_sky = "space";
+  result.space_environment = true;
+  result.space_bodies.push_back({
+      "arvane:space_body/luna",
+      "Luna",
+      "arvane:world/luna",
+      "arvane:models/space_body/moon",
+      "arvane:textures/space_body/luna",
+      {2200.0F, 0.0F, 700.0F},
+      90.0F,
+      130.0F,
+      true});
 
   const std::vector<arv::u8> bytes = arv::protocol::serialize_clientbound_world_join_result(result);
   const auto decoded = arv::protocol::deserialize_clientbound_world_join_result(bytes);
@@ -993,6 +1005,18 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   EXPECT_EQ(decoded.value().initial_tick, 99U);
   EXPECT_EQ(decoded.value().tick_rate, 20U);
   EXPECT_EQ(decoded.value().effective_view_distance, 6);
+  EXPECT_EQ(decoded.value().environment_sky, "space");
+  EXPECT_TRUE(decoded.value().space_environment);
+  ASSERT_EQ(decoded.value().space_bodies.size(), 1U);
+  EXPECT_EQ(decoded.value().space_bodies.front().body_id, "arvane:space_body/luna");
+  EXPECT_EQ(decoded.value().space_bodies.front().display_name, "Luna");
+  EXPECT_EQ(decoded.value().space_bodies.front().target_world_id, "arvane:world/luna");
+  EXPECT_EQ(decoded.value().space_bodies.front().render_model, "arvane:models/space_body/moon");
+  EXPECT_EQ(decoded.value().space_bodies.front().render_texture, "arvane:textures/space_body/luna");
+  EXPECT_EQ(decoded.value().space_bodies.front().position, (arv::Vec3f{2200.0F, 0.0F, 700.0F}));
+  EXPECT_FLOAT_EQ(decoded.value().space_bodies.front().visual_radius, 90.0F);
+  EXPECT_FLOAT_EQ(decoded.value().space_bodies.front().entry_radius, 130.0F);
+  EXPECT_TRUE(decoded.value().space_bodies.front().entry_enabled);
 
   const arv::protocol::ClientboundWorldLeave leave{arv::WorldID{4}, 3};
   const auto decoded_leave =

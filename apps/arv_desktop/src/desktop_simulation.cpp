@@ -59,6 +59,7 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
           active_session.client->disconnect();
           return true;
         }
+        sessions_.sync_client_world_context(active_session);
         update_block_outline_target(active_session);
         sessions_.collect_client_chunk_stream(active_session);
       }
@@ -109,6 +110,7 @@ bool DesktopFrameLoop::update_simulation_and_chunks(
     sessions_.refresh_inventory_slots(active_session);
   }
 
+  sessions_.sync_client_world_context(active_session);
   sessions_.apply_pending_client_chunk_stream(
       active_session,
       config_.chunk_pipeline.max_client_chunk_applies_per_frame,
