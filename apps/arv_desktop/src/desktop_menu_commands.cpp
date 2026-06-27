@@ -6,6 +6,7 @@
 #include "arv/client/client_settings.hpp"
 #include "arv/client/entity_render_assets.hpp"
 #include "arv/client/render_asset_upload.hpp"
+#include "arv/client/space_body_texture.hpp"
 #include "arv/core/log.hpp"
 #include "arv/io/input_bindings.hpp"
 #include "arv/net/connection_state.hpp"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace arv::desktop {
@@ -405,6 +407,14 @@ void DesktopFrameLoop::refresh_runtime_player_tuning() {
 }
 
 void DesktopFrameLoop::rebuild_outline_render_assets() {
+  client::SpaceBodyTextureAssets space_body_textures;
+  if (assets_.worldgen_registry != nullptr) {
+    space_body_textures = client::build_space_body_texture_assets(
+        resources_,
+        assets_.space_definitions,
+        *assets_.worldgen_registry,
+        assets_.block_registry);
+  }
   client::EntityRenderAssetsResult result = client::build_entity_render_assets(
       resources_,
       assets_.entity_registry,
@@ -417,7 +427,13 @@ void DesktopFrameLoop::rebuild_outline_render_assets() {
            config_.render.block_outline.color_g,
            config_.render.block_outline.color_b},
           config_.render.block_outline.thickness},
-      entity_atlas_options_from(config_.render.atlases.entities));
+      entity_atlas_options_from(config_.render.atlases.entities),
+      std::span<const client::GeneratedTextureAsset>{
+          space_body_textures.generated_textures.data(),
+          space_body_textures.generated_textures.size()},
+      std::span<const std::string>{
+          space_body_textures.texture_assets.data(),
+          space_body_textures.texture_assets.size()});
   if (!result) {
     core::warn(
         "assets",

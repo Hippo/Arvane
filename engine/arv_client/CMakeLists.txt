@@ -34,6 +34,7 @@ set(ARV_CLIENT_HEADERS
   include/arv/client/remote_chunk_stream.hpp
   include/arv/client/replicated_entity_mirror.hpp
   include/arv/client/render_asset_upload.hpp
+  include/arv/client/space_body_texture.hpp
   include/arv/client/sky_rendering.hpp
   include/arv/client/ui_interactions.hpp
 )
@@ -205,6 +206,7 @@ target_link_libraries(arv_client_item_animation
 
 add_library(arv_client_gameplay_assets STATIC
   src/client_gameplay_assets.cpp
+  src/space_body_texture.cpp
 )
 target_include_directories(arv_client_gameplay_assets PUBLIC include)
 target_link_libraries(arv_client_gameplay_assets
@@ -212,6 +214,7 @@ target_link_libraries(arv_client_gameplay_assets
     arv_client_item_animation
     arv_client_render_assets
     arv_client_ui_assets
+    arv_world
 )
 
 add_library(arv_client_input STATIC

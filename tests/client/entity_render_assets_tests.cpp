@@ -141,6 +141,77 @@ TEST(EntityRenderAssetsTests, ClientEntityLoaderUsesCustomEntityRegistryBuilder)
   EXPECT_FALSE(entity_assets.value().vehicle_registry.records().empty());
 }
 
+TEST(EntityRenderAssetsTests, BuildsTexturedSphereModelForSpaceBodyTexture) {
+  auto packs = arv::asset::PackManager::load(test_arvane_home());
+  ASSERT_TRUE(packs) << packs.error().describe();
+  arv::asset::ResourceManager resources(packs.value());
+
+  auto block_assets =
+      arv::client::load_client_block_render_assets(packs.value(), resources);
+  ASSERT_TRUE(block_assets) << block_assets.error().message;
+  auto entity_registry = arv::entity::EntityRegistry::build({});
+  ASSERT_TRUE(entity_registry) << entity_registry.error().message;
+  auto item_definition_text =
+      packs.value().load_merged_json_array_text("items", "items");
+  ASSERT_TRUE(item_definition_text) << item_definition_text.error().describe();
+  auto item_definitions =
+      arv::player::parse_item_definitions_json(item_definition_text.value());
+  ASSERT_TRUE(item_definitions) << item_definitions.error().message;
+  auto item_registry =
+      arv::player::ItemRegistry::build_from_blocks_and_items(
+          block_assets.value().block_registry,
+          std::move(item_definitions.value()));
+  ASSERT_TRUE(item_registry) << item_registry.error().message;
+
+  arv::asset::Image generated;
+  generated.width = 8U;
+  generated.height = 4U;
+  generated.channels = 4U;
+  generated.pixels.assign(
+      static_cast<arv::usize>(generated.width) *
+          static_cast<arv::usize>(generated.height) *
+          4U,
+      255U);
+  const std::string texture = "test:texture/space_body/generated";
+  const std::vector<arv::client::GeneratedTextureAsset> generated_textures{
+      {texture, generated}};
+  const std::vector<std::string> space_body_textures{texture};
+  const arv::asset::TextureAtlasBuildOptions atlas_options{
+      .max_page_size = 1024,
+      .max_pages = 1,
+      .padding = 2,
+      .require_uniform_non_fallback_size = false};
+  auto assets = arv::client::build_entity_render_assets(
+      resources,
+      entity_registry.value(),
+      item_registry.value(),
+      block_assets.value().block_registry,
+      block_assets.value().block_atlas.render_data,
+      block_assets.value().block_models,
+      {},
+      atlas_options,
+      std::span<const arv::client::GeneratedTextureAsset>{
+          generated_textures.data(),
+          generated_textures.size()},
+      std::span<const std::string>{
+          space_body_textures.data(),
+          space_body_textures.size()});
+
+  ASSERT_TRUE(assets) << assets.error().message;
+  const auto model_id = assets.value().space_body_model_by_texture.find(texture);
+  ASSERT_NE(model_id, assets.value().space_body_model_by_texture.end());
+  const arv::render::EntityModelAsset* model =
+      find_model(assets.value(), model_id->second);
+  ASSERT_NE(model, nullptr);
+  EXPECT_GT(model->vertices.size(), 100U);
+  EXPECT_GT(model->indices.size(), 300U);
+  const std::optional<std::pair<arv::f32, arv::f32>> bounds =
+      model_y_bounds(*model);
+  ASSERT_TRUE(bounds.has_value());
+  EXPECT_NEAR(bounds->first, -8.0F, 0.01F);
+  EXPECT_NEAR(bounds->second, 8.0F, 0.01F);
+}
+
 TEST(EntityRenderAssetsTests, BlockAttachedModelsUseEntityModelBaker) {
   arv::voxel::BlockRegistry registry = make_chest_block_registry();
   const std::optional<arv::voxel::BlockVariantID> chest_variant =

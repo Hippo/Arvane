@@ -47,6 +47,12 @@ struct EntityRenderAssets {
   std::vector<render::EntityAnimationID> block_attached_animation_by_variant{};
   std::vector<Quatf> block_attached_rotation_by_variant{};
   render::EntityModelID space_body_model{};
+  HashMap<std::string, render::EntityModelID> space_body_model_by_texture{};
+};
+
+struct GeneratedTextureAsset {
+  std::string asset_id{};
+  asset::Image image{};
 };
 
 struct ClientEntityRenderAssets {
@@ -69,6 +75,8 @@ struct ClientEntityRenderAssetLoadOptions {
       .max_pages = 1,
       .padding = 2,
       .require_uniform_non_fallback_size = false};
+  std::vector<GeneratedTextureAsset> generated_textures{};
+  std::vector<std::string> space_body_texture_assets{};
 };
 
 struct ClientEntityRenderAssetLoadError {
@@ -92,7 +100,9 @@ using ClientEntityRenderAssetsResult =
         {.max_page_size = 1024,
          .max_pages = 1,
          .padding = 2,
-         .require_uniform_non_fallback_size = false});
+         .require_uniform_non_fallback_size = false},
+    std::span<const GeneratedTextureAsset> generated_textures = {},
+    std::span<const std::string> space_body_texture_assets = {});
 
 [[nodiscard]] ClientEntityRenderAssetsResult load_client_entity_render_assets(
     const asset::PackManager& packs,

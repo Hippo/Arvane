@@ -1,5 +1,8 @@
 #include "arv/client/client_gameplay_assets.hpp"
 
+#include "arv/client/space_body_texture.hpp"
+
+#include <iterator>
 #include <utility>
 
 namespace arv::client {
@@ -26,6 +29,20 @@ ClientGameplayAssetsResult load_client_gameplay_assets(
     const voxel::BlockRenderData& block_render_data,
     std::span<const asset::BlockModelAssetData> block_models,
     ClientGameplayAssetLoadOptions options) {
+  SpaceBodyTextureAssets space_body_textures =
+      load_space_body_texture_assets_from_packs(
+          packs,
+          resources,
+          block_registry);
+  options.entity_assets.generated_textures.insert(
+      options.entity_assets.generated_textures.end(),
+      std::make_move_iterator(space_body_textures.generated_textures.begin()),
+      std::make_move_iterator(space_body_textures.generated_textures.end()));
+  options.entity_assets.space_body_texture_assets.insert(
+      options.entity_assets.space_body_texture_assets.end(),
+      std::make_move_iterator(space_body_textures.texture_assets.begin()),
+      std::make_move_iterator(space_body_textures.texture_assets.end()));
+
   auto entity_assets = load_client_entity_render_assets(
       packs,
       resources,

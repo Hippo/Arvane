@@ -432,7 +432,12 @@ usize append_space_body_draws(
       continue;
     }
     render::EntityDrawItem item;
-    item.model_id = entity_render_assets.space_body_model;
+    if (const auto model = entity_render_assets.space_body_model_by_texture.find(body.render_texture);
+        model != entity_render_assets.space_body_model_by_texture.end()) {
+      item.model_id = model->second;
+    } else {
+      item.model_id = entity_render_assets.space_body_model;
+    }
     const SpaceBodyDrawPlacement placement = space_body_draw_placement(frame, body);
     item.position = placement.position;
     item.scale = std::max(1.0F, placement.scale);

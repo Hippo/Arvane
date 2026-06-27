@@ -654,6 +654,9 @@ TEST(ClientFrameComposerTests, RequireLocalEntitySkipsWorldOnlyLayers) {
 TEST(ClientFrameComposerTests, AppendsSpaceBodyDrawsWithoutChunkGeometry) {
   arv::client::EntityRenderAssets assets;
   assets.space_body_model = arv::render::EntityModelID{77U};
+  assets.space_body_model_by_texture.emplace(
+      "arvane:textures/space_body/luna",
+      arv::render::EntityModelID{88U});
 
   const std::vector<arv::protocol::ClientboundSpaceBodyView> bodies{{
       "arvane:space_body/luna",
@@ -685,7 +688,7 @@ TEST(ClientFrameComposerTests, AppendsSpaceBodyDrawsWithoutChunkGeometry) {
   EXPECT_TRUE(frame.opaque_chunks.empty());
   EXPECT_TRUE(frame.transparent_chunks.empty());
   ASSERT_EQ(frame.entities.size(), 1U);
-  EXPECT_EQ(frame.entities.front().model_id, (arv::render::EntityModelID{77U}));
+  EXPECT_EQ(frame.entities.front().model_id, (arv::render::EntityModelID{88U}));
   EXPECT_LT(
       arv::distance(frame.entities.front().position, frame.camera.position),
       frame.camera.far_plane);

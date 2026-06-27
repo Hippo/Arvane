@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <utility>
@@ -80,8 +81,8 @@ constexpr std::string_view DynamicPlayerSkinTextureAsset =
   return render::EntityModelID{ChunkBoundsEntityModelID};
 }
 
-[[nodiscard]] render::EntityModelID space_body_model_id() noexcept {
-  return render::EntityModelID{SpaceBodyEntityModelID};
+[[nodiscard]] render::EntityModelID space_body_model_id(u32 texture_index = 0U) noexcept {
+  return render::EntityModelID{SpaceBodyEntityModelID + texture_index};
 }
 
 [[nodiscard]] render::EntityModelID break_overlay_model_id(
@@ -163,35 +164,68 @@ void translate_entity_model_asset(
 }
 
 [[nodiscard]] render::EntityModelAssetResult build_space_body_model(
-    const asset::TextureAtlasEntry& white_entry) {
-  render::EntityModelDefinition definition;
-  definition.name = "generated#space_body";
-  definition.texture_assets.push_back(std::string{WhiteTextureAsset});
-  definition.texture_sizes.push_back({1, 1});
-  definition.bones.emplace("root", render::EntityModelBoneDefinition{});
+    render::EntityModelID model_id,
+    std::string_view texture_asset,
+    const asset::TextureAtlasEntry& texture_entry) {
+  constexpr f32 Pi = 3.14159265358979323846F;
+  constexpr f32 Radius = 8.0F;
+  constexpr u32 Slices = 32U;
+  constexpr u32 Stacks = 16U;
+  constexpr Vec3f LightDir{-0.370F, 0.536F, -0.759F};
 
-  render::EntityModelBoxDefinition box;
-  box.bone = "root";
-  box.min = {-8.0F, -8.0F, -8.0F};
-  box.max = {8.0F, 8.0F, 8.0F};
-  box.origin = {};
-  for (std::optional<render::EntityModelFaceDefinition>& face : box.faces) {
-    face = render::EntityModelFaceDefinition{0, {0, 0, 1, 1}, 0.0F};
+  render::EntityModelAsset asset;
+  asset.id = model_id;
+  asset.name = "generated#space_body/" + std::string{texture_asset};
+  asset.bones.push_back({"root", {}});
+  asset.vertices.reserve((Slices + 1U) * (Stacks + 1U));
+  asset.indices.reserve(Slices * Stacks * 6U);
+
+  const Vec2f uv_min{
+      static_cast<f32>(texture_entry.unpadded_pixel_min.x),
+      static_cast<f32>(texture_entry.unpadded_pixel_min.y)};
+  const Vec2f uv_size{
+      static_cast<f32>(texture_entry.unpadded_pixel_max.x - texture_entry.unpadded_pixel_min.x),
+      static_cast<f32>(texture_entry.unpadded_pixel_max.y - texture_entry.unpadded_pixel_min.y)};
+
+  for (u32 stack = 0; stack <= Stacks; ++stack) {
+    const f32 v = static_cast<f32>(stack) / static_cast<f32>(Stacks);
+    const f32 theta = v * Pi;
+    const f32 sin_theta = std::sin(theta);
+    const f32 cos_theta = std::cos(theta);
+    for (u32 slice = 0; slice <= Slices; ++slice) {
+      const f32 u = static_cast<f32>(slice) / static_cast<f32>(Slices);
+      const f32 phi = u * Pi * 2.0F;
+      const Vec3f normal{
+          sin_theta * std::cos(phi),
+          cos_theta,
+          sin_theta * std::sin(phi)};
+      const f32 light = std::clamp(
+          normal.x * LightDir.x + normal.y * LightDir.y + normal.z * LightDir.z,
+          0.0F,
+          1.0F);
+      const f32 shade = 0.58F + light * 0.42F;
+      asset.vertices.push_back({
+          normal * Radius,
+          {uv_min.x + uv_size.x * u, uv_min.y + uv_size.y * v},
+          {shade, shade, shade},
+          0U,
+          0U,
+          static_cast<u32>(render::TextureAtlasDomain::Entities),
+          static_cast<u32>(texture_entry.page)});
+    }
   }
-  definition.boxes.push_back(std::move(box));
 
-  const std::array<render::EntityModelTextureBinding, 1> bindings{{
-      {std::string{WhiteTextureAsset},
-       white_entry.unpadded_pixel_min,
-       white_entry.unpadded_pixel_max,
-       white_entry.width,
-       white_entry.height,
-       render::TextureAtlasDomain::Entities,
-       static_cast<u16>(white_entry.page)}}};
-  return render::build_entity_model_asset(
-      space_body_model_id(),
-      definition,
-      std::span<const render::EntityModelTextureBinding>{bindings});
+  for (u32 stack = 0; stack < Stacks; ++stack) {
+    for (u32 slice = 0; slice < Slices; ++slice) {
+      const u32 base = stack * (Slices + 1U) + slice;
+      const u32 next = base + Slices + 1U;
+      asset.indices.insert(
+          asset.indices.end(),
+          {base, base + 1U, next, next, base + 1U, next + 1U});
+    }
+  }
+
+  return render::EntityModelAssetResult::success(std::move(asset));
 }
 
 [[nodiscard]] render::EntityModelDefinition make_first_person_player_definition(
@@ -322,7 +356,9 @@ EntityRenderAssetsResult build_entity_render_assets(
     const voxel::BlockRenderData& block_render_data,
     std::span<const asset::BlockModelAssetData> block_models,
     BlockOutlineRenderConfig outline_config,
-    asset::TextureAtlasBuildOptions atlas_options) {
+    asset::TextureAtlasBuildOptions atlas_options,
+    std::span<const GeneratedTextureAsset> generated_textures,
+    std::span<const std::string> space_body_texture_assets) {
   struct PendingModel {
     EntityTypeID type_id{};
     std::optional<player::ItemID> item_id{};
@@ -392,6 +428,19 @@ EntityRenderAssetsResult build_entity_render_assets(
       texture_ids.push_back({std::move(texture)});
     }
   };
+  HashMap<std::string, const GeneratedTextureAsset*> generated_texture_by_id;
+  generated_texture_by_id.reserve(generated_textures.size());
+  for (const GeneratedTextureAsset& generated : generated_textures) {
+    if (generated.asset_id.empty() || generated.image.empty()) {
+      continue;
+    }
+    if (generated_texture_by_id.emplace(generated.asset_id, &generated).second) {
+      add_texture(generated.asset_id);
+    }
+  }
+  for (const std::string& texture : space_body_texture_assets) {
+    add_texture(texture);
+  }
 
   for (const entity::EntityTypeRecord& type : entity_registry.records()) {
     if (type.model_asset.empty()) {
@@ -785,7 +834,11 @@ EntityRenderAssetsResult build_entity_render_assets(
   HashMap<std::string, asset::Image> source_images;
   inputs.reserve(texture_ids.size());
   for (const asset::AssetID& texture_id : texture_ids) {
-    if (texture_id.value == WhiteTextureAsset) {
+    if (const auto generated = generated_texture_by_id.find(texture_id.value);
+        generated != generated_texture_by_id.end()) {
+      inputs.push_back({texture_id, generated->second->image, false});
+      source_images[texture_id.value] = generated->second->image;
+    } else if (texture_id.value == WhiteTextureAsset) {
       asset::Image white;
       white.width = 1;
       white.height = 1;
@@ -1047,7 +1100,8 @@ EntityRenderAssetsResult build_entity_render_assets(
   assets.chunk_bounds_model = chunk_bounds_input.id;
   assets.models.push_back(render::build_block_outline_model(chunk_bounds_input));
 
-  auto space_body_model = build_space_body_model(*white_entry);
+  auto space_body_model =
+      build_space_body_model(space_body_model_id(), WhiteTextureAsset, *white_entry);
   if (!space_body_model) {
     return EntityRenderAssetsResult::failure({"generated#space_body",
                                               {},
@@ -1056,6 +1110,30 @@ EntityRenderAssetsResult build_entity_render_assets(
   }
   assets.space_body_model = space_body_model_id();
   assets.models.push_back(std::move(space_body_model.value()));
+  HashSet<std::string> emitted_space_body_textures;
+  u32 space_body_texture_index = 1U;
+  for (const std::string& texture : space_body_texture_assets) {
+    if (texture.empty() || !emitted_space_body_textures.insert(texture).second) {
+      continue;
+    }
+    const asset::TextureAtlasEntry* entry = assets.texture_atlas.find(texture);
+    if (entry == nullptr) {
+      return EntityRenderAssetsResult::failure({texture,
+                                                {},
+                                                "build space body model",
+                                                "space body texture was not present in final atlas"});
+    }
+    const render::EntityModelID model_id = space_body_model_id(space_body_texture_index++);
+    auto textured_space_body_model = build_space_body_model(model_id, texture, *entry);
+    if (!textured_space_body_model) {
+      return EntityRenderAssetsResult::failure({texture,
+                                                {},
+                                                "build space body model",
+                                                textured_space_body_model.error().message});
+    }
+    assets.space_body_model_by_texture.emplace(texture, model_id);
+    assets.models.push_back(std::move(textured_space_body_model.value()));
+  }
 
   for (u32 variant_value = 0; variant_value < block_registry.variant_count(); ++variant_value) {
     const voxel::BlockVariantID variant_id{variant_value};
@@ -1191,7 +1269,13 @@ ClientEntityRenderAssetsResult load_client_entity_render_assets(
       block_render_data,
       block_models,
       options.outline_config,
-      options.atlas_options);
+      options.atlas_options,
+      std::span<const GeneratedTextureAsset>{
+          options.generated_textures.data(),
+          options.generated_textures.size()},
+      std::span<const std::string>{
+          options.space_body_texture_assets.data(),
+          options.space_body_texture_assets.size()});
   if (!render_assets) {
     return asset_failure("entities", render_assets.error().message);
   }

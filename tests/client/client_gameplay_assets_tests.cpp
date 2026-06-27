@@ -61,6 +61,20 @@ TEST(ClientGameplayAssetsTests, LoadsEntityItemAnimationAndUiTextureAssetsTogeth
   ASSERT_TRUE(gameplay_assets) << gameplay_assets.error().message;
   EXPECT_EQ(builder_calls, 1);
   EXPECT_FALSE(gameplay_assets.value().entity_assets.render_assets.models.empty());
+  const arv::client::EntityRenderAssets& render_assets =
+      gameplay_assets.value().entity_assets.render_assets;
+  EXPECT_NE(
+      render_assets.space_body_model_by_texture.find("arvane:textures/space_body/overworld"),
+      render_assets.space_body_model_by_texture.end());
+  EXPECT_NE(
+      render_assets.space_body_model_by_texture.find("arvane:textures/space_body/luna"),
+      render_assets.space_body_model_by_texture.end());
+  const arv::asset::TextureAtlasEntry* overworld_space_texture =
+      render_assets.texture_atlas.find("arvane:textures/space_body/overworld");
+  ASSERT_NE(overworld_space_texture, nullptr);
+  EXPECT_EQ(overworld_space_texture->width, 128U);
+  EXPECT_EQ(overworld_space_texture->height, 64U);
+  EXPECT_FALSE(overworld_space_texture->fallback);
   EXPECT_FALSE(gameplay_assets.value().entity_assets.vehicle_registry.records().empty());
   EXPECT_GT(gameplay_assets.value().item_animation_library.clip_count(), 0U);
   EXPECT_FALSE(gameplay_assets.value().ui_texture_assets.item_atlas.pages.empty());
