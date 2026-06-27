@@ -669,6 +669,7 @@ TEST(ClientFrameComposerTests, AppendsSpaceBodyDrawsWithoutChunkGeometry) {
   arv::render::FramePacket frame;
   frame.world_view.world_id = arv::WorldID{2U};
   frame.camera = make_forward_camera();
+  frame.camera.far_plane = 1000.0F;
 
   const arv::client::ClientEntityFrameResult result =
       arv::client::append_client_entity_frame_draws(
@@ -685,6 +686,10 @@ TEST(ClientFrameComposerTests, AppendsSpaceBodyDrawsWithoutChunkGeometry) {
   EXPECT_TRUE(frame.transparent_chunks.empty());
   ASSERT_EQ(frame.entities.size(), 1U);
   EXPECT_EQ(frame.entities.front().model_id, (arv::render::EntityModelID{77U}));
-  EXPECT_EQ(frame.entities.front().position, (arv::Vec3f{2200.0F, 0.0F, 700.0F}));
-  EXPECT_FLOAT_EQ(frame.entities.front().scale, 180.0F);
+  EXPECT_LT(
+      arv::distance(frame.entities.front().position, frame.camera.position),
+      frame.camera.far_plane);
+  EXPECT_NE(frame.entities.front().position, (arv::Vec3f{2200.0F, 0.0F, 700.0F}));
+  EXPECT_GT(frame.entities.front().scale, 20.0F);
+  EXPECT_LT(frame.entities.front().scale, 180.0F);
 }

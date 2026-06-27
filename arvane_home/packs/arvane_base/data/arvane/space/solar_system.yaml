@@ -15,4 +15,3 @@ space:
   bodies:
     - arvane:space_body/overworld
     - arvane:space_body/luna
-    - arvane:space_body/research_station

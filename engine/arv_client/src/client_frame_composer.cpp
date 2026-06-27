@@ -17,6 +17,10 @@ constexpr f32 ContactShadowMinAlpha = 0.01F;
 constexpr f32 ReplicatedEntityContactShadowAlpha = 0.32F;
 constexpr f32 DroppedItemContactShadowAlpha = 0.22F;
 constexpr f32 BlockAttachedContactShadowAlpha = 0.18F;
+constexpr f32 SpaceBodyShellDistanceFraction = 0.65F;
+constexpr f32 SpaceBodyShellSafetyMargin = 96.0F;
+constexpr f32 SpaceBodyMinRenderedRadius = 18.0F;
+constexpr f32 SpaceBodyMaxRenderedRadiusFraction = 0.25F;
 
 [[nodiscard]] bool can_append_contact_shadow(
     const render::FramePacket& frame,
@@ -44,6 +48,43 @@ constexpr f32 BlockAttachedContactShadowAlpha = 0.18F;
       {position.x + DefaultBox.x * 0.5F,
        position.y + DefaultBox.y,
        position.z + DefaultBox.z * 0.5F}};
+}
+
+struct SpaceBodyDrawPlacement {
+  Vec3f position{};
+  f32 scale{1.0F};
+};
+
+[[nodiscard]] SpaceBodyDrawPlacement space_body_draw_placement(
+    const render::FramePacket& frame,
+    const protocol::ClientboundSpaceBodyView& body) noexcept {
+  const f32 visual_radius = std::max(1.0F, body.visual_radius);
+  const Vec3f camera_position =
+      finite(frame.camera.position) ? frame.camera.position : frame.world_view.position;
+  const f32 far_plane =
+      std::isfinite(frame.camera.far_plane)
+          ? std::max(frame.camera.far_plane, 16.0F)
+          : std::max(frame.world_view.far_plane, 16.0F);
+  const Vec3f to_body = body.position - camera_position;
+  const f32 distance_to_body = length(to_body);
+  if (!std::isfinite(distance_to_body) || distance_to_body <= 0.001F ||
+      distance_to_body + visual_radius <= far_plane - SpaceBodyShellSafetyMargin) {
+    return {body.position, visual_radius * 2.0F};
+  }
+
+  const Vec3f direction = normalize_or_zero(to_body);
+  if (length(direction) <= 0.0F) {
+    return {body.position, visual_radius * 2.0F};
+  }
+  const f32 shell_distance = std::clamp(
+      far_plane * SpaceBodyShellDistanceFraction,
+      64.0F,
+      std::max(64.0F, far_plane - SpaceBodyShellSafetyMargin));
+  const f32 projected_radius = std::clamp(
+      visual_radius * shell_distance / distance_to_body,
+      SpaceBodyMinRenderedRadius,
+      shell_distance * SpaceBodyMaxRenderedRadiusFraction);
+  return {camera_position + direction * shell_distance, projected_radius * 2.0F};
 }
 
 [[nodiscard]] Aabb3f replicated_entity_bounds_for(
@@ -392,8 +433,9 @@ usize append_space_body_draws(
     }
     render::EntityDrawItem item;
     item.model_id = entity_render_assets.space_body_model;
-    item.position = body.position;
-    item.scale = std::max(1.0F, body.visual_radius * 2.0F);
+    const SpaceBodyDrawPlacement placement = space_body_draw_placement(frame, body);
+    item.position = placement.position;
+    item.scale = std::max(1.0F, placement.scale);
     frame.entities.push_back(std::move(item));
   }
   return frame.entities.size() - before;

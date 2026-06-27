@@ -121,14 +121,14 @@ TEST(SpaceDefinitionTests, LoadsBasePackSolarSystemDefinitions) {
   ASSERT_TRUE(registry) << registry.error().describe();
   EXPECT_GE(registry.value().world_count(), 3U);
   EXPECT_GE(registry.value().environment_count(), 3U);
-  EXPECT_GE(registry.value().space_body_count(), 3U);
+  EXPECT_EQ(registry.value().space_body_count(), 2U);
 
   const arv::world::WorldDefinition* solar =
       registry.value().find_world("arvane:space/solar_system");
   ASSERT_NE(solar, nullptr);
   EXPECT_EQ(solar->kind, arv::world::WorldDefinitionKind::Space);
   ASSERT_TRUE(solar->space.has_value());
-  EXPECT_EQ(solar->space->bodies.size(), 3U);
+  EXPECT_EQ(solar->space->bodies.size(), 2U);
 
   const arv::world::WorldDefinition* luna =
       registry.value().find_world("arvane:world/luna");
@@ -165,13 +165,9 @@ TEST(SpaceDefinitionTests, LoadsBasePackSolarSystemDefinitions) {
           overworld_body->position),
       overworld_body->entry_radius * overworld_body->entry_radius);
 
-  const arv::world::SpaceBodyDefinition* station =
-      registry.value().find_space_body("arvane:space_body/research_station");
-  ASSERT_NE(station, nullptr);
-  EXPECT_EQ(station->type, arv::world::SpaceBodyType::Station);
-  EXPECT_EQ(station->space_world, "arvane:space/solar_system");
-  EXPECT_FALSE(station->entry.enabled);
-  EXPECT_EQ(station->entry.mode, arv::world::SpaceBodyEntryMode::Disabled);
+  EXPECT_EQ(
+      registry.value().find_space_body("arvane:space_body/research_station"),
+      nullptr);
 }
 
 TEST(SpaceDefinitionTests, EmptyPackLoadsEmptyRegistry) {
