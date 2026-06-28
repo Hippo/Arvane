@@ -1747,8 +1747,11 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
   EXPECT_FLOAT_EQ(luna_world->environment().gravity_scale, 0.18F);
   EXPECT_FALSE(luna_world->environment().has_oxygen);
 
-  EXPECT_FALSE(space_world->entity_exists(rocket));
-  EXPECT_FALSE(space_world->entity_for_player(player_id).has_value());
+  const arv::server::WorldRecord* stopped_space_record =
+      harness.server.worlds().find("solar_system");
+  ASSERT_NE(stopped_space_record, nullptr);
+  EXPECT_EQ(stopped_space_record->state, arv::server::WorldRuntimeState::Stopped);
+  EXPECT_EQ(harness.server.world_runtime(stopped_space_record->id), nullptr);
   const arv::player::PlayerState* target_player =
       luna_world->find_player(player_id);
   ASSERT_NE(target_player, nullptr);
@@ -1799,6 +1802,56 @@ TEST(CommandTests, PlanetEntryTransitionsMountedRocketToTargetWorld) {
   EXPECT_EQ(harness.client.mounted_vehicle_id(), target_rocket_net);
   EXPECT_EQ(std::string{harness.client.mounted_seat_id()}, "pilot");
   EXPECT_TRUE(harness.client.mounted_controls_vehicle());
+}
+
+TEST(CommandTests, PlanetEntryPrewarmsTargetWorldWhenApproachingBody) {
+  RunningServerHarness harness;
+
+  const arv::server::WorldRecord* space_record =
+      create_and_load_command_test_space_world(harness);
+  ASSERT_NE(space_record, nullptr);
+  arv::command::CommandResult result = harness.server.execute_command(
+      arv::server::server_console_command_sender(),
+      "/world tp solar_system local_player");
+  ASSERT_EQ(result.status, arv::command::CommandStatus::Success);
+  pump_client_until_ingame(harness.server, harness.client);
+
+  const std::vector<arv::SessionID> session_ids =
+      harness.server.sessions().session_ids();
+  ASSERT_EQ(session_ids.size(), 1U);
+  const arv::server::ServerSession* session =
+      harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  const arv::PlayerID player_id = session->player_id;
+  ASSERT_EQ(session->world_id, space_record->id);
+
+  arv::world::WorldRuntime* space_world =
+      harness.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> player_entity =
+      space_world->entity_for_player(player_id);
+  ASSERT_TRUE(player_entity.has_value());
+
+  const arv::EntityID rocket = create_command_test_rocket(
+      *space_world,
+      harness.vehicle_registry,
+      {2380.0F, 0.0F, 700.0F});
+  ASSERT_TRUE(space_world->mount_entity(
+      rocket,
+      player_entity.value(),
+      "pilot"));
+
+  harness.server.tick();
+
+  const arv::server::WorldRecord* luna_record =
+      harness.server.worlds().find("luna");
+  ASSERT_NE(luna_record, nullptr);
+  EXPECT_EQ(luna_record->state, arv::server::WorldRuntimeState::Running);
+  EXPECT_NE(harness.server.world_runtime(luna_record->id), nullptr);
+  session = harness.server.sessions().find(session_ids.front());
+  ASSERT_NE(session, nullptr);
+  EXPECT_EQ(session->world_id, space_record->id);
+  EXPECT_EQ(harness.client.camera().world_id(), space_record->id);
 }
 
 TEST(CommandTests, PlanetEntryRequiresEnabledBody) {
@@ -1986,12 +2039,17 @@ TEST(CommandTests, PlanetEntryReconnectsInTargetWorldAfterRestart) {
   const arv::server::WorldRecord* restarted_luna =
       restarted.worlds().find("luna");
   ASSERT_NE(restarted_luna, nullptr);
-  ASSERT_EQ(restarted_luna->state, arv::server::WorldRuntimeState::Running);
+  ASSERT_EQ(restarted_luna->state, arv::server::WorldRuntimeState::Stopped);
+  ASSERT_EQ(restarted.world_runtime(luna_world_id), nullptr);
 
   ASSERT_TRUE(reconnected.connect_integrated());
   complete_integrated_handshake(restarted, reconnected);
   ASSERT_EQ(reconnected.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(reconnected.camera().world_id(), luna_world_id);
+  restarted_luna = restarted.worlds().find("luna");
+  ASSERT_NE(restarted_luna, nullptr);
+  EXPECT_EQ(restarted_luna->state, arv::server::WorldRuntimeState::Running);
+  EXPECT_NE(restarted.world_runtime(luna_world_id), nullptr);
 
   const std::vector<arv::SessionID> restarted_session_ids =
       restarted.sessions().session_ids();
@@ -2056,12 +2114,17 @@ TEST(CommandTests, WorldCommandTransitionReconnectsInTargetWorld) {
   const arv::server::WorldRecord* restarted_record =
       restarted.worlds().find("reconnect_world");
   ASSERT_NE(restarted_record, nullptr);
-  ASSERT_EQ(restarted_record->state, arv::server::WorldRuntimeState::Running);
+  ASSERT_EQ(restarted_record->state, arv::server::WorldRuntimeState::Stopped);
+  ASSERT_EQ(restarted.world_runtime(reconnect_world_id), nullptr);
 
   ASSERT_TRUE(reconnected.connect_integrated());
   complete_integrated_handshake(restarted, reconnected);
   ASSERT_EQ(reconnected.connection_state(), arv::net::ConnectionState::InGame);
   EXPECT_EQ(reconnected.camera().world_id(), reconnect_world_id);
+  restarted_record = restarted.worlds().find("reconnect_world");
+  ASSERT_NE(restarted_record, nullptr);
+  EXPECT_EQ(restarted_record->state, arv::server::WorldRuntimeState::Running);
+  EXPECT_NE(restarted.world_runtime(reconnect_world_id), nullptr);
 
   const std::vector<arv::SessionID> session_ids =
       restarted.sessions().session_ids();

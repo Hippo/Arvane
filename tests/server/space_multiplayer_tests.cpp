@@ -824,8 +824,11 @@ TEST(SpaceMultiplayerTests, LaunchedRocketCanEnterMoonAndStayMounted) {
   alice_session = fixture.session("Alice");
   ASSERT_NE(alice_session, nullptr);
   EXPECT_EQ(alice_session->world_id, luna_record->id);
-  EXPECT_FALSE(space_world->entity_exists(space_rocket.value()));
-  EXPECT_FALSE(space_world->entity_for_player(alice_session->player_id).has_value());
+  const arv::server::WorldRecord* stopped_space_record =
+      fixture.server.worlds().find("solar_system");
+  ASSERT_NE(stopped_space_record, nullptr);
+  EXPECT_EQ(stopped_space_record->state, arv::server::WorldRuntimeState::Stopped);
+  EXPECT_EQ(fixture.server.world_runtime(stopped_space_record->id), nullptr);
 
   const std::optional<arv::EntityID> luna_alice =
       luna_world->entity_for_player(alice_session->player_id);

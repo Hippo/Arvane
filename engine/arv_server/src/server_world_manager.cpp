@@ -600,6 +600,12 @@ void apply_definition_environment(
   return position;
 }
 
+[[nodiscard]] f32 planet_entry_prewarm_radius(
+    const world::SpaceBodyDefinition& body) noexcept {
+  const f32 entry_radius = std::max(0.0F, body.entry_radius);
+  return entry_radius + std::max(entry_radius, 128.0F);
+}
+
 struct EntityTransferSnapshot {
   EntityID source_entity{};
   std::optional<EntityNetID> source_net_id{};
@@ -967,6 +973,56 @@ void ensure_launch_vehicle_fuel_state(
   return players;
 }
 
+[[nodiscard]] command::SaveAllCommandResult save_world_runtime_to_disk(
+    const std::filesystem::path& server_save_root,
+    const WorldRecord& record,
+    const world::WorldRuntime& runtime,
+    std::span<const persistence::PlayerSaveData> players,
+    const persistence::SaveMetadata& save_metadata,
+    const voxel::BlockRegistry& block_registry,
+    const player::ItemRegistry& item_registry) {
+  command::SaveAllCommandResult out;
+  const std::vector<persistence::SavedChunkSection> chunks =
+      capture_saved_chunks(runtime);
+  const std::vector<entity::PersistentEntityRecord> entities =
+      runtime.persistent_entity_records();
+  const world::WorldGenerationConfig* active_generation =
+      runtime.generation_config();
+  const world::WorldHeightSettings height = runtime.height_settings();
+  persistence::WorldMetadata world_metadata{
+      record.name,
+      runtime.generation_seed(),
+      runtime.tick_index(),
+      active_generation == nullptr ? world::WorldGenerationConfig{}
+                                   : *active_generation,
+      height.min_chunk_y,
+      height.max_chunk_y,
+      persistence::hash_block_registry(block_registry),
+      persistence::hash_item_registry(item_registry),
+      runtime.clock(),
+      {},
+      true,
+      runtime.spawn_point()};
+  auto saved = persistence::save_server_root(
+      server_save_root,
+      save_metadata,
+      world_metadata,
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry);
+  if (!saved) {
+    out.message = saved.error().message;
+    return out;
+  }
+  out.success = true;
+  out.saved_chunks = static_cast<u32>(chunks.size());
+  out.saved_entities = static_cast<u32>(entities.size());
+  out.saved_players = static_cast<u32>(players.size());
+  return out;
+}
+
 void restore_loaded_save_into_world(
     world::WorldRuntime& runtime,
     const persistence::LoadedSaveData& loaded_save,
@@ -1171,47 +1227,157 @@ command::SaveAllCommandResult ServerRuntimeImpl::save_all_worlds_from_command(bo
       out.message = "Cannot save an unregistered loaded world.";
       return out;
     }
-    const std::vector<persistence::SavedChunkSection> chunks =
-        capture_saved_chunks(*runtime);
-    const std::vector<entity::PersistentEntityRecord> entities =
-        runtime->persistent_entity_records();
-    const world::WorldGenerationConfig* active_generation =
-        runtime->generation_config();
-    const world::WorldHeightSettings height = runtime->height_settings();
-    persistence::WorldMetadata world_metadata{
-        record->name,
-        runtime->generation_seed(),
-        runtime->tick_index(),
-        active_generation == nullptr ? world::WorldGenerationConfig{}
-                                     : *active_generation,
-        height.min_chunk_y,
-        height.max_chunk_y,
-        persistence::hash_block_registry(*block_registry_),
-        persistence::hash_item_registry(*item_registry_),
-        runtime->clock(),
-        {},
-        true,
-        runtime->spawn_point()};
-    auto saved = persistence::save_server_root(
+    command::SaveAllCommandResult saved = save_world_runtime_to_disk(
         server_save_root_,
-        save_metadata,
-        world_metadata,
-        chunks,
+        *record,
+        *runtime,
         players,
-        entities,
+        save_metadata,
         *block_registry_,
         *item_registry_);
-    if (!saved) {
-      out.message = saved.error().message;
+    if (!saved.success) {
+      out.message = saved.message;
       return out;
     }
-    out.saved_chunks += static_cast<u32>(chunks.size());
-    out.saved_entities += static_cast<u32>(entities.size());
+    out.saved_chunks += saved.saved_chunks;
+    out.saved_entities += saved.saved_entities;
   }
 
   out.success = true;
   out.saved_players = static_cast<u32>(players.size());
   return out;
+}
+
+command::SaveAllCommandResult ServerRuntimeImpl::save_loaded_world(
+    WorldID world_id,
+    bool flush) {
+  command::SaveAllCommandResult out;
+  out.flushed = flush;
+  if (server_save_root_.empty()) {
+    out.message = "Server save root is not configured.";
+    return out;
+  }
+  if (block_registry_ == nullptr || item_registry_ == nullptr) {
+    out.message = "Cannot save without block and item registries.";
+    return out;
+  }
+  world::WorldRuntime* runtime = world_by_id(world_id);
+  if (runtime == nullptr) {
+    out.message = "Cannot save an unloaded world.";
+    return out;
+  }
+  const WorldRecord* record = worlds_.find(world_id);
+  if (record == nullptr) {
+    out.message = "Cannot save an unregistered loaded world.";
+    return out;
+  }
+
+  if (flush) {
+    world_jobs_.schedule_generation_jobs(
+        *runtime,
+        chunk_streamer_,
+        chunk_generation_,
+        std::numeric_limits<u32>::max(),
+        false);
+    world_jobs_.join_pending_jobs();
+    world_jobs_.drain_generation_jobs(*runtime, true);
+    world_jobs_.schedule_fluid_jobs(*runtime, block_registry_, fluid_definition_);
+    world_jobs_.schedule_lighting_jobs(*runtime, block_registry_);
+    world_jobs_.join_pending_jobs();
+    world_jobs_.drain_fluid_jobs(*runtime, fluid_definition_, true);
+    world_jobs_.drain_lighting_jobs(*runtime, true);
+  }
+
+  const std::vector<persistence::PlayerSaveData> players =
+      collect_player_saves(
+          player_saves_,
+          sessions_,
+          worlds_,
+          *this,
+          world_name_);
+  const persistence::SaveMetadata save_metadata{
+      persistence::CurrentSaveFormatVersion,
+      std::string{persistence::CurrentGameVersion},
+      persistence::hash_block_registry(*block_registry_),
+      persistence::hash_item_registry(*item_registry_),
+      server_save_display_name_};
+  out = save_world_runtime_to_disk(
+      server_save_root_,
+      *record,
+      *runtime,
+      players,
+      save_metadata,
+      *block_registry_,
+      *item_registry_);
+  out.flushed = flush;
+  return out;
+}
+
+void ServerRuntimeImpl::save_and_unload_world_if_idle_after_exit(WorldID world_id) {
+  if (server_save_root_.empty() || block_registry_ == nullptr ||
+      item_registry_ == nullptr) {
+    return;
+  }
+  WorldRecord* record = worlds_.find(world_id);
+  world::WorldRuntime* runtime = world_by_id(world_id);
+  if (record == nullptr || runtime == nullptr) {
+    return;
+  }
+  if (player_count_for_world(sessions_, world_id) > 0U) {
+    return;
+  }
+
+  command::SaveAllCommandResult saved = save_loaded_world(world_id, true);
+  if (!saved.success) {
+    core::warn(
+        "worlds",
+        "failed to save world '{}' after exit: {}",
+        record->name,
+        saved.message);
+    return;
+  }
+  if (world_id == DefaultWorldID || record->is_default) {
+    return;
+  }
+
+  const std::string unloaded_name = record->name;
+  loaded_worlds_.erase(world_id);
+  record = worlds_.find(world_id);
+  if (record != nullptr) {
+    record->state = WorldRuntimeState::Stopped;
+    record->load_on_start = false;
+  }
+  if (!save_registry_index(server_save_root_, worlds_)) {
+    core::warn(
+        "worlds",
+        "unloaded world '{}' after exit, but failed to persist registry metadata",
+        unloaded_name);
+    return;
+  }
+  core::info("worlds", "saved and unloaded idle world '{}' after exit", unloaded_name);
+}
+
+void ServerRuntimeImpl::queue_save_and_unload_world_if_idle_after_exit(WorldID world_id) {
+  if (world_id.value == 0U || server_save_root_.empty() ||
+      block_registry_ == nullptr || item_registry_ == nullptr) {
+    return;
+  }
+  pending_idle_world_exits_.push_back(world_id);
+}
+
+void ServerRuntimeImpl::drain_idle_world_exit_saves() {
+  if (pending_idle_world_exits_.empty()) {
+    return;
+  }
+  std::vector<WorldID> pending = std::move(pending_idle_world_exits_);
+  pending_idle_world_exits_.clear();
+  std::sort(pending.begin(), pending.end(), [](WorldID lhs, WorldID rhs) {
+    return lhs.value < rhs.value;
+  });
+  pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
+  for (const WorldID world_id : pending) {
+    save_and_unload_world_if_idle_after_exit(world_id);
+  }
 }
 
 std::optional<world::WorldGenerationConfig>
@@ -1688,7 +1854,7 @@ command::WorldOperationCommandResult ServerRuntimeImpl::unload_world_from_comman
       }
     }
   }
-  command::SaveAllCommandResult saved = save_all_worlds_from_command(true);
+  command::SaveAllCommandResult saved = save_loaded_world(record->id, true);
   if (!saved.success) {
     return op_failure("Failed to save world '" + record->name + "' before unload: " + saved.message);
   }
@@ -1887,6 +2053,7 @@ void ServerRuntimeImpl::tick_space_exit_transitions() {
     return;
   }
 
+  std::vector<WorldID> exited_worlds;
   const std::vector<world::WorldRuntime*> worlds = loaded_worlds();
   for (world::WorldRuntime* runtime : worlds) {
     if (runtime == nullptr) {
@@ -2121,7 +2288,17 @@ void ServerRuntimeImpl::tick_space_exit_transitions() {
           target_definition->id,
           transform->position.y,
           launch_velocity.y);
+      exited_worlds.push_back(runtime->id());
     }
+  }
+  std::sort(exited_worlds.begin(), exited_worlds.end(), [](WorldID lhs, WorldID rhs) {
+    return lhs.value < rhs.value;
+  });
+  exited_worlds.erase(
+      std::unique(exited_worlds.begin(), exited_worlds.end()),
+      exited_worlds.end());
+  for (const WorldID world_id : exited_worlds) {
+    queue_save_and_unload_world_if_idle_after_exit(world_id);
   }
 }
 
@@ -2131,6 +2308,7 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
     return;
   }
 
+  std::vector<WorldID> exited_worlds;
   const std::vector<world::WorldRuntime*> worlds = loaded_worlds();
   for (world::WorldRuntime* runtime : worlds) {
     if (runtime == nullptr) {
@@ -2191,8 +2369,49 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
           continue;
         }
         const f32 entry_radius = std::max(0.0F, body->entry_radius);
-        if (distance_squared(transform->position, body->position) >
-            entry_radius * entry_radius) {
+        const f32 distance_to_body_sq =
+            distance_squared(transform->position, body->position);
+        if (distance_to_body_sq > entry_radius * entry_radius) {
+          const f32 prewarm_radius = planet_entry_prewarm_radius(*body);
+          if (distance_to_body_sq <= prewarm_radius * prewarm_radius &&
+              body->entry.enabled &&
+              body->entry.mode == world::SpaceBodyEntryMode::FixedSpawn &&
+              vehicle_satisfies_required_tags(
+                  *runtime,
+                  entity,
+                  *vehicle_definition,
+                  body->entry.require_vehicle_tags)) {
+            const world::WorldDefinition* prewarm_definition =
+                space_definitions_->find_world(body->target_world);
+            if (prewarm_definition != nullptr &&
+                prewarm_definition->kind == world::WorldDefinitionKind::Planet) {
+              WorldRecord* prewarm_record =
+                  find_world_record_for_definition_id(
+                      worlds_,
+                      prewarm_definition->id);
+              if (prewarm_record == nullptr) {
+                command::WorldCreateCommandRequest create_request;
+                create_request.name =
+                    world_runtime_name_for_definition_id(prewarm_definition->id);
+                create_request.world_type = std::string{"default"};
+                if (!prewarm_definition->worldgen.empty()) {
+                  create_request.generator_id = prewarm_definition->worldgen;
+                }
+                command::WorldOperationCommandResult created =
+                    create_world_from_command(create_request);
+                if (created.success) {
+                  prewarm_record =
+                      find_world_record_for_definition_id(
+                          worlds_,
+                          prewarm_definition->id);
+                }
+              }
+              if (prewarm_record != nullptr &&
+                  prewarm_record->state != WorldRuntimeState::Running) {
+                (void)load_world_from_command(prewarm_record->name);
+              }
+            }
+          }
           continue;
         }
         if (!body->entry.enabled ||
@@ -2391,6 +2610,7 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
             source_definition->id,
             body->id,
             target_definition->id);
+        exited_worlds.push_back(runtime->id());
         transitioned = true;
         break;
       }
@@ -2398,6 +2618,15 @@ void ServerRuntimeImpl::tick_planet_entry_transitions() {
         continue;
       }
     }
+  }
+  std::sort(exited_worlds.begin(), exited_worlds.end(), [](WorldID lhs, WorldID rhs) {
+    return lhs.value < rhs.value;
+  });
+  exited_worlds.erase(
+      std::unique(exited_worlds.begin(), exited_worlds.end()),
+      exited_worlds.end());
+  for (const WorldID world_id : exited_worlds) {
+    queue_save_and_unload_world_if_idle_after_exit(world_id);
   }
 }
 

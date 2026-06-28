@@ -448,6 +448,12 @@ struct ServerRuntimeImpl {
       std::string_view name) const;
   [[nodiscard]] std::optional<std::string> default_world_name_for_command() const;
   [[nodiscard]] command::SaveAllCommandResult save_all_worlds_from_command(bool flush);
+  [[nodiscard]] command::SaveAllCommandResult save_loaded_world(
+      WorldID world_id,
+      bool flush);
+  void queue_save_and_unload_world_if_idle_after_exit(WorldID world_id);
+  void drain_idle_world_exit_saves();
+  void save_and_unload_world_if_idle_after_exit(WorldID world_id);
   [[nodiscard]] command::WorldOperationCommandResult create_world_from_command(
       const command::WorldCreateCommandRequest& request);
   [[nodiscard]] command::WorldOperationCommandResult load_world_from_command(
@@ -803,6 +809,7 @@ struct ServerRuntimeImpl {
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
   StableHashMap<WorldID, std::unique_ptr<world::WorldRuntime>> loaded_worlds_;
+  std::vector<WorldID> pending_idle_world_exits_;
   world::NaturalSpawnSystem natural_spawns_{};
   world::WorldTickPolicy world_tick_policy_{};
   std::vector<net::NetworkEvent> inbound_events_;

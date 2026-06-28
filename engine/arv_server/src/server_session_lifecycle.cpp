@@ -290,7 +290,20 @@ bool ServerRuntimeImpl::complete_authenticated_session(ServerSession& session) {
   if (const std::optional<std::string> saved_world_name =
           player_saves_.world_name_for(session);
       saved_world_name.has_value()) {
-    const WorldRecord* saved_world = worlds_.find(saved_world_name.value());
+    WorldRecord* saved_world = worlds_.find(saved_world_name.value());
+    if (saved_world != nullptr && world_by_id(saved_world->id) == nullptr) {
+      command::WorldOperationCommandResult loaded =
+          load_world_from_command(saved_world->name);
+      if (!loaded.success) {
+        core::warn(
+            "worlds",
+            "failed to load saved player world '{}' for profile '{}': {}",
+            saved_world->name,
+            session.profile_id.string(),
+            loaded.message);
+      }
+      saved_world = worlds_.find(saved_world_name.value());
+    }
     if (saved_world != nullptr && world_by_id(saved_world->id) != nullptr) {
       session.world_id = saved_world->id;
     }
@@ -550,6 +563,7 @@ void ServerRuntimeImpl::handle_connection_lost(net::ConnectionID connection_id) 
 }
 
 void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
+  std::optional<WorldID> exited_world_id;
   if (const ServerSession* session = sessions_.find_by_connection(connection_id);
       session != nullptr) {
     remove_online_profile_for_session(*session);
@@ -577,6 +591,9 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
     skin_transfers_.erase(session->session_id);
     chat_rate_limits_.erase(session->session_id);
     world::WorldRuntime* runtime = world_for_session(*session);
+    if (runtime != nullptr && session->authenticated) {
+      exited_world_id = session->world_id;
+    }
     if (const player::PlayerState* player_state =
             runtime == nullptr ? nullptr : runtime->find_player(session->player_id);
         player_state != nullptr) {
@@ -594,6 +611,9 @@ void ServerRuntimeImpl::cleanup_connection(net::ConnectionID connection_id) {
     }
   }
   sessions_.remove_by_connection(connection_id);
+  if (exited_world_id.has_value()) {
+    queue_save_and_unload_world_if_idle_after_exit(exited_world_id.value());
+  }
 }
 
 void ServerRuntimeImpl::send_keep_alive(

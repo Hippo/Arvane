@@ -716,20 +716,16 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       start_info.saved_players.end());
   block_registry_ = start_info.block_registry;
   item_registry_ = start_info.item_registry;
-  if (!server_save_root_.empty() &&
-      block_registry_ != nullptr &&
-      item_registry_ != nullptr) {
-    auto loaded_save_result = persistence::load_server_root(
+  if (!server_save_root_.empty() && item_registry_ != nullptr) {
+    auto loaded_players_result = persistence::load_server_player_saves(
         server_save_root_,
-        *block_registry_,
         *item_registry_);
-    if (loaded_save_result) {
+    if (loaded_players_result) {
       std::vector<ServerPlayerSaveState> disk_player_saves;
       disk_player_saves.reserve(
-          loaded_save_result.value().players.size() +
+          loaded_players_result.value().size() +
           initial_player_saves.size());
-      for (const persistence::PlayerSaveData& player :
-           loaded_save_result.value().players) {
+      for (const persistence::PlayerSaveData& player : loaded_players_result.value()) {
         disk_player_saves.push_back(server_player_save_from_persistence(player));
       }
       disk_player_saves.insert(
@@ -741,7 +737,7 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
       core::warn(
           "persistence",
           "failed to load player save cache: {}",
-          loaded_save_result.error().message);
+          loaded_players_result.error().message);
     }
   }
   player_saves_.load(initial_player_saves);
@@ -829,18 +825,6 @@ net::NetworkResult ServerRuntimeImpl::start(const ServerStartInfo& start_info) {
   default_world_.set_tick_index(tick_index_);
   default_world_.set_tick_policy(tick_policy);
   initialize_world_registry(start_info);
-  const std::vector<WorldRecord> startup_worlds = worlds_.records();
-  for (const WorldRecord& record : startup_worlds) {
-    if (!record.load_on_start || record.id == DefaultWorldID ||
-        record.state == WorldRuntimeState::Running) {
-      continue;
-    }
-    command::WorldOperationCommandResult loaded =
-        load_world_from_command(record.name);
-    if (!loaded.success) {
-      core::warn("worlds", "failed to load world '{}': {}", record.name, loaded.message);
-    }
-  }
   handshake_policy_.server_name =
       mode_ == ServerMode::Dedicated
           ? arv::text::text_or_fallback(language_, "server.name.dedicated", "Arvane Dedicated Server")
@@ -1170,6 +1154,7 @@ void ServerRuntimeImpl::tick() {
   send_dropped_item_replication();
   send_inventory_updates();
   send_text_variable_updates();
+  drain_idle_world_exit_saves();
   ++tick_index_;
 }
 
@@ -1189,6 +1174,7 @@ void ServerRuntimeImpl::pump_integrated_network_frame() {
   tick_keep_alive();
   send_inventory_updates();
   send_text_variable_updates();
+  drain_idle_world_exit_saves();
 }
 
 void ServerRuntimeImpl::shutdown() {
@@ -1212,6 +1198,7 @@ void ServerRuntimeImpl::shutdown() {
           arv::text::text_or_fallback(language_, "server.disconnect.shutting_down", "Server is shutting down."));
     }
   }
+  drain_idle_world_exit_saves();
   world_jobs_.wait_for_all();
   for (world::WorldRuntime* runtime : loaded_worlds()) {
     world_jobs_.drain_generation_jobs(*runtime, true);

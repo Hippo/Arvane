@@ -112,6 +112,11 @@ struct WorldFileOperationOptions {
 void upsert_player_save(
     std::vector<PlayerSaveData>& players,
     PlayerSaveData save);
+[[nodiscard]] Expected<std::vector<PlayerSaveData>, PersistenceError>
+load_server_player_saves(
+    const std::filesystem::path& root,
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options = {});
 [[nodiscard]] std::vector<SavedServerSummary> discover_saved_servers(
     const std::filesystem::path& saves_root);
 [[nodiscard]] std::vector<SavedWorldSummary> discover_saved_worlds(

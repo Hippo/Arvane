@@ -1090,6 +1090,55 @@ void upsert_player_save(
   }
 }
 
+Expected<std::vector<PlayerSaveData>, PersistenceError> load_server_player_saves(
+    const std::filesystem::path& root,
+    const player::ItemRegistry& item_registry,
+    WorldFileOperationOptions options) {
+  try {
+    std::vector<PlayerSaveData> players;
+    const std::filesystem::path players_dir = root / "players";
+    if (!std::filesystem::exists(players_dir)) {
+      return Expected<std::vector<PlayerSaveData>, PersistenceError>::success(
+          std::move(players));
+    }
+    if (!std::filesystem::is_directory(players_dir)) {
+      return Expected<std::vector<PlayerSaveData>, PersistenceError>::success(
+          std::move(players));
+    }
+
+    std::vector<std::filesystem::path> player_paths;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(players_dir)) {
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+      player_paths.push_back(entry.path());
+    }
+    std::sort(player_paths.begin(), player_paths.end());
+
+    auto player_results = collect_world_file_jobs<
+        std::filesystem::path,
+        PlayerSaveData>(
+        std::span<const std::filesystem::path>{player_paths},
+        options,
+        [&](const std::filesystem::path& path) {
+          return load_player_save_file(path, item_registry);
+        });
+    if (!player_results) {
+      return Expected<std::vector<PlayerSaveData>, PersistenceError>::failure(
+          player_results.error());
+    }
+    for (PlayerSaveData& player_save : player_results.value()) {
+      players.push_back(std::move(player_save));
+    }
+    return Expected<std::vector<PlayerSaveData>, PersistenceError>::success(
+        std::move(players));
+  } catch (const std::exception& ex) {
+    return Expected<std::vector<PlayerSaveData>, PersistenceError>::failure(
+        PersistenceError{"failed to load player save data: " + std::string{ex.what()}});
+  }
+}
+
 u64 hash_block_registry(const voxel::BlockRegistry& registry) noexcept {
   u64 hash = 14695981039346656037ULL;
   for (u32 index = 0; index < registry.variant_count(); ++index) {
@@ -1575,30 +1624,13 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
       }
     }
 
-    const std::filesystem::path players_dir = root / "players";
-    if (std::filesystem::exists(players_dir)) {
-      std::vector<std::filesystem::path> player_paths;
-      for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(players_dir)) {
-        if (!entry.is_regular_file()) {
-          continue;
-        }
-        player_paths.push_back(entry.path());
-      }
-      std::sort(player_paths.begin(), player_paths.end());
-      auto player_results = collect_world_file_jobs<
-          std::filesystem::path,
-          PlayerSaveData>(
-          std::span<const std::filesystem::path>{player_paths},
-          options,
-          [&](const std::filesystem::path& path) {
-            return load_player_save_file(path, item_registry);
-          });
-      if (!player_results) {
-        return Expected<LoadedSaveData, PersistenceError>::failure(player_results.error());
-      }
-      for (PlayerSaveData& player_save : player_results.value()) {
-        loaded.players.push_back(std::move(player_save));
-      }
+    auto player_results = load_server_player_saves(root, item_registry, options);
+    if (!player_results) {
+      return Expected<LoadedSaveData, PersistenceError>::failure(
+          player_results.error());
+    }
+    for (PlayerSaveData& player_save : player_results.value()) {
+      loaded.players.push_back(std::move(player_save));
     }
 
     return Expected<LoadedSaveData, PersistenceError>::success(std::move(loaded));
