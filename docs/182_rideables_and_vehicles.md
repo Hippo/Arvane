@@ -265,12 +265,18 @@ Aircraft use:
 }
 ```
 
-The client runs simplified arcade flight: forward accelerates, backward
-decelerates, jump/sneak pitch up/down, strafe yaws, vehicle roll actions roll,
-and secondary applies air brake. Ground takeoff clamps vertical nose influence
-until the aircraft has enough speed, then gives nose-up input a small lift-off
-assist. Lift remains speed based and stall adds extra downward acceleration
-below `stall_speed`.
+The client runs simplified arcade atmospheric flight: forward accelerates,
+backward decelerates, jump/sneak pitch up/down, strafe yaws, vehicle roll
+actions roll, and secondary applies air brake. Ground takeoff clamps vertical
+nose influence until the aircraft has enough speed, then gives nose-up input a
+small lift-off assist. Lift remains speed based and stall adds extra downward
+acceleration below `stall_speed`.
+
+In space environments, aircraft that provide a `space_movement` profile use
+rocket-style controls instead: forward accelerates, backward decelerates, and
+mouse look steers the vehicle toward the camera direction. Releasing movement
+input coasts at the current speed, so a rocket in deep space does not silently
+brake or freeze just because there is no terrain collision query.
 
 Aircraft always use the swept AABB collision path on the server. The built-in
 plane also rejects movement into unloaded chunks instead of accepting blind

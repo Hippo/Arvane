@@ -138,6 +138,7 @@ struct ClientRuntime::Impl {
     particles.clear();
     pack_sync.clear();
     world_time_update.reset();
+    input.clear_vehicle_prediction();
     world_environment_sky.clear();
     space_environment = false;
     void_space_world = false;

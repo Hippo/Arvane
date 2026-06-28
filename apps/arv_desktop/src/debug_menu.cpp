@@ -48,10 +48,23 @@ namespace {
   return &server.voxel_world();
 }
 
+[[nodiscard]] world::WorldRuntime* active_client_world(
+    server::ServerRuntime& server,
+    const client::ClientRuntime& client_runtime) noexcept {
+  if (world::WorldRuntime* runtime =
+          server.world_runtime(client_runtime.camera().world_id());
+      runtime != nullptr) {
+    return runtime;
+  }
+  return active_session_world(server);
+}
+
 struct LocalPlayerDebugContext {
   const server::ServerSession* session{};
   world::WorldRuntime* world{};
   player::PlayerState* player{};
+  std::optional<PlayerID> player_id{};
+  std::optional<Vec3f> position{};
 };
 
 [[nodiscard]] LocalPlayerDebugContext local_player_context(
@@ -66,12 +79,68 @@ struct LocalPlayerDebugContext {
     return context;
   }
   context.player = context.world->find_player(context.session->player_id);
+  context.player_id = context.session->player_id;
+  if (context.player != nullptr) {
+    context.position = context.player->position;
+  }
+  return context;
+}
+
+[[nodiscard]] LocalPlayerDebugContext local_player_context(
+    server::ServerRuntime& server,
+    const client::ClientRuntime& client_runtime) noexcept {
+  LocalPlayerDebugContext context;
+  context.session = server.sessions().first();
+  context.world = server.world_runtime(client_runtime.camera().world_id());
+  const bool using_client_world = context.world != nullptr;
+  if (context.world == nullptr) {
+    context.world = active_session_world(server);
+  }
+
+  if (using_client_world) {
+    context.player_id = client_runtime.local_player_id();
+    if (context.player_id.has_value()) {
+      context.player = context.world->find_player(context.player_id.value());
+      context.position = client_runtime.player_position();
+    }
+  }
+
+  if (context.player == nullptr && context.session != nullptr && context.world != nullptr &&
+      context.session->world_id == context.world->id()) {
+    context.player = context.world->find_player(context.session->player_id);
+    if (!context.player_id.has_value()) {
+      context.player_id = context.session->player_id;
+    }
+  }
+
+  if (!context.position.has_value() && context.player != nullptr) {
+    context.position = context.player->position;
+  }
   return context;
 }
 
 [[nodiscard]] player::PlayerState* local_player_state(
     server::ServerRuntime& server) noexcept {
   return local_player_context(server).player;
+}
+
+[[nodiscard]] std::optional<Vec3f> debug_entity_spawn_position(
+    const DebugMenuState& state,
+    const LocalPlayerDebugContext& player_context) noexcept {
+  if (!state.entity_spawn_at_player) {
+    return Vec3f{
+        state.entity_spawn_position[0],
+        state.entity_spawn_position[1],
+        state.entity_spawn_position[2]};
+  }
+  if (!player_context.position.has_value()) {
+    return std::nullopt;
+  }
+  const Vec3f& anchor = player_context.position.value();
+  return Vec3f{
+      anchor.x + state.entity_spawn_offset[0],
+      anchor.y + state.entity_spawn_offset[1],
+      anchor.z + state.entity_spawn_offset[2]};
 }
 
 [[nodiscard]] std::string biome_display_label(
@@ -1119,30 +1188,31 @@ void render_player_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
     client::ClientRuntime& client) {
-  LocalPlayerDebugContext player_context = local_player_context(server);
+  LocalPlayerDebugContext player_context = local_player_context(server, client);
   player::PlayerState* player = player_context.player;
   if (player == nullptr) {
     ImGui::TextUnformatted("No local player session.");
     return;
   }
   world::WorldRuntime& player_world = *player_context.world;
+  const Vec3f player_position = player_context.position.value_or(player->position);
 
   ImGui::Text("Player ID: %u", player->player_id.value);
   ImGui::Text("World: #%u", player_world.id().value);
   ImGui::Text(
       "Position: %.2f, %.2f, %.2f",
-      static_cast<double>(player->position.x),
-      static_cast<double>(player->position.y),
-      static_cast<double>(player->position.z));
+      static_cast<double>(player_position.x),
+      static_cast<double>(player_position.y),
+      static_cast<double>(player_position.z));
   const std::string& biome_label =
-      current_biome_label(state, player_world, player->position);
+      current_biome_label(state, player_world, player_position);
   ImGui::Text("Biome: %s", biome_label.c_str());
   const world::WorldGenerationConfig* generation_config =
       player_world.generation_config();
   const i32 biome_chunk_x =
-      floor_div(static_cast<i32>(std::floor(player->position.x)), ChunkSize);
+      floor_div(static_cast<i32>(std::floor(player_position.x)), ChunkSize);
   const i32 biome_chunk_z =
-      floor_div(static_cast<i32>(std::floor(player->position.z)), ChunkSize);
+      floor_div(static_cast<i32>(std::floor(player_position.z)), ChunkSize);
   const void* biome_dimension =
       generation_config == nullptr ? nullptr : generation_config->resolved_dimension.get();
   bool nearest_biome_cache_current =
@@ -1152,7 +1222,7 @@ void render_player_tab(
       state.nearest_biome_seed == player_world.generation_seed() &&
       state.nearest_biome_dimension == biome_dimension;
   if (ImGui::Button("Locate nearest different biome")) {
-    (void)nearest_different_biome_label(state, player_world, player->position);
+    (void)nearest_different_biome_label(state, player_world, player_position);
     nearest_biome_cache_current = true;
   }
   ImGui::Text(
@@ -1455,10 +1525,14 @@ void render_item_animations_tab(
 void render_entities_tab(
     DebugMenuState& state,
     server::ServerRuntime& server,
+    const client::ClientRuntime& client_runtime,
     const entity::EntityRegistry& entity_registry) {
-  world::WorldRuntime& world = *active_session_world(server);
+  world::WorldRuntime& world = *active_client_world(server, client_runtime);
+  const LocalPlayerDebugContext local_player =
+      local_player_context(server, client_runtime);
   const std::vector<EntityID> entity_ids = world.entity_ids();
   ImGui::Text("Runtime entities: %zu", entity_ids.size());
+  ImGui::Text("Target world: #%u", world.id().value);
   ImGui::Text("Dropped item stacks: %zu", server.dropped_item_stacks().size());
 
   ImGui::SeparatorText("Spawn");
@@ -1515,28 +1589,18 @@ void render_entities_tab(
     ImGui::InputText("Persistent UUID", &state.entity_persistent_uuid);
   }
 
-  const player::PlayerState* local_player = local_player_state(server);
+  const std::optional<Vec3f> spawn_position =
+      debug_entity_spawn_position(state, local_player);
   const bool can_spawn =
-      selected_type != nullptr && (!state.entity_spawn_at_player || local_player != nullptr);
+      selected_type != nullptr && spawn_position.has_value();
   if (!can_spawn) {
     ImGui::BeginDisabled();
   }
   if (ImGui::Button("Spawn entity")) {
-    Vec3f position{
-        state.entity_spawn_position[0],
-        state.entity_spawn_position[1],
-        state.entity_spawn_position[2]};
-    if (state.entity_spawn_at_player && local_player != nullptr) {
-      position = {
-          local_player->position.x + state.entity_spawn_offset[0],
-          local_player->position.y + state.entity_spawn_offset[1],
-          local_player->position.z + state.entity_spawn_offset[2]};
-    }
-
     world::EntityCreateInfo info;
     info.type_id = selected_type->id;
     info.type_name = selected_type->name;
-    info.position = position;
+    info.position = spawn_position.value();
     info.persistent = state.entity_persistent;
     info.persistent_uuid = state.entity_persistent_uuid;
     info.replicated = state.entity_replicated;
@@ -1550,8 +1614,9 @@ void render_entities_tab(
   if (!can_spawn) {
     ImGui::EndDisabled();
   }
-  if (state.entity_spawn_at_player && local_player == nullptr) {
-    ImGui::TextUnformatted("No local player is available for player-relative spawning.");
+  if (state.entity_spawn_at_player && !local_player.position.has_value()) {
+    ImGui::TextUnformatted(
+        "No local player is available in the current client world for player-relative spawning.");
   }
 
   ImGui::SeparatorText("Selected Entity");
@@ -1575,25 +1640,23 @@ void render_entities_tab(
     ImGui::TextUnformatted("Selected entity is not loaded.");
   }
 
-  if (!selected_exists || selected_is_player) {
+  const bool can_move_selected =
+      selected_exists && !selected_is_player && spawn_position.has_value();
+  if (!can_move_selected) {
     ImGui::BeginDisabled();
   }
   if (ImGui::Button("Move selected to spawn position")) {
-    Vec3f position{
-        state.entity_spawn_position[0],
-        state.entity_spawn_position[1],
-        state.entity_spawn_position[2]};
-    if (state.entity_spawn_at_player && local_player != nullptr) {
-      position = {
-          local_player->position.x + state.entity_spawn_offset[0],
-          local_player->position.y + state.entity_spawn_offset[1],
-          local_player->position.z + state.entity_spawn_offset[2]};
-    }
-    if (world.set_entity_position(selected_entity.value(), position)) {
+    if (world.set_entity_position(selected_entity.value(), spawn_position.value())) {
       state.console_log.emplace_back("Moved entity " + state.selected_entity_id + ".");
     }
   }
+  if (!can_move_selected) {
+    ImGui::EndDisabled();
+  }
   ImGui::SameLine();
+  if (!selected_exists || selected_is_player) {
+    ImGui::BeginDisabled();
+  }
   if (ImGui::Button("Destroy selected")) {
     if (world.destroy_entity(selected_entity.value())) {
       state.console_log.emplace_back("Queued entity " + state.selected_entity_id + " for despawn.");
@@ -1690,8 +1753,9 @@ void render_entities_tab(
 
 void render_world_tab(
     const DebugMenuFrameInfo& frame_info,
-    server::ServerRuntime& server) {
-  world::WorldRuntime& world_runtime = *active_session_world(server);
+    server::ServerRuntime& server,
+    const client::ClientRuntime& client_runtime) {
+  world::WorldRuntime& world_runtime = *active_client_world(server, client_runtime);
   const world::WorldClock& clock = world_runtime.clock();
   const world::CelestialState celestial = world::build_celestial_state(clock);
   const world::ClockTime24 time_24 = world::to_clock_time_24(celestial.day_fraction);
@@ -2468,11 +2532,11 @@ DebugMenuResult render_debug_menu(
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("World")) {
-      render_world_tab(frame_info, server);
+      render_world_tab(frame_info, server, client);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Chunks")) {
-      render_world_tab(frame_info, server);
+      render_world_tab(frame_info, server, client);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Rendering")) {
@@ -2494,7 +2558,7 @@ DebugMenuResult render_debug_menu(
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Entities")) {
-      render_entities_tab(state, server, entity_registry);
+      render_entities_tab(state, server, client, entity_registry);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Networking")) {

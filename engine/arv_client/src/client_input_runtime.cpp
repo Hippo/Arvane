@@ -100,8 +100,25 @@ inline constexpr u32 MaxDropItemRequestsPerTick = 4U;
   return model_forward_yaw_rotation(yaw_radians);
 }
 
+[[nodiscard]] Quatf vehicle_render_rotation_from_look(
+    f32 yaw_radians,
+    f32 pitch_radians) noexcept {
+  return normalize_quat(
+      multiply_quat(
+          yaw_pitch_rotation(yaw_radians, -pitch_radians),
+          yaw_rotation(ModelForwardYawOffsetRadians)));
+}
+
 [[nodiscard]] Vec3f model_visual_forward(Quatf rotation) noexcept {
   return rotate_vector(normalize_quat(rotation), {0.0F, 0.0F, -1.0F});
+}
+
+[[nodiscard]] f32 vehicle_pitch_from_rotation(Quatf rotation) noexcept {
+  Vec3f forward = normalize_or_zero(model_visual_forward(rotation));
+  if (length(forward) <= 0.0F) {
+    return 0.0F;
+  }
+  return std::asin(std::clamp(forward.y, -1.0F, 1.0F));
 }
 
 struct VehicleMovementProfile {
@@ -137,6 +154,7 @@ struct VehicleMovementProfile {
   f32 preferred_water_occupancy{1.0F};
   Vec3f collision_size{1.0F, 1.0F, 1.0F};
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
+  bool uses_space_aircraft_profile{};
 };
 
 [[nodiscard]] const entity::VehicleDefinition* vehicle_definition_for_entity(
@@ -211,10 +229,13 @@ struct VehicleMovementProfile {
       profile.base_flags = protocol::VehicleMoveFlags::OnGround;
       break;
     case entity::VehiclePhysicsKind::Aircraft: {
+      const bool use_space_aircraft =
+          space_environment && definition->space_aircraft.has_value();
       const entity::AircraftMovementDefinition& aircraft =
-          space_environment && definition->space_aircraft.has_value()
+          use_space_aircraft
               ? definition->space_aircraft.value()
               : definition->aircraft;
+      profile.uses_space_aircraft_profile = use_space_aircraft;
       profile.max_forward_speed = aircraft.max_speed;
       profile.max_reverse_speed = 0.0F;
       profile.min_forward_speed = aircraft.min_speed;
@@ -551,14 +572,17 @@ struct VehicleMovementProfile {
     const ReplicatedEntityMirror& mirror,
     const std::optional<EntityNetID>& predicted_vehicle_id,
     Vec3f predicted_position,
-    Vec3f predicted_velocity) noexcept {
+    Vec3f predicted_velocity,
+    bool space_aircraft) noexcept {
   if (!predicted_vehicle_id.has_value() || predicted_vehicle_id.value() != vehicle_id) {
     return true;
   }
-  if (distance(predicted_position, mirror.position) > 2.0F) {
+  const f32 position_tolerance = space_aircraft ? 8.0F : 2.0F;
+  const f32 velocity_tolerance = space_aircraft ? 24.0F : 6.0F;
+  if (distance(predicted_position, mirror.position) > position_tolerance) {
     return true;
   }
-  return distance(predicted_velocity, mirror.velocity) > 6.0F;
+  return distance(predicted_velocity, mirror.velocity) > velocity_tolerance;
 }
 
 } // namespace
@@ -713,7 +737,8 @@ void ClientInputRuntime::send_fixed_tick_input(
             *mirror,
             predicted_vehicle_id_,
             predicted_vehicle_position_,
-            predicted_vehicle_velocity_)) {
+            predicted_vehicle_velocity_,
+            profile.uses_space_aircraft_profile)) {
       predicted_vehicle_id_ = vehicle_id;
       predicted_vehicle_position_ = mirror->position;
       predicted_vehicle_velocity_ = mirror->velocity;
@@ -742,8 +767,11 @@ void ClientInputRuntime::send_fixed_tick_input(
         profile.physics == entity::VehiclePhysicsKind::GroundVehicle;
     const bool aircraft =
         profile.physics == entity::VehiclePhysicsKind::Aircraft;
+    const bool space_aircraft = aircraft && profile.uses_space_aircraft_profile;
     const bool submersible =
         profile.physics == entity::VehiclePhysicsKind::Submersible;
+    const physics::ICollisionQuery* vehicle_collision_query =
+        void_space_world ? nullptr : collision_query;
     if (!ground_vehicle) {
       clear_vehicle_impact_memory();
     }
@@ -751,9 +779,9 @@ void ClientInputRuntime::send_fixed_tick_input(
         profile.base_flags,
         protocol::VehicleMoveFlags::OnGround);
     if ((living_mount || ground_vehicle || aircraft || submersible) &&
-        collision_query != nullptr) {
+        vehicle_collision_query != nullptr) {
       vehicle_grounded = vehicle_has_ground_support(
-          *collision_query,
+          *vehicle_collision_query,
           predicted_vehicle_position_,
           profile.collision_size);
     }
@@ -763,12 +791,58 @@ void ClientInputRuntime::send_fixed_tick_input(
     Vec3f reported_angular_velocity{};
     Vec3f attempted_delta{};
 
-    if (aircraft) {
+    if (space_aircraft) {
+      f32 forward_speed = length(predicted_vehicle_velocity_);
+      if (!std::isfinite(forward_speed)) {
+        forward_speed = 0.0F;
+      }
+      if (command.secondary_held) {
+        forward_speed = approach(forward_speed, 0.0F, profile.brake_force * dt);
+      } else if (throttle > 0.01F) {
+        forward_speed += throttle * profile.acceleration * dt;
+      } else if (throttle < -0.01F) {
+        forward_speed =
+            approach(forward_speed, 0.0F, profile.brake_force * -throttle * dt);
+      } else if (forward_speed < 0.02F) {
+        forward_speed = 0.0F;
+      }
+      forward_speed = std::clamp(
+          forward_speed,
+          profile.min_forward_speed,
+          profile.max_forward_speed);
+
+      const f32 current_pitch =
+          vehicle_pitch_from_rotation(predicted_vehicle_rotation_);
+      const f32 target_yaw = player_controller.camera().yaw_radians();
+      const f32 target_pitch = player_controller.camera().pitch_radians();
+      const f32 next_yaw = approach_angle(
+          predicted_vehicle_yaw_,
+          target_yaw,
+          profile.yaw_rate * dt);
+      const f32 next_pitch = approach(
+          current_pitch,
+          target_pitch,
+          profile.pitch_rate * dt);
+      const f32 yaw_delta = wrap_angle_radians(next_yaw - predicted_vehicle_yaw_);
+      const f32 pitch_delta = next_pitch - current_pitch;
+
+      predicted_vehicle_yaw_ = next_yaw;
+      predicted_vehicle_rotation_ =
+          vehicle_render_rotation_from_look(next_yaw, next_pitch);
+      reported_angular_velocity = {pitch_delta / dt, yaw_delta / dt, 0.0F};
+
+      Vec3f forward = normalize_or_zero(model_visual_forward(predicted_vehicle_rotation_));
+      if (length(forward) <= 0.0F) {
+        forward = normalize_or_zero(look_direction(next_yaw, next_pitch));
+      }
+      predicted_vehicle_velocity_ = forward * forward_speed;
+      attempted_delta = predicted_vehicle_velocity_ * dt;
+    } else if (aircraft) {
       const bool near_takeoff_surface =
           vehicle_grounded ||
-          (collision_query != nullptr &&
+          (vehicle_collision_query != nullptr &&
            physics::has_support_below(
-               *collision_query,
+               *vehicle_collision_query,
                vehicle_bounds(predicted_vehicle_position_, profile.collision_size),
                0.35F));
       const Vec3f speed_axis =
@@ -816,7 +890,7 @@ void ClientInputRuntime::send_fixed_tick_input(
           -1.0F,
           1.0F);
       const bool stationary_without_collision_query =
-          collision_query == nullptr &&
+          vehicle_collision_query == nullptr &&
           length(predicted_vehicle_velocity_) <= 0.05F &&
           std::abs(throttle) <= 0.01F &&
           std::abs(steer) <= 0.01F &&
@@ -930,7 +1004,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       attempted_delta = predicted_vehicle_velocity_ * dt;
     } else if (submersible) {
       water_occupancy = vehicle_water_occupancy(
-          collision_query,
+          vehicle_collision_query,
           predicted_vehicle_position_,
           profile.collision_size,
           profile.preferred_water_occupancy);
@@ -1089,15 +1163,15 @@ void ClientInputRuntime::send_fixed_tick_input(
     Vec3f collision_normal{};
     f32 collision_normal_impact_speed = 0.0F;
     const Vec3f pre_collision_velocity = predicted_vehicle_velocity_;
-    if (collision_query != nullptr) {
+    if (vehicle_collision_query != nullptr) {
       const Aabb3f bounds =
           vehicle_bounds(predicted_vehicle_position_, profile.collision_size);
       physics::MovementResolution resolved =
-          physics::resolve_movement(*collision_query, bounds, attempted_delta);
+          physics::resolve_movement(*vehicle_collision_query, bounds, attempted_delta);
       if (living_mount && vehicle_grounded) {
         if (std::optional<physics::MovementResolution> stepped =
                 try_vehicle_step_up(
-                    *collision_query,
+                    *vehicle_collision_query,
                     bounds,
                     attempted_delta,
                     resolved,

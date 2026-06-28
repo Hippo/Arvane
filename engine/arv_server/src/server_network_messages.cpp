@@ -40,9 +40,16 @@ inline constexpr std::string_view ChatHoverPermission = "arvane.chat.hover";
 
 [[nodiscard]] bool runtime_is_void_space_world(
     const WorldRegistry& worlds,
-    WorldID world_id) noexcept {
-  const WorldRecord* record = worlds.find(world_id);
-  return record != nullptr && record->world_type == "space";
+    const world::WorldRuntime& runtime) noexcept {
+  const WorldRecord* record = worlds.find(runtime.id());
+  if (record != nullptr && record->world_type == "space") {
+    return true;
+  }
+  if (runtime.environment().sky == "space") {
+    return true;
+  }
+  const auto* generation = runtime.generation_config();
+  return generation != nullptr && generation->void_world;
 }
 
 void enable_void_space_player_movement(MovementValidationContext& context) noexcept {
@@ -1975,7 +1982,7 @@ void ServerRuntimeImpl::handle_player_move(
       tick_index_,
       base_tps_,
       player_tuning_);
-  if (runtime_is_void_space_world(worlds_, runtime->id())) {
+  if (runtime_is_void_space_world(worlds_, *runtime)) {
     enable_void_space_player_movement(context);
   }
   const MovementValidationResult validation =
@@ -2628,7 +2635,7 @@ void ServerRuntimeImpl::handle_vehicle_move(
           previous,
           tick_index_,
           base_tps_);
-  if (runtime_is_void_space_world(worlds_, runtime->id())) {
+  if (runtime_is_void_space_world(worlds_, *runtime)) {
     enable_void_space_vehicle_movement(context);
   }
   const VehicleMovementValidationResult validation =

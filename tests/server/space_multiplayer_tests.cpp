@@ -7,6 +7,7 @@
 #include "arv/player/item.hpp"
 #include "arv/server/server_runtime.hpp"
 #include "arv/world/space_definition.hpp"
+#include "arv/world/world_queries.hpp"
 #include "support/temp_dir.hpp"
 #include "support/test_registries.hpp"
 
@@ -653,6 +654,8 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
   EXPECT_EQ(fixture.alice.mounted_vehicle_id(), target_rocket_net);
   EXPECT_EQ(std::string{fixture.alice.mounted_seat_id()}, "pilot");
   EXPECT_TRUE(fixture.alice.mounted_controls_vehicle());
+  EXPECT_TRUE(fixture.alice.space_environment());
+  EXPECT_EQ(fixture.alice.world_environment_sky(), "space");
   EXPECT_EQ(fixture.alice.camera().world_id(), space_record->id);
   EXPECT_EQ(fixture.bob.camera().world_id(), arv::server::DefaultWorldID);
   EXPECT_TRUE(mirrors_only_reference_camera_world(fixture.alice));
@@ -662,12 +665,22 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
       space_world->find_entity_transform(target_rocket.value());
   ASSERT_NE(before_transform, nullptr);
   const arv::Vec3f before_position = before_transform->position;
+  arv::world::WorldRuntime empty_client_space{space_record->id};
+  const arv::world::WorldCollisionQuery missing_chunks_are_solid{
+      empty_client_space,
+      fixture.block_registry};
   for (arv::u32 i = 0; i < 12U; ++i) {
     arv::client::InputFrame input;
     input.move_forward = true;
-    input.jump_held = true;
+    if (i == 0U) {
+      input.mouse_delta_y = -120.0F;
+    }
     fixture.alice.submit_input(input);
-    fixture.pump(1U);
+    fixture.server.tick();
+    fixture.alice.fixed_tick(
+        fixture.server.tick_index(),
+        &missing_chunks_are_solid);
+    fixture.bob.fixed_tick(fixture.server.tick_index());
   }
   const arv::entity::EntityTransform* after_transform =
       space_world->find_entity_transform(target_rocket.value());
@@ -675,6 +688,14 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
   EXPECT_GT(
       arv::distance_squared(after_transform->position, before_position),
       0.0001F);
+  const std::optional<arv::server::VehicleCrashDebugInfo> move_debug =
+      fixture.server.last_vehicle_crash_debug(target_rocket_net.value());
+  ASSERT_TRUE(move_debug.has_value());
+  EXPECT_TRUE(move_debug->accepted_move);
+  EXPECT_FALSE(move_debug->sent_correction);
+  EXPECT_EQ(
+      move_debug->validation_reason,
+      arv::protocol::VehicleCorrectionReason::Unknown);
 }
 
 TEST(SpaceMultiplayerTests, UnmountedPlayerCanMoveInVoidSpaceWorld) {

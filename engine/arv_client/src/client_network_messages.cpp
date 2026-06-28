@@ -88,10 +88,11 @@ void apply_world_join_result(
       result.spawn_position,
       result.initial_tick,
       result.tick_rate);
+  runtime.input.clear_vehicle_prediction();
   runtime.world_environment_sky = result.environment_sky;
   runtime.space_environment =
       result.space_environment || result.environment_sky == "space";
-  runtime.void_space_world = result.space_environment;
+  runtime.void_space_world = runtime.space_environment;
   runtime.space_bodies = result.space_bodies;
   if (runtime.world_transition_status.active) {
     runtime.world_transition_status.phase = ClientWorldTransitionPhase::EnteringWorld;
@@ -124,6 +125,7 @@ void apply_world_leave(
   runtime.recipe_book.clear();
   runtime.pack_sync.clear();
   runtime.world_time_update.reset();
+  runtime.input.clear_vehicle_prediction();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
   runtime.void_space_world = false;
@@ -141,6 +143,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.inventory.reset();
   runtime.recipe_book.clear();
   runtime.world_time_update.reset();
+  runtime.input.clear_vehicle_prediction();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
   runtime.void_space_world = false;

@@ -387,6 +387,25 @@ arv::entity::VehicleDefinitionRegistry make_client_air_vehicle_registry() {
       0.0F,
       0.90F,
       true};
+  rocket.space_aircraft = arv::entity::AircraftMovementDefinition{
+      0.0F,
+      95.0F,
+      24.0F,
+      12.0F,
+      0.997F,
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(95.0F),
+      arv::degrees_to_radians(120.0F),
+      0.0F,
+      120.0F,
+      0.0F,
+      0.0F,
+      0.0F,
+      95.0F,
+      95.0F,
+      0.0F,
+      0.997F,
+      true};
   rocket.authority.max_speed = 105.0F;
   rocket.authority.max_acceleration = 42.0F;
   rocket.authority.max_deceleration = 54.0F;
@@ -453,7 +472,9 @@ void enter_in_game(
     arv::client::ClientRuntime& client,
     arv::net::ITransport& server_transport,
     arv::net::ConnectionID connection_id,
-    arv::Vec3f spawn_position = {8.0F, 20.0F, -20.0F}) {
+    arv::Vec3f spawn_position = {8.0F, 20.0F, -20.0F},
+    bool space_environment = false,
+    std::string_view environment_sky = {}) {
   (void)server_transport.poll_events();
 
   arv::protocol::ClientboundHello hello;
@@ -475,6 +496,10 @@ void enter_in_game(
   join.spawn_position = spawn_position;
   join.initial_tick = 1;
   join.tick_rate = arv::DefaultBaseTps;
+  join.environment_sky = environment_sky.empty()
+                             ? (space_environment ? "space" : "overworld")
+                             : std::string{environment_sky};
+  join.space_environment = space_environment;
   send_to_client(
       server_transport,
       connection_id,
@@ -525,13 +550,15 @@ void spawn_and_mount_test_vehicle(
     std::string_view entity_type_name,
     std::string_view seat_id,
     arv::EntityNetID vehicle_id,
-    arv::Vec3f position) {
+    arv::Vec3f position,
+    arv::Quatf rotation = {}) {
   arv::protocol::ClientboundEntitySpawn spawn;
   spawn.world_id = arv::WorldID{1};
   spawn.entity_id = vehicle_id;
   spawn.entity_type = arv::EntityTypeID{2};
   spawn.entity_type_name = std::string{entity_type_name};
   spawn.position = position;
+  spawn.rotation = rotation;
   send_to_client(
       server_transport,
       connection_id,
@@ -1802,6 +1829,183 @@ TEST(ClientRuntimeTests, RocketVerticalThrustClimbsWithoutPitchRotation) {
   EXPECT_GT(max_y, 8.0F);
   EXPECT_GT(max_vertical_speed, 24.0F);
   EXPECT_GT(moves.back().velocity.y, 24.0F);
+}
+
+TEST(ClientRuntimeTests, RocketSpaceFlightAcceleratesAlongMouseLook) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {0.0F, 4.0F, 0.0F},
+      false,
+      "space");
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_rocket/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F},
+      arv::model_forward_yaw_rotation(0.0F));
+
+  for (arv::TickIndex tick = 3; tick < 40; ++tick) {
+    arv::client::InputFrame input{.move_forward = true};
+    if (tick == 3) {
+      input.mouse_delta_y = -240.0F;
+    }
+    client.submit_input(input);
+    client.fixed_tick(tick);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  const arv::Vec3f vehicle_forward =
+      arv::normalize_or_zero(arv::rotate_vector(last.rotation, {0.0F, 0.0F, -1.0F}));
+  const arv::Vec3f velocity_direction =
+      arv::normalize_or_zero(last.velocity);
+  arv::f32 max_pitch_angular_speed = 0.0F;
+  for (const arv::protocol::ServerboundVehicleMove& move : moves) {
+    max_pitch_angular_speed =
+        std::max(max_pitch_angular_speed, std::abs(move.angular_velocity.x));
+  }
+
+  EXPECT_GT(arv::length(last.velocity), 12.0F);
+  EXPECT_GT(last.velocity.y, 4.0F);
+  EXPECT_GT(last.position.y, 5.0F);
+  EXPECT_GT(arv::dot(vehicle_forward, velocity_direction), 0.98F);
+  EXPECT_GT(max_pitch_angular_speed, 0.01F);
+  EXPECT_NEAR(last.angular_velocity.z, 0.0F, 0.0001F);
+}
+
+TEST(ClientRuntimeTests, RocketSpaceFlightIgnoresMissingChunkCollision) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {0.0F, 4.0F, 0.0F},
+      false,
+      "space");
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_rocket/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F},
+      arv::model_forward_yaw_rotation(0.0F));
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime empty_space_world{arv::WorldID{1}};
+  const arv::world::WorldCollisionQuery missing_chunks_are_solid{
+      empty_space_world,
+      block_registry};
+
+  for (arv::TickIndex tick = 3; tick < 40; ++tick) {
+    arv::client::InputFrame input{.move_forward = true};
+    if (tick == 3) {
+      input.mouse_delta_y = -240.0F;
+    }
+    client.submit_input(input);
+    client.fixed_tick(tick, &missing_chunks_are_solid);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_GT(arv::length(last.velocity), 12.0F);
+  EXPECT_GT(last.position.y, 5.0F);
+  EXPECT_GT(arv::distance_squared(last.position, arv::Vec3f{0.0F, 4.0F, 0.0F}), 1.0F);
+}
+
+TEST(ClientRuntimeTests, RocketSpaceFlightCoastsBackDeceleratesAndRecovers) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {0.0F, 4.0F, 0.0F},
+      true);
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_rocket/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F},
+      arv::model_forward_yaw_rotation(0.0F));
+
+  for (arv::TickIndex tick = 3; tick < 34; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick);
+  }
+  std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::f32 accelerated_speed = arv::length(moves.back().velocity);
+  ASSERT_GT(accelerated_speed, 10.0F);
+
+  for (arv::TickIndex tick = 34; tick < 48; ++tick) {
+    client.submit_input(arv::client::InputFrame{});
+    client.fixed_tick(tick);
+  }
+  moves = serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::f32 coast_speed = arv::length(moves.back().velocity);
+  EXPECT_GT(coast_speed, accelerated_speed * 0.95F);
+
+  for (arv::TickIndex tick = 48; tick < 100; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_backward = true});
+    client.fixed_tick(tick);
+  }
+  moves = serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& braked = moves.back();
+  const arv::Vec3f braked_forward =
+      arv::rotate_vector(braked.rotation, {0.0F, 0.0F, -1.0F});
+  const arv::f32 braked_speed = arv::length(braked.velocity);
+  EXPECT_LT(braked_speed, coast_speed * 0.5F);
+  EXPECT_GE(arv::dot(braked.velocity, braked_forward), -0.001F);
+
+  for (arv::TickIndex tick = 100; tick < 112; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick);
+  }
+  moves = serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  EXPECT_GT(arv::length(moves.back().velocity), braked_speed + 4.0F);
 }
 
 TEST(ClientRuntimeTests, AircraftTakeoffAssistClimbsFromGroundedRoll) {
