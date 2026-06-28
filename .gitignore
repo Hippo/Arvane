@@ -32,6 +32,7 @@ compile_commands.json
 *.tmp
 *.swp
 *.bak
+
 *.d
 *.user
 *.userprefs

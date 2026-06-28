@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -387,6 +388,14 @@ arv::world::SpaceDefinitionRegistry make_space_test_definitions() {
   deep_space.sky = "space";
   registry.environments.emplace(deep_space.id, std::move(deep_space));
 
+  arv::world::EnvironmentDefinition luna_env;
+  luna_env.id = "arvane:environment/luna";
+  luna_env.gravity_scale = 0.18F;
+  luna_env.has_atmosphere = false;
+  luna_env.has_oxygen = false;
+  luna_env.sky = "space";
+  registry.environments.emplace(luna_env.id, std::move(luna_env));
+
   arv::world::WorldDefinition default_world;
   default_world.id = "arvane:world/default";
   default_world.kind = arv::world::WorldDefinitionKind::Planet;
@@ -421,7 +430,7 @@ arv::world::SpaceDefinitionRegistry make_space_test_definitions() {
   arv::world::WorldDefinition luna_world;
   luna_world.id = "arvane:world/luna";
   luna_world.kind = arv::world::WorldDefinitionKind::Planet;
-  luna_world.environment = "arvane:environment/overworld";
+  luna_world.environment = "arvane:environment/luna";
   luna_world.worldgen = "arvane:worldgen/dimension/overworld";
   registry.worlds.emplace(luna_world.id, std::move(luna_world));
 
@@ -749,6 +758,8 @@ TEST(SpaceMultiplayerTests, LaunchedRocketCanEnterMoonAndStayMounted) {
       fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
   const arv::player::ItemID stone_item =
       fixture.item_registry.find_item("arvane:stone").value();
+  const arv::voxel::BlockVariantID stone_block =
+      fixture.block_registry.find_variant("arvane:stone").value();
   arv::entity::VehicleCargoComponent* launch_cargo =
       fixture.server.voxel_world().find_entity_vehicle_cargo(rocket);
   ASSERT_NE(launch_cargo, nullptr);
@@ -843,6 +854,23 @@ TEST(SpaceMultiplayerTests, LaunchedRocketCanEnterMoonAndStayMounted) {
   EXPECT_GT(luna_transform->position.y, -64.0F);
   EXPECT_LT(luna_transform->position.y, 128.0F);
   const arv::f32 entry_y = luna_transform->position.y;
+  const arv::f32 entry_z = luna_transform->position.z;
+  const arv::i32 wall_x =
+      static_cast<arv::i32>(std::floor(luna_transform->position.x));
+  const arv::i32 wall_y =
+      static_cast<arv::i32>(std::floor(luna_transform->position.y));
+  const arv::i32 wall_z =
+      static_cast<arv::i32>(std::floor(luna_transform->position.z));
+  ASSERT_TRUE(luna_world->set_block({{wall_x, wall_y, wall_z + 3}}, stone_block));
+  ASSERT_TRUE(luna_world->set_block({{wall_x, wall_y, wall_z - 3}}, stone_block));
+  for (arv::u32 i = 0; i < 24U; ++i) {
+    fixture.alice.submit_input(arv::client::InputFrame{.move_forward = true});
+    fixture.pump(1U);
+  }
+  luna_transform = luna_world->find_entity_transform(luna_rocket.value());
+  ASSERT_NE(luna_transform, nullptr);
+  EXPECT_LE(std::abs(luna_transform->position.z - entry_z), 2.401F);
+
   for (arv::u32 i = 0; i < 10U; ++i) {
     fixture.alice.submit_input(arv::client::InputFrame{.sneak_held = true});
     fixture.pump(1U);

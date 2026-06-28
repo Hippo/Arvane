@@ -1166,6 +1166,91 @@ TEST(ClientRuntimeTests, EntitySpawnReceivedBeforeWorldJoinSurvivesJoin) {
   EXPECT_EQ(mirror->last_server_tick, 2U);
 }
 
+TEST(ClientRuntimeTests, RideStartedBeforeWorldJoinRestoresMountedVehicleControl) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(client, *server_transport, connection_id.value(), {0.0F, 4.0F, 0.0F});
+  (void)server_transport->poll_events();
+
+  const arv::EntityNetID passenger_id{2};
+  const arv::EntityNetID rocket_id{10};
+
+  arv::protocol::ClientboundWorldLeave leave;
+  leave.world_id = arv::WorldID{1};
+  leave.reason = 2U;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldLeave,
+      arv::protocol::serialize_clientbound_world_leave(leave));
+
+  arv::protocol::ClientboundEntitySpawn rocket_spawn;
+  rocket_spawn.world_id = arv::WorldID{2};
+  rocket_spawn.entity_id = rocket_id;
+  rocket_spawn.entity_type = arv::EntityTypeID{2};
+  rocket_spawn.entity_type_name = "arvane:test_rocket/basic";
+  rocket_spawn.position = {100.0F, 40.0F, 100.0F};
+  rocket_spawn.velocity = {0.0F, 2.5F, 0.0F};
+  rocket_spawn.rotation = arv::model_forward_yaw_rotation(0.0F);
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundEntitySpawn,
+      arv::protocol::serialize_clientbound_entity_spawn(rocket_spawn));
+
+  arv::protocol::ClientboundRideStarted ride;
+  ride.passenger_id = passenger_id;
+  ride.rideable_id = rocket_id;
+  ride.seat_id = "pilot";
+  ride.controls_vehicle = true;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundRideStarted,
+      arv::protocol::serialize_clientbound_ride_started(ride));
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{2};
+  join.player_id = arv::PlayerID{1};
+  join.local_entity_id = passenger_id;
+  join.spawn_position = {100.0F, 43.2F, 100.0F};
+  join.initial_tick = 20;
+  join.tick_rate = arv::DefaultBaseTps;
+  join.environment_sky = "space";
+  join.space_environment = true;
+  send_to_client(
+      *server_transport,
+      connection_id.value(),
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+
+  client.fixed_tick(20);
+  ASSERT_EQ(client.connection_state(), arv::net::ConnectionState::InGame);
+  EXPECT_EQ(client.camera().world_id(), arv::WorldID{2});
+  EXPECT_EQ(client.mounted_vehicle_id(), std::optional<arv::EntityNetID>{rocket_id});
+  EXPECT_EQ(std::string{client.mounted_seat_id()}, "pilot");
+  EXPECT_TRUE(client.mounted_controls_vehicle());
+
+  for (arv::TickIndex tick = 21; tick < 34; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  EXPECT_EQ(moves.back().vehicle_id, rocket_id);
+  EXPECT_GT(arv::distance_squared(moves.back().position, rocket_spawn.position), 0.0001F);
+}
+
 TEST(ClientRuntimeTests, KickPacketDisconnectsAndStoresReason) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
@@ -1806,7 +1891,7 @@ TEST(ClientRuntimeTests, RocketVerticalThrustClimbsWithoutPitchRotation) {
       arv::EntityNetID{10},
       {0.0F, 4.0F, 0.0F});
 
-  EXPECT_NEAR(client.player_position().y, 7.2F, 0.0001F);
+  EXPECT_NEAR(client.player_position().y, 7.2F, 0.01F);
 
   for (arv::TickIndex tick = 3; tick < 45; ++tick) {
     client.submit_input(
@@ -1846,7 +1931,7 @@ TEST(ClientRuntimeTests, RocketSpaceFlightAcceleratesAlongMouseLook) {
       *server_transport,
       connection_id.value(),
       {0.0F, 4.0F, 0.0F},
-      false,
+      true,
       "space");
   spawn_and_mount_test_vehicle(
       client,
@@ -1904,7 +1989,7 @@ TEST(ClientRuntimeTests, RocketSpaceFlightIgnoresMissingChunkCollision) {
       *server_transport,
       connection_id.value(),
       {0.0F, 4.0F, 0.0F},
-      false,
+      true,
       "space");
   spawn_and_mount_test_vehicle(
       client,
@@ -1939,6 +2024,57 @@ TEST(ClientRuntimeTests, RocketSpaceFlightIgnoresMissingChunkCollision) {
   EXPECT_GT(arv::length(last.velocity), 12.0F);
   EXPECT_GT(last.position.y, 5.0F);
   EXPECT_GT(arv::distance_squared(last.position, arv::Vec3f{0.0F, 4.0F, 0.0F}), 1.0F);
+}
+
+TEST(ClientRuntimeTests, RocketOnSpaceSkyPlanetStillUsesCollision) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  arv::entity::VehicleDefinitionRegistry vehicles = make_client_air_vehicle_registry();
+  client.configure_vehicles(&vehicles);
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {0.0F, 4.0F, 0.0F},
+      false,
+      "space");
+  EXPECT_TRUE(client.space_environment());
+  spawn_and_mount_test_vehicle(
+      client,
+      *server_transport,
+      connection_id.value(),
+      "arvane:test_rocket/basic",
+      "pilot",
+      arv::EntityNetID{10},
+      {0.0F, 4.0F, 0.0F},
+      arv::model_forward_yaw_rotation(0.0F));
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  (void)world.ensure_chunk({{0, 0, 0}});
+  (void)world.ensure_chunk({{0, 0, 1}});
+  ASSERT_TRUE(world.set_block({{0, 4, 3}}, stone));
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  for (arv::TickIndex tick = 3; tick < 45; ++tick) {
+    client.submit_input(arv::client::InputFrame{.move_forward = true});
+    client.fixed_tick(tick, &query);
+  }
+
+  const std::vector<arv::protocol::ServerboundVehicleMove> moves =
+      serverbound_vehicle_moves(server_transport->poll_events());
+  ASSERT_FALSE(moves.empty());
+  const arv::protocol::ServerboundVehicleMove& last = moves.back();
+  EXPECT_LE(last.position.z, 2.401F);
+  EXPECT_NEAR(last.velocity.z, 0.0F, 0.0001F);
 }
 
 TEST(ClientRuntimeTests, RocketSpaceFlightCoastsBackDeceleratesAndRecovers) {

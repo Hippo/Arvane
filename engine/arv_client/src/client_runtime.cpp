@@ -52,6 +52,7 @@ struct ClientRuntime::Impl {
         inventory,
         input,
         entities,
+        pending_local_ride_starts,
         dropped_items,
         skins,
         particles,
@@ -100,7 +101,6 @@ struct ClientRuntime::Impl {
           sender,
           entities,
           vehicle_registry,
-          space_environment,
           void_space_world,
           collision_query,
           tick_seconds);
@@ -139,6 +139,7 @@ struct ClientRuntime::Impl {
     pack_sync.clear();
     world_time_update.reset();
     input.clear_vehicle_prediction();
+    pending_local_ride_starts.clear();
     world_environment_sky.clear();
     space_environment = false;
     void_space_world = false;
@@ -186,6 +187,7 @@ struct ClientRuntime::Impl {
   ClientChunkInbox chunks{};
   ClientInventoryRuntime inventory{};
   ClientEntityMirrorStore entities{};
+  std::vector<protocol::ClientboundRideStarted> pending_local_ride_starts{};
   ClientDroppedItemMirrorStore dropped_items{};
   detail::ClientSkinRuntime skins{};
   ParticleSystem particles{};

@@ -8,6 +8,7 @@
 #include "arv/physics/collision.hpp"
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/crafting.hpp"
+#include "arv/protocol/vehicles.hpp"
 #include "arv/protocol/world_time.hpp"
 
 #include "client_chunk_inbox.hpp"
@@ -25,6 +26,7 @@
 #include <filesystem>
 #include <iterator>
 #include <optional>
+#include <vector>
 
 namespace arv::text {
 class LanguageCatalog;
@@ -111,6 +113,7 @@ struct ClientRuntimeContext {
   ClientInventoryRuntime& inventory;
   ClientInputRuntime& input;
   ClientEntityMirrorStore& entities;
+  std::vector<protocol::ClientboundRideStarted>& pending_local_ride_starts;
   ClientDroppedItemMirrorStore& dropped_items;
   ClientSkinRuntime& skins;
   ParticleSystem& particles;

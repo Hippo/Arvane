@@ -155,7 +155,17 @@ struct VehicleMovementProfile {
   Vec3f collision_size{1.0F, 1.0F, 1.0F};
   protocol::VehicleMoveFlags base_flags{protocol::VehicleMoveFlags::OnGround};
   bool uses_space_aircraft_profile{};
+  bool uses_planetary_rocket_profile{};
 };
+
+[[nodiscard]] bool vehicle_definition_has_tag(
+    const entity::VehicleDefinition& definition,
+    std::string_view tag) noexcept {
+  return std::find(
+             definition.tags.begin(),
+             definition.tags.end(),
+             tag) != definition.tags.end();
+}
 
 [[nodiscard]] const entity::VehicleDefinition* vehicle_definition_for_entity(
     const entity::VehicleDefinitionRegistry* registry,
@@ -182,7 +192,7 @@ struct VehicleMovementProfile {
     const ReplicatedEntityMirror& mirror,
     const entity::VehicleDefinitionRegistry* registry,
     const player::PlayerCommand& command,
-    bool space_environment) noexcept {
+    bool void_space_world) noexcept {
   VehicleMovementProfile profile;
   const entity::VehicleDefinition* definition =
       vehicle_definition_for_entity(registry, mirror.entity_type_name);
@@ -230,12 +240,14 @@ struct VehicleMovementProfile {
       break;
     case entity::VehiclePhysicsKind::Aircraft: {
       const bool use_space_aircraft =
-          space_environment && definition->space_aircraft.has_value();
+          void_space_world && definition->space_aircraft.has_value();
       const entity::AircraftMovementDefinition& aircraft =
           use_space_aircraft
               ? definition->space_aircraft.value()
               : definition->aircraft;
       profile.uses_space_aircraft_profile = use_space_aircraft;
+      profile.uses_planetary_rocket_profile =
+          !use_space_aircraft && vehicle_definition_has_tag(*definition, "arvane:rocket");
       profile.max_forward_speed = aircraft.max_speed;
       profile.max_reverse_speed = 0.0F;
       profile.min_forward_speed = aircraft.min_speed;
@@ -660,7 +672,6 @@ void ClientInputRuntime::send_fixed_tick_input(
     ClientProtocolSender& sender,
     ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
-    bool space_environment,
     bool void_space_world,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
@@ -731,7 +742,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     const entity::VehicleSeatDefinition* seat =
         find_vehicle_seat(definition, player_controller.mounted_seat_id());
     const VehicleMovementProfile profile =
-        vehicle_movement_profile(*mirror, vehicle_registry, command, space_environment);
+        vehicle_movement_profile(*mirror, vehicle_registry, command, void_space_world);
     if (should_reset_vehicle_prediction(
             vehicle_id,
             *mirror,
@@ -768,6 +779,8 @@ void ClientInputRuntime::send_fixed_tick_input(
     const bool aircraft =
         profile.physics == entity::VehiclePhysicsKind::Aircraft;
     const bool space_aircraft = aircraft && profile.uses_space_aircraft_profile;
+    const bool planetary_rocket =
+        aircraft && profile.uses_planetary_rocket_profile;
     const bool submersible =
         profile.physics == entity::VehiclePhysicsKind::Submersible;
     const physics::ICollisionQuery* vehicle_collision_query =
@@ -836,6 +849,73 @@ void ClientInputRuntime::send_fixed_tick_input(
         forward = normalize_or_zero(look_direction(next_yaw, next_pitch));
       }
       predicted_vehicle_velocity_ = forward * forward_speed;
+      attempted_delta = predicted_vehicle_velocity_ * dt;
+    } else if (planetary_rocket) {
+      const f32 target_yaw = player_controller.camera().yaw_radians();
+      const f32 next_yaw = approach_angle(
+          predicted_vehicle_yaw_,
+          target_yaw,
+          profile.yaw_rate * dt);
+      const f32 yaw_delta = wrap_angle_radians(next_yaw - predicted_vehicle_yaw_);
+      predicted_vehicle_yaw_ = next_yaw;
+      predicted_vehicle_rotation_ =
+          vehicle_render_rotation_from_gameplay_yaw(next_yaw);
+      reported_angular_velocity = {0.0F, yaw_delta / dt, 0.0F};
+
+      const Vec3f forward = horizontal_forward(predicted_vehicle_yaw_);
+      f32 forward_speed = dot(predicted_vehicle_velocity_, forward);
+      if (!std::isfinite(forward_speed)) {
+        forward_speed = 0.0F;
+      }
+      if (command.secondary_held || throttle < -0.01F) {
+        forward_speed =
+            approach(forward_speed, 0.0F, profile.brake_force * std::max(-throttle, 1.0F) * dt);
+      } else if (throttle > 0.01F) {
+        forward_speed =
+            approach(forward_speed, profile.max_forward_speed, profile.acceleration * throttle * dt);
+      } else {
+        forward_speed *= std::pow(profile.drag, std::max(dt, 0.0F) * 60.0F);
+        if (std::abs(forward_speed) < 0.02F) {
+          forward_speed = 0.0F;
+        }
+      }
+      forward_speed = std::clamp(
+          forward_speed,
+          0.0F,
+          profile.max_forward_speed);
+
+      const f32 vertical_input = std::clamp(
+          (command.jump_held ? 1.0F : 0.0F) -
+              (command.sneak_held ? 1.0F : 0.0F),
+          -1.0F,
+          1.0F);
+      f32 next_vertical_speed = predicted_vehicle_velocity_.y;
+      if (std::abs(vertical_input) > 0.01F) {
+        const f32 target_vertical_speed =
+            vertical_input > 0.0F
+                ? profile.max_climb_rate
+                : -profile.max_descent_rate;
+        const f32 vertical_acceleration =
+            std::max(profile.lift_strength, profile.acceleration);
+        next_vertical_speed = approach(
+            next_vertical_speed,
+            target_vertical_speed,
+            vertical_acceleration * dt);
+      } else if (vehicle_grounded) {
+        next_vertical_speed = std::max(next_vertical_speed, 0.0F);
+      } else {
+        next_vertical_speed = std::max(
+            next_vertical_speed -
+                VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
+            -VehicleTerminalVelocityBlocksPerSecond);
+      }
+      next_vertical_speed = std::clamp(
+          next_vertical_speed,
+          -profile.max_descent_rate,
+          profile.max_climb_rate);
+
+      predicted_vehicle_velocity_ = forward * forward_speed;
+      predicted_vehicle_velocity_.y = next_vertical_speed;
       attempted_delta = predicted_vehicle_velocity_ * dt;
     } else if (aircraft) {
       const bool near_takeoff_surface =

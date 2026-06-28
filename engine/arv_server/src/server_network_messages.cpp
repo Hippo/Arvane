@@ -45,9 +45,6 @@ inline constexpr std::string_view ChatHoverPermission = "arvane.chat.hover";
   if (record != nullptr && record->world_type == "space") {
     return true;
   }
-  if (runtime.environment().sky == "space") {
-    return true;
-  }
   const auto* generation = runtime.generation_config();
   return generation != nullptr && generation->void_world;
 }

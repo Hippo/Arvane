@@ -71,6 +71,42 @@ namespace {
   return nullptr;
 }
 
+[[nodiscard]] bool local_ride_start_matches(
+    const LocalPlayerController& player_controller,
+    const protocol::ClientboundRideStarted& packet) noexcept {
+  const std::optional<EntityNetID> local_entity =
+      player_controller.local_entity_id();
+  return local_entity.has_value() && packet.passenger_id == local_entity.value();
+}
+
+void queue_pending_local_ride_start(
+    ClientRuntimeContext& runtime,
+    const protocol::ClientboundRideStarted& packet) {
+  std::erase_if(
+      runtime.pending_local_ride_starts,
+      [&](const protocol::ClientboundRideStarted& existing) {
+        return existing.passenger_id == packet.passenger_id;
+      });
+  runtime.pending_local_ride_starts.push_back(packet);
+}
+
+void apply_pending_local_ride_starts(ClientRuntimeContext& runtime) {
+  const std::optional<EntityNetID> local_entity =
+      runtime.player_controller.local_entity_id();
+  if (!local_entity.has_value()) {
+    return;
+  }
+  for (const protocol::ClientboundRideStarted& pending :
+       runtime.pending_local_ride_starts) {
+    if (pending.passenger_id != local_entity.value()) {
+      continue;
+    }
+    runtime.player_controller.apply_ride_started(pending);
+    break;
+  }
+  runtime.pending_local_ride_starts.clear();
+}
+
 void apply_world_join_result(
     ClientRuntimeContext& runtime,
     const protocol::ClientboundWorldJoinResult& result) {
@@ -89,10 +125,11 @@ void apply_world_join_result(
       result.initial_tick,
       result.tick_rate);
   runtime.input.clear_vehicle_prediction();
+  apply_pending_local_ride_starts(runtime);
   runtime.world_environment_sky = result.environment_sky;
   runtime.space_environment =
       result.space_environment || result.environment_sky == "space";
-  runtime.void_space_world = runtime.space_environment;
+  runtime.void_space_world = result.space_environment;
   runtime.space_bodies = result.space_bodies;
   if (runtime.world_transition_status.active) {
     runtime.world_transition_status.phase = ClientWorldTransitionPhase::EnteringWorld;
@@ -126,6 +163,7 @@ void apply_world_leave(
   runtime.pack_sync.clear();
   runtime.world_time_update.reset();
   runtime.input.clear_vehicle_prediction();
+  runtime.pending_local_ride_starts.clear();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
   runtime.void_space_world = false;
@@ -144,6 +182,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.recipe_book.clear();
   runtime.world_time_update.reset();
   runtime.input.clear_vehicle_prediction();
+  runtime.pending_local_ride_starts.clear();
   runtime.world_environment_sky.clear();
   runtime.space_environment = false;
   runtime.void_space_world = false;
@@ -888,17 +927,28 @@ void ClientNetworkRouter::handle_message(
       }
       const protocol::ClientboundRideStarted packet = event.value();
       runtime.entities.apply_ride_started(packet);
-      runtime.player_controller.apply_ride_started(packet);
-      if (const ReplicatedEntityMirror* rideable =
-              runtime.entities.find(packet.rideable_id);
-          rideable != nullptr) {
-        apply_local_mounted_vehicle_transform(
-            runtime,
-            packet.rideable_id,
-            packet.seat_id,
-            rideable->position,
-            rideable->velocity,
-            rideable->rotation);
+      if (runtime.player_controller.local_entity_id().has_value()) {
+        if (local_ride_start_matches(runtime.player_controller, packet)) {
+          runtime.player_controller.apply_ride_started(packet);
+          std::erase_if(
+              runtime.pending_local_ride_starts,
+              [&](const protocol::ClientboundRideStarted& existing) {
+                return existing.passenger_id == packet.passenger_id;
+              });
+          if (const ReplicatedEntityMirror* rideable =
+                  runtime.entities.find(packet.rideable_id);
+              rideable != nullptr) {
+            apply_local_mounted_vehicle_transform(
+                runtime,
+                packet.rideable_id,
+                packet.seat_id,
+                rideable->position,
+                rideable->velocity,
+                rideable->rotation);
+          }
+        }
+      } else {
+        queue_pending_local_ride_start(runtime, packet);
       }
       return;
     }
