@@ -1494,10 +1494,16 @@ TEST(CommandTests, SpaceExitTransitionsMountedRocketToConfiguredSpaceWorld) {
   ASSERT_NE(velocity, nullptr);
   velocity->linear = physics->linear_velocity;
 
-  harness.server.tick();
-
   const arv::server::WorldRecord* space_record =
       harness.server.worlds().find("solar_system");
+  for (int i = 0; i < 200 &&
+                  (space_record == nullptr ||
+                   harness.server.world_runtime(space_record->id) == nullptr);
+       ++i) {
+    harness.server.tick();
+    harness.client.fixed_tick(harness.server.tick_index());
+    space_record = harness.server.worlds().find("solar_system");
+  }
   ASSERT_NE(space_record, nullptr);
   EXPECT_EQ(space_record->world_type, "space");
   arv::world::WorldRuntime* space_world =

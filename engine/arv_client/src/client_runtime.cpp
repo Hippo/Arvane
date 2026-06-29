@@ -106,7 +106,7 @@ struct ClientRuntime::Impl {
           tick_seconds);
     }
 
-    if (connection.state() == net::ConnectionState::InGame) {
+    if (connection.state() == net::ConnectionState::InGame && !void_space_world) {
       chunk_interest.set_world_id(player_controller.camera().world_id());
       chunk_interest.update_player_position(player_controller.player_position());
       if (chunk_interest.consume_interest_changed()) {

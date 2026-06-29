@@ -103,6 +103,7 @@ struct WorldFileOperationOptions {
   // 0 means automatic: use a capped, short-lived file-operation fan-out for
   // world load/save phases.
   u32 max_threads{};
+  bool load_chunk_regions{true};
 };
 
 [[nodiscard]] u32 resolve_world_file_operation_threads(

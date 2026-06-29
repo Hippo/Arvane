@@ -830,7 +830,9 @@ void ClientSession::handle_message(std::span<const u8> payload) {
           floor_div(static_cast<i32>(std::floor(join.value().spawn_position.y)), ChunkSize),
           floor_div(static_cast<i32>(std::floor(join.value().spawn_position.z)), ChunkSize),
       }};
-      send_chunk_interest(center, join.value().effective_view_distance);
+      if (!join.value().space_environment) {
+        send_chunk_interest(center, join.value().effective_view_distance);
+      }
       return;
     }
     case protocol::MessageType::ClientboundWorldLeave: {

@@ -113,6 +113,19 @@ arv::usize message_type_count(
   return count;
 }
 
+arv::usize transport_message_type_count(
+    std::span<const arv::net::TransportMessage> messages,
+    arv::protocol::MessageType type) {
+  arv::usize count = 0U;
+  for (const arv::net::TransportMessage& message : messages) {
+    const auto decoded = arv::protocol::deserialize_envelope(message.payload);
+    if (decoded && decoded.value().envelope.message_type == type) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 template <typename Packet, typename Decode>
 Packet decode_single_serverbound(
     const std::vector<arv::net::NetworkEvent>& events,
@@ -772,6 +785,53 @@ TEST(ClientSessionTests, OutOfStateWorldJoinDisconnectsBeforeEnteringGame) {
   ASSERT_EQ(scripted->close_reasons.size(), 1U);
   EXPECT_NE(scripted->close_reasons.front().find("packet 0x"), std::string::npos);
   EXPECT_NE(scripted->close_reasons.front().find("session state"), std::string::npos);
+}
+
+TEST(ClientSessionTests, SpaceWorldJoinDoesNotSendInitialChunkInterest) {
+  auto transport = std::make_unique<ScriptedClientTransport>();
+  ScriptedClientTransport* scripted = transport.get();
+  arv::client::ClientSession session(std::move(transport));
+  const auto connection_id = session.connect({"in-process", 0});
+  ASSERT_TRUE(connection_id);
+  scripted->push_event({
+      arv::net::NetworkEventType::ConnectionAccepted,
+      connection_id.value()});
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::ProtocolHandshake);
+
+  arv::protocol::ClientboundHello server_hello;
+  server_hello.accepted = true;
+  server_hello.required_followup_sync = false;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundHello,
+      arv::protocol::serialize_clientbound_hello(server_hello));
+  session.pump();
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::WorldJoin);
+  scripted->sent.clear();
+
+  arv::protocol::ClientboundWorldJoinResult join;
+  join.accepted = true;
+  join.world_id = arv::WorldID{7};
+  join.player_id = arv::PlayerID{2};
+  join.local_entity_id = arv::EntityNetID{3};
+  join.spawn_position = {32.0F, 0.0F, -32.0F};
+  join.tick_rate = arv::DefaultBaseTps;
+  join.effective_view_distance = 4;
+  join.environment_sky = "space";
+  join.space_environment = true;
+  scripted->push_message(
+      arv::protocol::MessageType::ClientboundWorldJoinResult,
+      arv::protocol::serialize_clientbound_world_join_result(join));
+  session.pump();
+
+  ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::InGame);
+  ASSERT_TRUE(session.world_join().has_value());
+  EXPECT_TRUE(session.world_join()->space_environment);
+  EXPECT_EQ(
+      transport_message_type_count(
+          scripted->sent,
+          arv::protocol::MessageType::ServerboundChunkInterestUpdate),
+      0U);
 }
 
 TEST(ClientSessionTests, StaleMessageAfterConnectionCloseDoesNotResurrectWorldState) {

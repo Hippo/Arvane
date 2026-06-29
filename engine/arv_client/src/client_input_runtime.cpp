@@ -59,6 +59,24 @@ inline constexpr u32 MaxDropItemRequestsPerTick = 4U;
   return std::max(value - max_delta, target);
 }
 
+[[nodiscard]] Vec3f approach_vec3(
+    Vec3f value,
+    Vec3f target,
+    f32 max_delta) noexcept {
+  if (max_delta <= 0.0F) {
+    return value;
+  }
+  const Vec3f delta = target - value;
+  const f32 delta_length = length(delta);
+  if (!std::isfinite(delta_length) || delta_length <= max_delta) {
+    return target;
+  }
+  if (delta_length <= 0.0F) {
+    return target;
+  }
+  return value + delta * (max_delta / delta_length);
+}
+
 [[nodiscard]] f32 wrap_angle_radians(f32 radians) noexcept {
   while (radians > PiRadians) {
     radians -= TauRadians;
@@ -805,25 +823,13 @@ void ClientInputRuntime::send_fixed_tick_input(
     Vec3f attempted_delta{};
 
     if (space_aircraft) {
-      f32 forward_speed = length(predicted_vehicle_velocity_);
-      if (!std::isfinite(forward_speed)) {
-        forward_speed = 0.0F;
+      Vec3f current_velocity =
+          finite(predicted_vehicle_velocity_) ? predicted_vehicle_velocity_ : Vec3f{};
+      f32 current_speed = length(current_velocity);
+      if (!std::isfinite(current_speed)) {
+        current_speed = 0.0F;
+        current_velocity = {};
       }
-      if (command.secondary_held) {
-        forward_speed = approach(forward_speed, 0.0F, profile.brake_force * dt);
-      } else if (throttle > 0.01F) {
-        forward_speed += throttle * profile.acceleration * dt;
-      } else if (throttle < -0.01F) {
-        forward_speed =
-            approach(forward_speed, 0.0F, profile.brake_force * -throttle * dt);
-      } else if (forward_speed < 0.02F) {
-        forward_speed = 0.0F;
-      }
-      forward_speed = std::clamp(
-          forward_speed,
-          profile.min_forward_speed,
-          profile.max_forward_speed);
-
       const f32 current_pitch =
           vehicle_pitch_from_rotation(predicted_vehicle_rotation_);
       const f32 target_yaw = player_controller.camera().yaw_radians();
@@ -848,7 +854,45 @@ void ClientInputRuntime::send_fixed_tick_input(
       if (length(forward) <= 0.0F) {
         forward = normalize_or_zero(look_direction(next_yaw, next_pitch));
       }
-      predicted_vehicle_velocity_ = forward * forward_speed;
+      if (length(forward) <= 0.0F) {
+        forward = {0.0F, 0.0F, -1.0F};
+      }
+
+      if (command.secondary_held || throttle < -0.01F) {
+        const f32 brake_scale =
+            command.secondary_held ? 1.0F : std::min(-throttle, 1.0F);
+        const f32 target_speed =
+            approach(current_speed, 0.0F, profile.brake_force * brake_scale * dt);
+        const Vec3f brake_direction = normalize_or_zero(current_velocity);
+        const Vec3f target_velocity = brake_direction * target_speed;
+        predicted_vehicle_velocity_ = approach_vec3(
+            current_velocity,
+            target_velocity,
+            profile.brake_force * brake_scale * dt);
+      } else if (throttle > 0.01F) {
+        const f32 target_speed = std::clamp(
+            current_speed + throttle * profile.acceleration * dt,
+            profile.min_forward_speed,
+            profile.max_forward_speed);
+        const Vec3f target_velocity = forward * target_speed;
+        predicted_vehicle_velocity_ = approach_vec3(
+            current_velocity,
+            target_velocity,
+            profile.acceleration * throttle * dt);
+      } else {
+        predicted_vehicle_velocity_ =
+            current_speed < 0.02F ? Vec3f{} : current_velocity;
+      }
+
+      const f32 predicted_speed = length(predicted_vehicle_velocity_);
+      if (std::isfinite(predicted_speed) &&
+          predicted_speed > profile.max_forward_speed &&
+          predicted_speed > 0.0F) {
+        predicted_vehicle_velocity_ =
+            predicted_vehicle_velocity_ * (profile.max_forward_speed / predicted_speed);
+      } else if (!std::isfinite(predicted_speed)) {
+        predicted_vehicle_velocity_ = {};
+      }
       attempted_delta = predicted_vehicle_velocity_ * dt;
     } else if (planetary_rocket) {
       const f32 target_yaw = player_controller.camera().yaw_radians();

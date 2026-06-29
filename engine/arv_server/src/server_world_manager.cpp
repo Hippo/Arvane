@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -431,6 +432,19 @@ void apply_runtime_world_type_defaults(
   return nullptr;
 }
 
+[[nodiscard]] bool record_streams_terrain_regions(
+    const world::SpaceDefinitionRegistry* registry,
+    const WorldRecord& record) {
+  if (is_space_world_type(record.world_type) ||
+      is_void_world_generator(record.generator_id)) {
+    return false;
+  }
+  const world::WorldDefinition* definition =
+      find_world_definition_for_record(registry, record);
+  return definition == nullptr ||
+         definition->kind != world::WorldDefinitionKind::Space;
+}
+
 [[nodiscard]] std::string world_runtime_name_for_definition_id(
     std::string_view definition_id) {
   const usize slash = definition_id.find_last_of('/');
@@ -504,6 +518,128 @@ void apply_definition_environment(
     (void)runtime.set_game_rule_bool("doMobSpawning", false);
     (void)runtime.set_game_rule_bool("doWeatherCycle", false);
   }
+}
+
+void restore_loaded_save_into_world(
+    world::WorldRuntime& runtime,
+    const persistence::LoadedSaveData& loaded_save,
+    TickRate base_tps,
+    const entity::EntityRegistry* entity_registry,
+    const entity::VehicleDefinitionRegistry* vehicle_registry);
+
+struct WorldLoadPrepareSnapshot {
+  WorldID world_id{};
+  std::string world_name{};
+  std::string world_type{"default"};
+  std::string record_generator_id{};
+  u64 record_seed{};
+  std::optional<Location> record_spawn{};
+  TickIndex tick_index{};
+  TickRate base_tps{DefaultBaseTps};
+  world::WorldTickPolicy tick_policy{};
+  std::optional<world::WorldGenerationConfig> definition_generation{};
+  std::optional<world::WorldGenerationConfig> active_generation{};
+  std::optional<world::WorldEnvironmentState> definition_environment{};
+  bool definition_is_space{};
+  std::filesystem::path world_path{};
+  const entity::EntityRegistry* entity_registry{};
+  const entity::VehicleDefinitionRegistry* vehicle_registry{};
+};
+
+[[nodiscard]] std::string generator_id_from_generation(
+    const world::WorldGenerationConfig& generation,
+    std::string fallback) {
+  if (generation.void_world || generation.id == world::VoidWorldGenerationID ||
+      generation.dimension_id == world::VoidWorldGenerationID) {
+    return std::string{world::VoidWorldGenerationID};
+  }
+  if (!generation.id.empty()) {
+    return generation.id;
+  }
+  if (!generation.dimension_id.empty()) {
+    return generation.dimension_id;
+  }
+  return std::move(fallback);
+}
+
+void apply_snapshot_environment(
+    world::WorldRuntime& runtime,
+    const WorldLoadPrepareSnapshot& snapshot) {
+  if (snapshot.definition_environment.has_value()) {
+    runtime.set_environment(snapshot.definition_environment.value());
+  }
+  if (snapshot.definition_is_space) {
+    (void)runtime.set_game_rule_bool("allowBlockPlacement", false);
+    (void)runtime.set_game_rule_bool("doMobSpawning", false);
+    (void)runtime.set_game_rule_bool("doWeatherCycle", false);
+  }
+}
+
+[[nodiscard]] Expected<PreparedWorldLoad, persistence::PersistenceError>
+prepare_world_runtime_from_save(
+    const WorldLoadPrepareSnapshot& snapshot,
+    persistence::LoadedSaveData loaded_save) {
+  if (!loaded_save.has_world_metadata) {
+    return Expected<PreparedWorldLoad, persistence::PersistenceError>::failure(
+        persistence::PersistenceError{
+            "World metadata was not found for '" + snapshot.world_name + "'."});
+  }
+
+  auto runtime = std::make_unique<world::WorldRuntime>(snapshot.world_id);
+  world::WorldGenerationConfig generation = loaded_save.world.generation_config;
+  if (is_space_world_type(snapshot.world_type) ||
+      generation.void_world ||
+      generation.id == world::VoidWorldGenerationID ||
+      generation.dimension_id == world::VoidWorldGenerationID) {
+    generation = world::make_void_world_generation_config();
+  } else if (snapshot.definition_generation.has_value()) {
+    generation = world::refresh_generation_config_for_current_dimension(
+        generation,
+        snapshot.definition_generation.value());
+  } else if (snapshot.active_generation.has_value() &&
+             (generation.dimension_id.empty() ||
+              generation.dimension_id ==
+                  snapshot.active_generation->dimension_id)) {
+    generation = world::refresh_generation_config_for_current_dimension(
+        generation,
+        snapshot.active_generation.value());
+  }
+
+  const u64 seed =
+      loaded_save.world.seed == 0U
+          ? (snapshot.record_seed == 0U ? generated_world_seed() : snapshot.record_seed)
+          : loaded_save.world.seed;
+  runtime->set_generation_context(seed, generation);
+  runtime->configure_height(world::world_height_settings_from_generation_config(generation));
+  apply_runtime_world_type_defaults(*runtime, snapshot.world_type, generation);
+  apply_snapshot_environment(*runtime, snapshot);
+  Location spawn =
+      loaded_save.world.spawn_point.value_or(
+          snapshot.record_spawn.value_or(
+              world::generate_world_spawn_location(generation, seed)));
+  spawn.world = snapshot.world_id;
+  runtime->set_spawn_point(spawn);
+  runtime->set_tick_index(snapshot.tick_index);
+  runtime->set_tick_policy(snapshot.tick_policy);
+  restore_loaded_save_into_world(
+      *runtime,
+      loaded_save,
+      snapshot.base_tps,
+      snapshot.entity_registry,
+      snapshot.vehicle_registry);
+  runtime->set_tick_index(snapshot.tick_index);
+
+  PreparedWorldLoad prepared;
+  prepared.world_id = snapshot.world_id;
+  prepared.world_name = snapshot.world_name;
+  prepared.seed = seed;
+  prepared.spawn = spawn;
+  prepared.generator_id =
+      generator_id_from_generation(generation, snapshot.record_generator_id);
+  prepared.path = snapshot.world_path;
+  prepared.runtime = std::move(runtime);
+  return Expected<PreparedWorldLoad, persistence::PersistenceError>::success(
+      std::move(prepared));
 }
 
 [[nodiscard]] u32 player_count_for_world(
@@ -982,12 +1118,19 @@ void ensure_launch_vehicle_fuel_state(
     const voxel::BlockRegistry& block_registry,
     const player::ItemRegistry& item_registry) {
   command::SaveAllCommandResult out;
-  const std::vector<persistence::SavedChunkSection> chunks =
-      capture_saved_chunks(runtime);
   const std::vector<entity::PersistentEntityRecord> entities =
       runtime.persistent_entity_records();
   const world::WorldGenerationConfig* active_generation =
       runtime.generation_config();
+  const bool streams_terrain =
+      !is_space_world_type(record.world_type) &&
+      (active_generation == nullptr ||
+       (!active_generation->void_world &&
+        active_generation->id != world::VoidWorldGenerationID &&
+        active_generation->dimension_id != world::VoidWorldGenerationID));
+  const std::vector<persistence::SavedChunkSection> chunks =
+      streams_terrain ? capture_saved_chunks(runtime)
+                      : std::vector<persistence::SavedChunkSection>{};
   const world::WorldHeightSettings height = runtime.height_settings();
   persistence::WorldMetadata world_metadata{
       record.name,
@@ -1326,6 +1469,9 @@ void ServerRuntimeImpl::save_and_unload_world_if_idle_after_exit(WorldID world_i
   if (player_count_for_world(sessions_, world_id) > 0U) {
     return;
   }
+  if (world_id == DefaultWorldID || record->is_default) {
+    return;
+  }
 
   command::SaveAllCommandResult saved = save_loaded_world(world_id, true);
   if (!saved.success) {
@@ -1336,10 +1482,6 @@ void ServerRuntimeImpl::save_and_unload_world_if_idle_after_exit(WorldID world_i
         saved.message);
     return;
   }
-  if (world_id == DefaultWorldID || record->is_default) {
-    return;
-  }
-
   const std::string unloaded_name = record->name;
   loaded_worlds_.erase(world_id);
   record = worlds_.find(world_id);
@@ -1671,6 +1813,9 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
   if (record->state == WorldRuntimeState::Running) {
     return op_failure("World '" + record->name + "' is already loaded.");
   }
+  if (record->state == WorldRuntimeState::Loading) {
+    return op_failure("World '" + record->name + "' is already loading.");
+  }
   if (block_registry_ == nullptr || item_registry_ == nullptr) {
     return op_failure("Cannot load a world without block and item registries.");
   }
@@ -1700,24 +1845,36 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
     }
   }
 
+  persistence::WorldFileOperationOptions load_options;
+  load_options.load_chunk_regions =
+      record_streams_terrain_regions(space_definitions_, *record);
   auto loaded_save_result = persistence::load_server_root(
       server_save_root_,
       record->name,
       *block_registry_,
-      *item_registry_);
+      *item_registry_,
+      load_options);
   if (!loaded_save_result) {
     return op_failure(loaded_save_result.error().message);
   }
-  persistence::LoadedSaveData loaded_save = std::move(loaded_save_result.value());
+  return finish_loaded_world_from_save(
+      *record,
+      std::move(loaded_save_result.value()));
+}
+
+command::WorldOperationCommandResult
+ServerRuntimeImpl::finish_loaded_world_from_save(
+    WorldRecord& record,
+    persistence::LoadedSaveData loaded_save) {
   if (!loaded_save.has_world_metadata) {
-    return op_failure("World metadata was not found for '" + record->name + "'.");
+    return op_failure("World metadata was not found for '" + record.name + "'.");
   }
 
-  auto runtime = std::make_unique<world::WorldRuntime>(record->id);
+  auto runtime = std::make_unique<world::WorldRuntime>(record.id);
   world::WorldGenerationConfig generation = loaded_save.world.generation_config;
   const world::WorldDefinition* definition =
-      find_world_definition_for_record(space_definitions_, *record);
-  if (is_space_world_type(record->world_type) ||
+      find_world_definition_for_record(space_definitions_, record);
+  if (is_space_world_type(record.world_type) ||
       generation.void_world ||
       generation.id == world::VoidWorldGenerationID ||
       generation.dimension_id == world::VoidWorldGenerationID) {
@@ -1730,8 +1887,8 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
       generator_to_resolve = generation.dimension_id;
     } else if (!generation.id.empty()) {
       generator_to_resolve = generation.id;
-    } else if (!record->generator_id.empty()) {
-      generator_to_resolve = record->generator_id;
+    } else if (!record.generator_id.empty()) {
+      generator_to_resolve = record.generator_id;
     }
     if (!generator_to_resolve.empty()) {
       std::optional<world::WorldGenerationConfig> resolved_generation =
@@ -1751,17 +1908,17 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
         chunk_generation_->config);
   }
   const u64 seed = loaded_save.world.seed == 0U
-                       ? (record->seed == 0U ? generated_world_seed() : record->seed)
+                       ? (record.seed == 0U ? generated_world_seed() : record.seed)
                        : loaded_save.world.seed;
   runtime->set_generation_context(seed, generation);
   runtime->configure_height(world::world_height_settings_from_generation_config(generation));
-  apply_runtime_world_type_defaults(*runtime, record->world_type, generation);
-  apply_definition_environment(*runtime, space_definitions_, *record);
+  apply_runtime_world_type_defaults(*runtime, record.world_type, generation);
+  apply_definition_environment(*runtime, space_definitions_, record);
   Location spawn =
       loaded_save.world.spawn_point.value_or(
-          record->spawn.value_or(
+          record.spawn.value_or(
               world::generate_world_spawn_location(generation, seed)));
-  spawn.world = record->id;
+  spawn.world = record.id;
   runtime->set_spawn_point(spawn);
   runtime->set_tick_index(tick_index_);
   runtime->set_tick_policy(world_tick_policy_);
@@ -1773,20 +1930,20 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
       vehicle_registry_);
   runtime->set_tick_index(tick_index_);
 
-  loaded_worlds_[record->id] = std::move(runtime);
-  record->state = WorldRuntimeState::Running;
-  record->load_on_start = true;
-  record->seed = seed;
-  record->spawn = spawn;
-  record->path = world_root_path(server_save_root_, record->name).string();
-  record->generator_id = generator_id_from_world_json(
-      read_json_value(world_root_path(server_save_root_, record->name) / "world.json")
+  loaded_worlds_[record.id] = std::move(runtime);
+  record.state = WorldRuntimeState::Running;
+  record.load_on_start = true;
+  record.seed = seed;
+  record.spawn = spawn;
+  record.path = world_root_path(server_save_root_, record.name).string();
+  record.generator_id = generator_id_from_world_json(
+      read_json_value(world_root_path(server_save_root_, record.name) / "world.json")
           .value_or(io::DataValue::object()));
-  if (is_space_world_type(record->world_type) || generation.void_world) {
-    record->generator_id = std::string{world::VoidWorldGenerationID};
+  if (is_space_world_type(record.world_type) || generation.void_world) {
+    record.generator_id = std::string{world::VoidWorldGenerationID};
   }
-  if (record->generator_id.empty()) {
-    record->generator_id = default_generator_id(chunk_generation_);
+  if (record.generator_id.empty()) {
+    record.generator_id = default_generator_id(chunk_generation_);
   }
   if (!save_registry_index(server_save_root_, worlds_)) {
     return op_failure("Loaded world, but failed to persist world registry metadata.");
@@ -1794,15 +1951,15 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
   core::info(
       "worlds",
       "loaded world '{}' id={} seed={}",
-      record->name,
-      record->id.value,
+      record.name,
+      record.id.value,
       seed);
-  for (const SpaceBodyRuntimeView& body : space_bodies_for_world(record->id)) {
+  for (const SpaceBodyRuntimeView& body : space_bodies_for_world(record.id)) {
     core::info(
         "space",
         "body '{}' in world '{}' target='{}' pos=({}, {}, {}) visual_radius={} entry_radius={} entry_enabled={}",
         body.body_id,
-        record->name,
+        record.name,
         body.target_world_id,
         body.position.x,
         body.position.y,
@@ -1811,7 +1968,235 @@ command::WorldOperationCommandResult ServerRuntimeImpl::load_world_from_command(
         body.entry_radius,
         body.entry_enabled);
   }
-  return op_success("Loaded world '" + record->name + "'.");
+  return op_success("Loaded world '" + record.name + "'.");
+}
+
+command::WorldOperationCommandResult ServerRuntimeImpl::install_prepared_world_load(
+    WorldRecord& record,
+    PreparedWorldLoad prepared,
+    bool persist_load_on_start) {
+  if (prepared.world_id != record.id || prepared.world_name != record.name) {
+    return op_failure("Prepared world load does not match registry record.");
+  }
+  if (prepared.runtime == nullptr) {
+    return op_failure("Prepared world load did not include a runtime.");
+  }
+
+  loaded_worlds_[record.id] = std::move(prepared.runtime);
+  record.state = WorldRuntimeState::Running;
+  if (persist_load_on_start) {
+    record.load_on_start = true;
+  }
+  record.seed = prepared.seed;
+  record.spawn = prepared.spawn;
+  record.path = prepared.path.string();
+  record.generator_id = std::move(prepared.generator_id);
+  if (record.generator_id.empty()) {
+    record.generator_id = default_generator_id(chunk_generation_);
+  }
+  if (persist_load_on_start && !save_registry_index(server_save_root_, worlds_)) {
+    return op_failure("Loaded world, but failed to persist world registry metadata.");
+  }
+  core::info(
+      "worlds",
+      "loaded world '{}' id={} seed={}",
+      record.name,
+      record.id.value,
+      record.seed);
+  for (const SpaceBodyRuntimeView& body : space_bodies_for_world(record.id)) {
+    core::info(
+        "space",
+        "body '{}' in world '{}' target='{}' pos=({}, {}, {}) visual_radius={} entry_radius={} entry_enabled={}",
+        body.body_id,
+        record.name,
+        body.target_world_id,
+        body.position.x,
+        body.position.y,
+        body.position.z,
+        body.visual_radius,
+        body.entry_radius,
+        body.entry_enabled);
+  }
+  return op_success("Loaded world '" + record.name + "'.");
+}
+
+command::WorldOperationCommandResult ServerRuntimeImpl::request_world_load_async(
+    WorldRecord& record) {
+  if (record.state == WorldRuntimeState::Running) {
+    return op_success("World '" + record.name + "' is already loaded.");
+  }
+  if (record.state == WorldRuntimeState::Loading) {
+    return op_success("World '" + record.name + "' is already loading.");
+  }
+  if (block_registry_ == nullptr || item_registry_ == nullptr) {
+    return op_failure("Cannot load a world without block and item registries.");
+  }
+  const std::optional<std::filesystem::path> safe_path =
+      canonical_world_path_if_safe(server_save_root_, record.name);
+  if (!safe_path.has_value()) {
+    return op_failure("World path is not safely contained by the server worlds directory.");
+  }
+  std::error_code path_error;
+  const bool metadata_exists =
+      std::filesystem::exists(safe_path.value() / "world.json", path_error);
+  if (path_error) {
+    return op_failure(
+        "Failed to inspect world metadata for '" + record.name + "': " +
+        path_error.message());
+  }
+  if (!metadata_exists) {
+    command::WorldOperationCommandResult regenerated =
+        materialize_world_save_for_record(
+            record,
+            find_world_definition_for_record(space_definitions_, record));
+    if (!regenerated.success) {
+      return op_failure(
+          "World target '" + record.name +
+          "' does not exist and could not be regenerated: " +
+          regenerated.message);
+    }
+  }
+
+  persistence::WorldFileOperationOptions load_options;
+  load_options.load_chunk_regions =
+      record_streams_terrain_regions(space_definitions_, record);
+  const std::filesystem::path save_root = server_save_root_;
+  const std::string world_name = record.name;
+  const voxel::BlockRegistry* block_registry = block_registry_;
+  const player::ItemRegistry* item_registry = item_registry_;
+  WorldLoadPrepareSnapshot snapshot;
+  snapshot.world_id = record.id;
+  snapshot.world_name = record.name;
+  snapshot.world_type = record.world_type.empty() ? "default" : record.world_type;
+  snapshot.record_generator_id = record.generator_id;
+  snapshot.record_seed = record.seed;
+  snapshot.record_spawn = record.spawn;
+  snapshot.tick_index = tick_index_;
+  snapshot.base_tps = base_tps_;
+  snapshot.tick_policy = world_tick_policy_;
+  snapshot.world_path = safe_path.value();
+  snapshot.entity_registry = entity_registry_;
+  snapshot.vehicle_registry = vehicle_registry_;
+  if (chunk_generation_.has_value()) {
+    snapshot.active_generation = chunk_generation_->config;
+  }
+  if (const world::WorldDefinition* definition =
+          find_world_definition_for_record(space_definitions_, record);
+      definition != nullptr) {
+    snapshot.definition_is_space =
+        definition->kind == world::WorldDefinitionKind::Space;
+    if (!definition->worldgen.empty()) {
+      if (std::optional<world::WorldGenerationConfig> resolved =
+              resolve_world_generation_config(definition->worldgen);
+          resolved.has_value()) {
+        snapshot.definition_generation = std::move(resolved.value());
+      }
+    }
+    if (space_definitions_ != nullptr) {
+      if (const world::EnvironmentDefinition* environment =
+              space_definitions_->find_environment(definition->environment);
+          environment != nullptr) {
+        snapshot.definition_environment = world::WorldEnvironmentState{
+            std::max(0.0F, environment->gravity_scale),
+            environment->has_atmosphere,
+            environment->has_oxygen,
+            environment->sky,
+            environment->ambient_light,
+            environment->fog};
+      }
+    }
+  }
+
+  try {
+    PendingWorldLoad pending;
+    pending.world_id = record.id;
+    pending.world_name = record.name;
+    pending.persist_load_on_start = false;
+    pending.result = std::async(
+        std::launch::async,
+        [save_root,
+         world_name,
+         block_registry,
+         item_registry,
+         load_options,
+         snapshot = std::move(snapshot)]() mutable
+            -> Expected<PreparedWorldLoad, persistence::PersistenceError> {
+          auto loaded = persistence::load_server_root(
+              save_root,
+              world_name,
+              *block_registry,
+              *item_registry,
+              load_options);
+          if (!loaded) {
+            return Expected<PreparedWorldLoad, persistence::PersistenceError>::failure(
+                loaded.error());
+          }
+          return prepare_world_runtime_from_save(
+              snapshot,
+              std::move(loaded.value()));
+        });
+    record.state = WorldRuntimeState::Loading;
+    pending_world_loads_.push_back(std::move(pending));
+  } catch (const std::exception& error) {
+    return op_failure(
+        "Failed to start async world load for '" + record.name + "': " +
+        error.what());
+  }
+
+  core::info(
+      "worlds",
+      "started async load for world '{}' id={}",
+      record.name,
+      record.id.value);
+  return op_success("Loading world '" + record.name + "'.");
+}
+
+void ServerRuntimeImpl::drain_pending_world_loads() {
+  for (usize index = 0U; index < pending_world_loads_.size();) {
+    PendingWorldLoad& pending = pending_world_loads_[index];
+    if (pending.result.wait_for(std::chrono::seconds{0}) !=
+        std::future_status::ready) {
+      ++index;
+      continue;
+    }
+
+    auto prepared = pending.result.get();
+    WorldRecord* record = worlds_.find(pending.world_id);
+    if (record == nullptr || record->name != pending.world_name) {
+      pending_world_loads_.erase(
+          pending_world_loads_.begin() + static_cast<isize>(index));
+      continue;
+    }
+    if (!prepared) {
+      record->state = WorldRuntimeState::Stopped;
+      core::warn(
+          "worlds",
+          "async load for world '{}' failed: {}",
+          record->name,
+          prepared.error().message);
+      pending_world_loads_.erase(
+          pending_world_loads_.begin() + static_cast<isize>(index));
+      continue;
+    }
+
+    command::WorldOperationCommandResult finished =
+        install_prepared_world_load(
+            *record,
+            std::move(prepared.value()),
+            pending.persist_load_on_start);
+    if (!finished.success) {
+      if (record->state == WorldRuntimeState::Loading) {
+        record->state = WorldRuntimeState::Stopped;
+      }
+      core::warn(
+          "worlds",
+          "async load for world '{}' failed: {}",
+          record->name,
+          finished.message);
+    }
+    pending_world_loads_.erase(
+        pending_world_loads_.begin() + static_cast<isize>(index));
+  }
 }
 
 command::WorldOperationCommandResult ServerRuntimeImpl::unload_world_from_command(
@@ -1825,6 +2210,9 @@ command::WorldOperationCommandResult ServerRuntimeImpl::unload_world_from_comman
     return op_failure("Cannot unload the current default world. Change the default world first.");
   }
   if (record->state != WorldRuntimeState::Running) {
+    if (record->state == WorldRuntimeState::Loading) {
+      return op_failure("World '" + record->name + "' is currently loading.");
+    }
     return op_failure("World '" + record->name + "' is already unloaded.");
   }
   if (player_count_for_world(sessions_, record->id) > 0U && !force) {
@@ -1882,7 +2270,8 @@ command::WorldOperationCommandResult ServerRuntimeImpl::delete_world_from_comman
   if (record->is_default || record->id == DefaultWorldID) {
     return op_failure("Cannot delete the default world. Change the default world first.");
   }
-  if (record->state == WorldRuntimeState::Running) {
+  if (record->state == WorldRuntimeState::Running ||
+      record->state == WorldRuntimeState::Loading) {
     return op_failure("World '" + record->name + "' is loaded. Unload it before deleting.");
   }
   const std::optional<std::filesystem::path> safe_path =
@@ -1913,7 +2302,8 @@ command::WorldOperationCommandResult ServerRuntimeImpl::rename_world_from_comman
   if (record == nullptr) {
     return op_failure("Unknown world '" + std::string{old_name} + "'. Use /world list to see available worlds.");
   }
-  if (record->is_default || record->state == WorldRuntimeState::Running) {
+  if (record->is_default || record->state == WorldRuntimeState::Running ||
+      record->state == WorldRuntimeState::Loading) {
     return op_failure("Cannot rename a loaded or default world.");
   }
   if (worlds_.find(new_name) != nullptr) {
@@ -2212,15 +2602,15 @@ void ServerRuntimeImpl::tick_space_exit_transitions() {
         continue;
       }
       if (target_record->state != WorldRuntimeState::Running) {
-        command::WorldOperationCommandResult loaded =
-            load_world_from_command(target_record->name);
-        if (!loaded.success) {
+        command::WorldOperationCommandResult load_request =
+            request_world_load_async(*target_record);
+        if (!load_request.success) {
           core::warn(
               "space_exit",
               "rejected space exit from world '{}' to '{}': {}",
               source_definition->id,
               target_definition->id,
-              loaded.message);
+              load_request.message);
           send_space_transition_feedback(
               *runtime,
               entity,
@@ -2228,9 +2618,15 @@ void ServerRuntimeImpl::tick_space_exit_transitions() {
               true);
           continue;
         }
-        target_record =
-            find_world_record_for_definition_id(worlds_, target_definition->id);
+        send_space_transition_feedback(
+            *runtime,
+            entity,
+            "Preparing target space world...",
+            false);
+        continue;
       }
+      target_record =
+          find_world_record_for_definition_id(worlds_, target_definition->id);
       if (target_record == nullptr ||
           world_by_id(target_record->id) == nullptr) {
         core::warn(
@@ -2735,8 +3131,10 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
 
   {
     ARV_PROFILE_ZONE("World transition target chunk prepare");
-    target_world->request_chunk_section_load(
-        transition_load_section_for_position(*target_world, request.target_position));
+    if (world_streams_terrain(target_world->id(), target_world)) {
+      target_world->request_chunk_section_load(
+          transition_load_section_for_position(*target_world, request.target_position));
+    }
   }
 
   const double receive_time =
@@ -2993,15 +3391,17 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
     close_container_sessions_for_player_session(
         session.session_id,
         protocol::ContainerCloseReason::ChunkUnloaded);
-    protocol::ServerboundChunkInterestUpdate initial_interest;
-    initial_interest.world_id = session.world_id;
-    initial_interest.center_chunk = player_chunk_coord(*target_state);
-    initial_interest.client_view_distance = max_view_distance_;
-    chunk_streamer_.update_player_interest(
-        session,
-        initial_interest.center_chunk,
-        target_world->height_settings(),
-        initial_interest);
+    if (world_streams_terrain(session.world_id, target_world)) {
+      protocol::ServerboundChunkInterestUpdate initial_interest;
+      initial_interest.world_id = session.world_id;
+      initial_interest.center_chunk = player_chunk_coord(*target_state);
+      initial_interest.client_view_distance = max_view_distance_;
+      chunk_streamer_.update_player_interest(
+          session,
+          initial_interest.center_chunk,
+          target_world->height_settings(),
+          initial_interest);
+    }
     accepted_player_movement_[session.player_id] = {
         target_state->position,
         target_state->velocity,
@@ -3018,6 +3418,16 @@ WorldTransitionResult ServerRuntimeImpl::execute_world_transition(
     if (target_vehicle.value != 0U &&
         target_player.target_entity.value != 0U &&
         target_player.target_seat_id.has_value()) {
+      send_entity_spawn_to_session(
+          session,
+          *target_world,
+          target_vehicle,
+          protocol::NetworkLane::Session);
+      send_entity_spawn_to_session(
+          session,
+          *target_world,
+          target_player.target_entity,
+          protocol::NetworkLane::Session);
       send_ride_started_to_session(
           session,
           *target_world,

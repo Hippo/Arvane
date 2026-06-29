@@ -142,6 +142,34 @@ make_ride_started_packet(
   return packet;
 }
 
+[[nodiscard]] std::optional<protocol::ClientboundEntitySpawn>
+make_entity_spawn_packet(
+    const world::WorldRuntime& runtime,
+    EntityID entity_id,
+    WorldID world_id) {
+  const std::vector<entity::EntitySnapshotEntry> snapshots =
+      runtime.collect_entity_snapshots();
+  const auto found = std::find_if(
+      snapshots.begin(),
+      snapshots.end(),
+      [&](const entity::EntitySnapshotEntry& snapshot) {
+        return snapshot.entity_id == entity_id;
+      });
+  if (found == snapshots.end()) {
+    return std::nullopt;
+  }
+  protocol::ClientboundEntitySpawn spawn;
+  spawn.world_id = world_id;
+  spawn.entity_id = found->net_id;
+  spawn.entity_type = found->type_id;
+  spawn.entity_type_name = found->type_name;
+  spawn.position = found->position;
+  spawn.velocity = found->velocity;
+  spawn.rotation = found->rotation;
+  spawn.owning_player = found->owning_player;
+  return spawn;
+}
+
 } // namespace
 
 void ServerRuntimeImpl::send_player_move_correction(
@@ -357,6 +385,31 @@ void ServerRuntimeImpl::send_ride_started_to_session(
       protocol::ReliabilityClass::ReliableOrdered,
       lane,
       protocol::serialize_clientbound_ride_started(packet.value()));
+  log_send_failure_if_dedicated(mode_, session.connection_id, result);
+}
+
+void ServerRuntimeImpl::send_entity_spawn_to_session(
+    const ServerSession& session,
+    world::WorldRuntime& runtime,
+    EntityID entity_id,
+    protocol::NetworkLane lane) {
+  const std::optional<protocol::ClientboundEntitySpawn> packet =
+      make_entity_spawn_packet(runtime, entity_id, session.world_id);
+  if (!packet.has_value() || transport_ == nullptr || !session.authenticated ||
+      session.closing || session.world_id != runtime.id()) {
+    return;
+  }
+
+  const net::NetworkResult result = send_protocol_message(
+      *transport_,
+      session.connection_id,
+      protocol::MessageType::ClientboundEntitySpawn,
+      protocol::ReliabilityClass::ReliableOrdered,
+      lane,
+      protocol::serialize_clientbound_entity_spawn(packet.value()));
+  if (result) {
+    entity_replication_[session.session_id].known_entities.insert(packet->entity_id);
+  }
   log_send_failure_if_dedicated(mode_, session.connection_id, result);
 }
 
@@ -619,6 +672,8 @@ void ServerRuntimeImpl::send_entity_replication() {
         session_player_entity.has_value()
             ? runtime->mounted_rideable(session_player_entity.value())
             : std::nullopt;
+    const bool streams_terrain =
+        world_streams_terrain(session->world_id, runtime);
 
     for (const entity::EntitySnapshotEntry& snapshot : snapshots) {
       const bool owns_entity =
@@ -632,10 +687,12 @@ void ServerRuntimeImpl::send_entity_replication() {
           session_mounted_vehicle.has_value() &&
           (snapshot.entity_id == session_mounted_vehicle.value() ||
            snapshot_mounted_vehicle == session_mounted_vehicle);
-      const bool chunk_visible = chunk_streamer_.session_has_sent_chunk(
-          session_id,
-          session->world_id,
-          snapshot.chunk);
+      const bool chunk_visible =
+          !streams_terrain ||
+          chunk_streamer_.session_has_sent_chunk(
+              session_id,
+              session->world_id,
+              snapshot.chunk);
       if (!owns_entity && !mounted_group_entity && !chunk_visible) {
         continue;
       }

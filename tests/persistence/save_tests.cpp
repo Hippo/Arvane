@@ -515,6 +515,68 @@ TEST(SaveTests, ParallelWorldFileOptionsRoundTripIndependentFiles) {
   EXPECT_EQ(alpha_player->inventory.slot(0)->item, stone_item);
 }
 
+TEST(SaveTests, LoadCanSkipChunkRegionPayloads) {
+  TempDir temp_dir;
+  const std::filesystem::path server_save_root =
+      temp_dir.path / "arvane_home" / "saves" / "server-save-skip-chunks";
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  const arv::player::ItemRegistry item_registry =
+      arv::testsupport::make_test_item_registry(block_registry);
+  const arv::voxel::BlockVariantID stone =
+      block_registry.find_variant("arvane:stone").value();
+
+  arv::persistence::SaveMetadata save_metadata;
+  save_metadata.name = "Skip Chunk Load";
+  arv::persistence::WorldMetadata world_metadata;
+  world_metadata.name = "solar_system";
+  world_metadata.seed = 123U;
+  world_metadata.generation_config =
+      arv::world::make_void_world_generation_config();
+  world_metadata.spawn_point = arv::Location{0.0F, 0.0F, 0.0F};
+
+  const std::vector<arv::persistence::SavedChunkSection> chunks{
+      make_saved_chunk({{0, 0, 0}}, stone),
+      make_saved_chunk({{arv::RegionSizeInChunks, 0, 0}}, stone)};
+  arv::persistence::PlayerSaveData player;
+  player.profile_name = "space_player";
+  player.world_name = "solar_system";
+  const std::vector<arv::persistence::PlayerSaveData> players{player};
+  const std::vector<arv::entity::PersistentEntityRecord> entities{
+      {"rocket",
+       "arvane:test_entity",
+       arv::WorldID{2},
+       {4.0F, 5.0F, 6.0F}}};
+
+  ASSERT_TRUE(arv::persistence::save_server_root(
+      server_save_root,
+      save_metadata,
+      world_metadata,
+      chunks,
+      players,
+      entities,
+      block_registry,
+      item_registry));
+
+  arv::persistence::WorldFileOperationOptions options;
+  options.load_chunk_regions = false;
+  auto loaded = arv::persistence::load_server_root(
+      server_save_root,
+      "solar_system",
+      block_registry,
+      item_registry,
+      options);
+
+  ASSERT_TRUE(loaded);
+  ASSERT_TRUE(loaded.value().has_world_metadata);
+  EXPECT_EQ(loaded.value().world.name, "solar_system");
+  EXPECT_TRUE(loaded.value().chunks.empty());
+  ASSERT_EQ(loaded.value().players.size(), 1U);
+  EXPECT_EQ(loaded.value().players.front().profile_name, "space_player");
+  ASSERT_EQ(loaded.value().entities.size(), 1U);
+  EXPECT_EQ(loaded.value().entities.front().uuid, "rocket");
+}
+
 TEST(SaveTests, WorldHeightLoadsFromGenerationBoundsWhenChunkBoundsAreStale) {
   TempDir temp_dir;
   const std::filesystem::path server_save_root =

@@ -676,15 +676,12 @@ void ServerRuntimeImpl::send_world_join_result(
   result.spawn_position = player_state.position;
   result.initial_tick = tick_index_;
   result.tick_rate = base_tps_;
-  result.effective_view_distance = max_view_distance_;
   const world::WorldRuntime* runtime = world_for_session(session);
+  const bool streams_terrain = world_streams_terrain(session.world_id, runtime);
+  result.effective_view_distance = streams_terrain ? max_view_distance_ : 0;
   if (runtime != nullptr) {
     result.environment_sky = runtime->environment().sky;
-    const WorldRecord* record = worlds_.find(session.world_id);
-    const world::WorldGenerationConfig* generation = runtime->generation_config();
-    result.space_environment =
-        (record != nullptr && record->world_type == "space") ||
-        (generation != nullptr && generation->void_world);
+    result.space_environment = !streams_terrain;
     const std::optional<EntityID> entity_id =
         runtime->entity_for_player(session.player_id);
     if (entity_id.has_value()) {

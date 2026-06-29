@@ -6,6 +6,7 @@
 #include "arv/command/server_command_services.hpp"
 #include "arv/core/rate_limiter.hpp"
 #include "arv/physics/collision.hpp"
+#include "arv/persistence/save.hpp"
 #include "arv/protocol/auth.hpp"
 #include "arv/protocol/block_updates.hpp"
 #include "arv/protocol/chat.hpp"
@@ -37,6 +38,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -228,6 +231,24 @@ struct WorldTransitionResult {
   EntityID moved_root_entity{};
 };
 
+struct PreparedWorldLoad {
+  WorldID world_id{};
+  std::string world_name{};
+  u64 seed{};
+  Location spawn{};
+  std::string generator_id{};
+  std::filesystem::path path{};
+  std::unique_ptr<world::WorldRuntime> runtime{};
+};
+
+struct PendingWorldLoad {
+  WorldID world_id{};
+  std::string world_name{};
+  bool persist_load_on_start{};
+  std::future<Expected<PreparedWorldLoad, persistence::PersistenceError>>
+      result{};
+};
+
 class ServerWorldJobRuntime {
 public:
   ServerWorldJobRuntime();
@@ -387,6 +408,9 @@ struct ServerRuntimeImpl {
       const ServerSession& session) const noexcept;
   [[nodiscard]] world::WorldRuntime* world_for_session(
       const ServerSession& session) noexcept;
+  [[nodiscard]] bool world_streams_terrain(
+      WorldID world_id,
+      const world::WorldRuntime* runtime = nullptr) const noexcept;
   [[nodiscard]] std::vector<world::WorldRuntime*> loaded_worlds() noexcept;
   [[nodiscard]] std::vector<const world::WorldRuntime*> loaded_worlds() const noexcept;
   [[nodiscard]] const entity::EntityRegistry* entity_registry() const noexcept;
@@ -458,6 +482,16 @@ struct ServerRuntimeImpl {
       const command::WorldCreateCommandRequest& request);
   [[nodiscard]] command::WorldOperationCommandResult load_world_from_command(
       std::string_view name);
+  [[nodiscard]] command::WorldOperationCommandResult request_world_load_async(
+      WorldRecord& record);
+  void drain_pending_world_loads();
+  [[nodiscard]] command::WorldOperationCommandResult finish_loaded_world_from_save(
+      WorldRecord& record,
+      persistence::LoadedSaveData loaded_save);
+  [[nodiscard]] command::WorldOperationCommandResult install_prepared_world_load(
+      WorldRecord& record,
+      PreparedWorldLoad prepared,
+      bool persist_load_on_start);
   [[nodiscard]] std::optional<world::WorldGenerationConfig> resolve_world_generation_config(
       std::string_view generator_id) const;
   [[nodiscard]] command::WorldOperationCommandResult materialize_world_save_for_record(
@@ -681,6 +715,11 @@ struct ServerRuntimeImpl {
       Vec3f position,
       VehicleDamageStage stage,
       u32 seed);
+  void send_entity_spawn_to_session(
+      const ServerSession& session,
+      world::WorldRuntime& runtime,
+      EntityID entity_id,
+      protocol::NetworkLane lane);
   void send_entity_passengers_to_session(
       const ServerSession& session,
       world::WorldRuntime& runtime,
@@ -809,6 +848,7 @@ struct ServerRuntimeImpl {
   WorldRegistry worlds_;
   world::WorldRuntime default_world_{DefaultWorldID};
   StableHashMap<WorldID, std::unique_ptr<world::WorldRuntime>> loaded_worlds_;
+  std::vector<PendingWorldLoad> pending_world_loads_;
   std::vector<WorldID> pending_idle_world_exits_;
   world::NaturalSpawnSystem natural_spawns_{};
   world::WorldTickPolicy world_tick_policy_{};

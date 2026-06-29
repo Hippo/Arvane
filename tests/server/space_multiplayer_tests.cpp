@@ -35,6 +35,7 @@ struct MultiClientEndpoint {
 
 struct MultiClientSharedState {
   bool listening{};
+  bool deliver_gameplay_before_session_messages{};
   std::deque<arv::net::NetworkEvent> server_inbound{};
   std::vector<MultiClientEndpoint> clients{};
 };
@@ -125,7 +126,13 @@ public:
       return arv::net::NetworkResult::failure(
           arv::net::NetworkError{"connection is not active"});
     }
-    endpoint->inbound.push_back(make_received_event(std::move(message)));
+    arv::net::NetworkEvent event = make_received_event(std::move(message));
+    if (shared_->deliver_gameplay_before_session_messages &&
+        event.lane == arv::protocol::NetworkLane::Gameplay) {
+      endpoint->inbound.push_front(std::move(event));
+    } else {
+      endpoint->inbound.push_back(std::move(event));
+    }
     return arv::net::NetworkResult::success();
   }
 
@@ -291,7 +298,7 @@ arv::entity::VehicleDefinitionRegistry make_space_test_vehicle_registry() {
   arv::entity::VehicleSeatDefinition pilot;
   pilot.id = "pilot";
   pilot.role = arv::entity::SeatRole::Driver;
-  pilot.local_position = {0.0F, 1.45F, 0.0F};
+  pilot.local_position = {0.0F, 3.2F, 0.0F};
   pilot.local_rotation = {0.0F, 0.0F, 0.0F, 1.0F};
   pilot.controls_vehicle = true;
   pilot.camera_mode = arv::entity::CameraMode::VehicleChase;
@@ -314,14 +321,15 @@ arv::entity::VehicleDefinitionRegistry make_space_test_vehicle_registry() {
       arv::degrees_to_radians(44.0F),
       arv::degrees_to_radians(70.0F),
       arv::degrees_to_radians(45.0F),
-      36.0F,
-      8.0F,
-      1.4F,
-      0.8F,
-      30.0F,
+      90.0F,
+      0.0F,
+      0.0F,
+      0.35F,
+      52.0F,
       32.0F,
-      8.0F,
-      0.90F};
+      0.0F,
+      0.90F,
+      true};
   rocket.space_aircraft = arv::entity::AircraftMovementDefinition{
       0.0F,
       95.0F,
@@ -339,7 +347,8 @@ arv::entity::VehicleDefinitionRegistry make_space_test_vehicle_registry() {
       95.0F,
       95.0F,
       0.0F,
-      0.997F};
+      0.997F,
+      true};
   rocket.fuel = arv::entity::VehicleFuelDefinition{
       "arvane:rocket_fuel/basic",
       120.0F,
@@ -347,11 +356,13 @@ arv::entity::VehicleDefinitionRegistry make_space_test_vehicle_registry() {
       1.0F,
       10.0F};
   rocket.cargo = arv::entity::VehicleCargoDefinition{9};
-  rocket.authority.max_speed = 120.0F;
-  rocket.authority.max_acceleration = 80.0F;
-  rocket.authority.max_deceleration = 80.0F;
+  rocket.authority.max_speed = 105.0F;
+  rocket.authority.max_acceleration = 42.0F;
+  rocket.authority.max_deceleration = 54.0F;
   rocket.authority.max_angular_speed = arv::degrees_to_radians(180.0F);
-  rocket.authority.max_vertical_speed = 120.0F;
+  rocket.authority.max_vertical_speed = 100.0F;
+  rocket.authority.requires_swept_collision = true;
+  rocket.authority.max_unloaded_chunk_entry_distance = 0.0F;
 
   auto result = arv::entity::VehicleDefinitionRegistry::build({std::move(rocket)});
   EXPECT_TRUE(result) << result.error().message;
@@ -594,7 +605,9 @@ struct SpaceMultiplayerFixture {
     return entity.value();
   }
 
-  arv::EntityID create_launch_ready_rocket(arv::Vec3f position) {
+  arv::EntityID create_launch_ready_rocket(
+      arv::Vec3f position,
+      arv::Vec3f launch_velocity = {0.0F, 6.0F, 0.0F}) {
     arv::world::WorldRuntime& world = server.voxel_world();
     const arv::EntityID rocket =
         create_space_test_rocket(world, vehicle_registry, position);
@@ -606,12 +619,12 @@ struct SpaceMultiplayerFixture {
       physics->fuel_seconds = 30.0F;
       physics->fuel_capacity_seconds = 120.0F;
       physics->fuel_burn_per_second = 1.0F;
-      physics->linear_velocity = {0.0F, 6.0F, 0.0F};
+      physics->linear_velocity = launch_velocity;
     }
     if (arv::entity::EntityVelocity* velocity =
             world.find_entity_velocity(rocket);
         velocity != nullptr) {
-      velocity->linear = {0.0F, 6.0F, 0.0F};
+      velocity->linear = launch_velocity;
     }
     return rocket;
   }
@@ -628,6 +641,66 @@ bool mirrors_only_reference_camera_world(const arv::client::ClientRuntime& clien
   return true;
 }
 
+void expect_client_mirror_mount(
+    const arv::client::ClientRuntime& client,
+    arv::EntityNetID passenger_net,
+    arv::EntityNetID rocket_net) {
+  const arv::client::ReplicatedEntityMirror* passenger =
+      client.find_replicated_entity(passenger_net);
+  ASSERT_NE(passenger, nullptr);
+  EXPECT_EQ(passenger->parent_rideable, std::optional<arv::EntityNetID>{rocket_net});
+  EXPECT_EQ(passenger->parent_seat_id, "pilot");
+  EXPECT_TRUE(passenger->controls_parent_vehicle);
+
+  const arv::client::ReplicatedEntityMirror* rocket =
+      client.find_replicated_entity(rocket_net);
+  ASSERT_NE(rocket, nullptr);
+  const auto mounted_passenger = std::find_if(
+      rocket->passengers.begin(),
+      rocket->passengers.end(),
+      [&](const arv::client::ReplicatedPassengerMirror& entry) {
+        return entry.passenger_id == passenger_net;
+      });
+  ASSERT_NE(mounted_passenger, rocket->passengers.end());
+  EXPECT_EQ(mounted_passenger->seat_id, "pilot");
+  EXPECT_TRUE(mounted_passenger->controls_vehicle);
+}
+
+void drive_space_rocket_and_expect_move(
+    SpaceMultiplayerFixture& fixture,
+    arv::world::WorldRuntime& space_world,
+    arv::EntityID rocket,
+    arv::EntityNetID rocket_net,
+    arv::u32 ticks = 16U) {
+  const arv::entity::EntityTransform* before_transform =
+      space_world.find_entity_transform(rocket);
+  ASSERT_NE(before_transform, nullptr);
+  const arv::Vec3f before_position = before_transform->position;
+  for (arv::u32 i = 0; i < ticks; ++i) {
+    arv::client::InputFrame input;
+    input.move_forward = true;
+    if (i == 0U) {
+      input.mouse_delta_y = -120.0F;
+    }
+    fixture.alice.submit_input(input);
+    fixture.pump(1U);
+  }
+  const arv::entity::EntityTransform* after_transform =
+      space_world.find_entity_transform(rocket);
+  ASSERT_NE(after_transform, nullptr);
+  EXPECT_GT(
+      arv::distance_squared(after_transform->position, before_position),
+      0.0001F);
+  const std::optional<arv::server::VehicleCrashDebugInfo> move_debug =
+      fixture.server.last_vehicle_crash_debug(rocket_net);
+  ASSERT_TRUE(move_debug.has_value());
+  EXPECT_TRUE(move_debug->accepted_move);
+  EXPECT_FALSE(move_debug->sent_correction);
+  EXPECT_EQ(
+      move_debug->validation_reason,
+      arv::protocol::VehicleCorrectionReason::Unknown);
+}
+
 TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
   SpaceMultiplayerFixture fixture;
   const arv::EntityID rocket =
@@ -636,10 +709,19 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
       fixture.mount_player_on_rocket("Alice", rocket, "pilot");
   ASSERT_NE(alice_entity, (arv::EntityID{}));
 
-  fixture.pump(3U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   const arv::server::ServerSession* alice_session = fixture.session("Alice");
   const arv::server::ServerSession* bob_session = fixture.session("Bob");
@@ -650,6 +732,7 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
   arv::world::WorldRuntime* space_world =
       fixture.server.world_runtime(space_record->id);
   ASSERT_NE(space_world, nullptr);
+  EXPECT_EQ(space_world->loaded_chunk_count(), 0U);
   const std::optional<arv::EntityID> target_alice =
       space_world->entity_for_player(alice_session->player_id);
   ASSERT_TRUE(target_alice.has_value());
@@ -694,6 +777,7 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
   const arv::entity::EntityTransform* after_transform =
       space_world->find_entity_transform(target_rocket.value());
   ASSERT_NE(after_transform, nullptr);
+  EXPECT_EQ(space_world->loaded_chunk_count(), 0U);
   EXPECT_GT(
       arv::distance_squared(after_transform->position, before_position),
       0.0001F);
@@ -707,6 +791,327 @@ TEST(SpaceMultiplayerTests, OnePlayerLaunchesAlone) {
       arv::protocol::VehicleCorrectionReason::Unknown);
 }
 
+TEST(SpaceMultiplayerTests, SpaceLaunchSurvivesGameplayLaneBeforeSessionLane) {
+  SpaceMultiplayerFixture fixture;
+  fixture.shared->deliver_gameplay_before_session_messages = true;
+  const arv::EntityID rocket =
+      fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
+  const arv::EntityID alice_entity =
+      fixture.mount_player_on_rocket("Alice", rocket, "pilot");
+  ASSERT_NE(alice_entity, (arv::EntityID{}));
+
+  const arv::server::WorldRecord* space_record =
+      fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id &&
+        fixture.alice.connection_state() == arv::net::ConnectionState::InGame) {
+      break;
+    }
+  }
+  ASSERT_NE(space_record, nullptr);
+  const arv::server::ServerSession* alice_session = fixture.session("Alice");
+  ASSERT_NE(alice_session, nullptr);
+  ASSERT_EQ(alice_session->world_id, space_record->id);
+  arv::world::WorldRuntime* space_world =
+      fixture.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> target_alice =
+      space_world->entity_for_player(alice_session->player_id);
+  ASSERT_TRUE(target_alice.has_value());
+  const std::optional<arv::EntityID> target_rocket =
+      space_world->mounted_rideable(target_alice.value());
+  ASSERT_TRUE(target_rocket.has_value());
+  const std::optional<arv::EntityNetID> target_rocket_net =
+      space_world->network_id_for_entity(target_rocket.value());
+  ASSERT_TRUE(target_rocket_net.has_value());
+  EXPECT_EQ(fixture.alice.mounted_vehicle_id(), target_rocket_net);
+  EXPECT_TRUE(fixture.alice.mounted_controls_vehicle());
+  ASSERT_NE(fixture.alice.find_replicated_entity(target_rocket_net.value()), nullptr);
+
+  const arv::entity::EntityTransform* before_transform =
+      space_world->find_entity_transform(target_rocket.value());
+  ASSERT_NE(before_transform, nullptr);
+  const arv::Vec3f before_position = before_transform->position;
+  arv::world::WorldRuntime empty_client_space{space_record->id};
+  const arv::world::WorldCollisionQuery missing_chunks_are_solid{
+      empty_client_space,
+      fixture.block_registry};
+  for (arv::u32 i = 0; i < 12U; ++i) {
+    fixture.alice.submit_input(arv::client::InputFrame{.move_forward = true});
+    fixture.server.tick();
+    fixture.alice.fixed_tick(
+        fixture.server.tick_index(),
+        &missing_chunks_are_solid);
+    fixture.bob.fixed_tick(fixture.server.tick_index());
+  }
+  const arv::entity::EntityTransform* after_transform =
+      space_world->find_entity_transform(target_rocket.value());
+  ASSERT_NE(after_transform, nullptr);
+  EXPECT_GT(
+      arv::distance_squared(after_transform->position, before_position),
+      0.0001F);
+  const std::optional<arv::server::VehicleCrashDebugInfo> move_debug =
+      fixture.server.last_vehicle_crash_debug(target_rocket_net.value());
+  ASSERT_TRUE(move_debug.has_value());
+  EXPECT_TRUE(move_debug->accepted_move);
+  EXPECT_FALSE(move_debug->sent_correction);
+}
+
+TEST(SpaceMultiplayerTests, SpaceLaunchWithLiveUpwardVelocityDoesNotCorrectionLoop) {
+  SpaceMultiplayerFixture fixture;
+  const arv::EntityID rocket =
+      fixture.create_launch_ready_rocket(
+          {2.0F, 21.0F, 0.0F},
+          {0.0F, 24.0F, 0.0F});
+  const arv::EntityID alice_entity =
+      fixture.mount_player_on_rocket("Alice", rocket, "pilot");
+  ASSERT_NE(alice_entity, (arv::EntityID{}));
+
+  const arv::server::WorldRecord* space_record =
+      fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id &&
+        fixture.alice.connection_state() == arv::net::ConnectionState::InGame) {
+      break;
+    }
+  }
+  ASSERT_NE(space_record, nullptr);
+  const arv::server::ServerSession* alice_session = fixture.session("Alice");
+  ASSERT_NE(alice_session, nullptr);
+  ASSERT_EQ(alice_session->world_id, space_record->id);
+  arv::world::WorldRuntime* space_world =
+      fixture.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> target_alice =
+      space_world->entity_for_player(alice_session->player_id);
+  ASSERT_TRUE(target_alice.has_value());
+  const std::optional<arv::EntityID> target_rocket =
+      space_world->mounted_rideable(target_alice.value());
+  ASSERT_TRUE(target_rocket.has_value());
+  const std::optional<arv::EntityNetID> target_rocket_net =
+      space_world->network_id_for_entity(target_rocket.value());
+  ASSERT_TRUE(target_rocket_net.has_value());
+  ASSERT_EQ(fixture.alice.mounted_vehicle_id(), target_rocket_net);
+  ASSERT_TRUE(fixture.alice.mounted_controls_vehicle());
+
+  drive_space_rocket_and_expect_move(
+      fixture,
+      *space_world,
+      target_rocket.value(),
+      target_rocket_net.value());
+}
+
+TEST(SpaceMultiplayerTests, SpaceLaunchRocketCanDismountRemountAndMoveAgain) {
+  SpaceMultiplayerFixture fixture;
+  const arv::EntityID rocket =
+      fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
+  const arv::EntityID alice_entity =
+      fixture.mount_player_on_rocket("Alice", rocket, "pilot");
+  ASSERT_NE(alice_entity, (arv::EntityID{}));
+
+  const arv::server::WorldRecord* space_record =
+      fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id &&
+        fixture.alice.connection_state() == arv::net::ConnectionState::InGame) {
+      break;
+    }
+  }
+  ASSERT_NE(space_record, nullptr);
+  const arv::server::ServerSession* alice_session = fixture.session("Alice");
+  ASSERT_NE(alice_session, nullptr);
+  ASSERT_EQ(alice_session->world_id, space_record->id);
+  arv::world::WorldRuntime* space_world =
+      fixture.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  const std::optional<arv::EntityID> target_alice =
+      space_world->entity_for_player(alice_session->player_id);
+  ASSERT_TRUE(target_alice.has_value());
+  const std::optional<arv::EntityID> target_rocket =
+      space_world->mounted_rideable(target_alice.value());
+  ASSERT_TRUE(target_rocket.has_value());
+  const std::optional<arv::EntityNetID> target_alice_net =
+      space_world->network_id_for_entity(target_alice.value());
+  const std::optional<arv::EntityNetID> target_rocket_net =
+      space_world->network_id_for_entity(target_rocket.value());
+  ASSERT_TRUE(target_alice_net.has_value());
+  ASSERT_TRUE(target_rocket_net.has_value());
+  ASSERT_EQ(fixture.alice.local_entity_id(), target_alice_net);
+  EXPECT_EQ(fixture.alice.mounted_vehicle_id(), target_rocket_net);
+  EXPECT_TRUE(fixture.alice.mounted_controls_vehicle());
+  expect_client_mirror_mount(
+      fixture.alice,
+      target_alice_net.value(),
+      target_rocket_net.value());
+
+  drive_space_rocket_and_expect_move(
+      fixture,
+      *space_world,
+      target_rocket.value(),
+      target_rocket_net.value());
+
+  ASSERT_TRUE(fixture.alice.request_dismount());
+  for (arv::u32 i = 0; i < 40U; ++i) {
+    fixture.pump(1U);
+    if (!fixture.alice.mounted_vehicle_id().has_value() &&
+        !space_world->mounted_rideable(target_alice.value()).has_value()) {
+      break;
+    }
+  }
+  EXPECT_FALSE(fixture.alice.mounted_vehicle_id().has_value());
+  EXPECT_FALSE(space_world->mounted_rideable(target_alice.value()).has_value());
+  const arv::client::ReplicatedEntityMirror* dismounted_passenger =
+      fixture.alice.find_replicated_entity(target_alice_net.value());
+  ASSERT_NE(dismounted_passenger, nullptr);
+  EXPECT_FALSE(dismounted_passenger->parent_rideable.has_value());
+
+  ASSERT_TRUE(
+      fixture.alice.request_ride_entity(target_rocket_net.value(), "pilot"));
+  for (arv::u32 i = 0; i < 40U; ++i) {
+    fixture.pump(1U);
+    if (fixture.alice.mounted_vehicle_id() == target_rocket_net &&
+        space_world->mounted_rideable(target_alice.value()) == target_rocket) {
+      break;
+    }
+  }
+  EXPECT_EQ(fixture.alice.mounted_vehicle_id(), target_rocket_net);
+  EXPECT_TRUE(fixture.alice.mounted_controls_vehicle());
+  EXPECT_EQ(
+      space_world->mounted_rideable(target_alice.value()),
+      target_rocket);
+  expect_client_mirror_mount(
+      fixture.alice,
+      target_alice_net.value(),
+      target_rocket_net.value());
+
+  drive_space_rocket_and_expect_move(
+      fixture,
+      *space_world,
+      target_rocket.value(),
+      target_rocket_net.value());
+}
+
+TEST(SpaceMultiplayerTests, SpaceLaunchStartsAsyncLoadBeforeTransition) {
+  SpaceMultiplayerFixture fixture;
+  const arv::EntityID rocket =
+      fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
+  const arv::EntityID alice_entity =
+      fixture.mount_player_on_rocket("Alice", rocket, "pilot");
+  ASSERT_NE(alice_entity, (arv::EntityID{}));
+  const arv::entity::EntityTransform* before_transform =
+      fixture.server.voxel_world().find_entity_transform(rocket);
+  ASSERT_NE(before_transform, nullptr);
+  const arv::f32 before_y = before_transform->position.y;
+
+  fixture.pump(1U);
+
+  const arv::server::WorldRecord* loading_space_record =
+      fixture.server.worlds().find("solar_system");
+  ASSERT_NE(loading_space_record, nullptr);
+  EXPECT_EQ(
+      loading_space_record->state,
+      arv::server::WorldRuntimeState::Loading);
+  EXPECT_EQ(
+      fixture.server.world_runtime(loading_space_record->id),
+      nullptr);
+  const arv::server::ServerSession* loading_alice_session =
+      fixture.session("Alice");
+  ASSERT_NE(loading_alice_session, nullptr);
+  EXPECT_EQ(loading_alice_session->world_id, arv::server::DefaultWorldID);
+  EXPECT_TRUE(fixture.server.voxel_world().entity_exists(rocket));
+  const arv::entity::EntityTransform* loading_transform =
+      fixture.server.voxel_world().find_entity_transform(rocket);
+  ASSERT_NE(loading_transform, nullptr);
+  EXPECT_GE(loading_transform->position.y, before_y);
+
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    const arv::server::WorldRecord* space_record =
+        fixture.server.worlds().find("solar_system");
+    ASSERT_NE(alice_session, nullptr);
+    ASSERT_NE(space_record, nullptr);
+    if (alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
+
+  const arv::server::WorldRecord* space_record =
+      fixture.server.worlds().find("solar_system");
+  ASSERT_NE(space_record, nullptr);
+  const arv::server::ServerSession* alice_session = fixture.session("Alice");
+  ASSERT_NE(alice_session, nullptr);
+  EXPECT_EQ(alice_session->world_id, space_record->id);
+  EXPECT_EQ(space_record->state, arv::server::WorldRuntimeState::Running);
+  EXPECT_FALSE(space_record->load_on_start);
+  EXPECT_NE(fixture.server.world_runtime(space_record->id), nullptr);
+}
+
+TEST(SpaceMultiplayerTests, UnmountedRocketSpawnedInSpaceReplicatesWithoutChunks) {
+  SpaceMultiplayerFixture fixture;
+  const arv::EntityID rocket =
+      fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
+  const arv::EntityID alice_entity =
+      fixture.mount_player_on_rocket("Alice", rocket, "pilot");
+  ASSERT_NE(alice_entity, (arv::EntityID{}));
+
+  const arv::server::WorldRecord* space_record =
+      fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
+  ASSERT_NE(space_record, nullptr);
+  arv::world::WorldRuntime* space_world =
+      fixture.server.world_runtime(space_record->id);
+  ASSERT_NE(space_world, nullptr);
+  ASSERT_EQ(space_world->loaded_chunk_count(), 0U);
+
+  const arv::EntityID spawned_rocket =
+      create_space_test_rocket(
+          *space_world,
+          fixture.vehicle_registry,
+          {120.0F, 42.0F, 100.0F});
+  ASSERT_NE(spawned_rocket, (arv::EntityID{}));
+  const std::optional<arv::EntityNetID> spawned_net =
+      space_world->network_id_for_entity(spawned_rocket);
+  ASSERT_TRUE(spawned_net.has_value());
+
+  fixture.pump(3U);
+
+  const arv::client::ReplicatedEntityMirror* mirror =
+      fixture.alice.find_replicated_entity(spawned_net.value());
+  ASSERT_NE(mirror, nullptr);
+  EXPECT_EQ(mirror->world_id, space_record->id);
+  EXPECT_EQ(mirror->entity_type_name, "arvane:test_rocket");
+  EXPECT_EQ(space_world->loaded_chunk_count(), 0U);
+}
+
 TEST(SpaceMultiplayerTests, UnmountedPlayerCanMoveInVoidSpaceWorld) {
   SpaceMultiplayerFixture fixture;
   const arv::EntityID rocket =
@@ -715,10 +1120,19 @@ TEST(SpaceMultiplayerTests, UnmountedPlayerCanMoveInVoidSpaceWorld) {
       fixture.mount_player_on_rocket("Alice", rocket, "pilot");
   ASSERT_NE(alice_entity, (arv::EntityID{}));
 
-  fixture.pump(3U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   arv::world::WorldRuntime* space_world =
       fixture.server.world_runtime(space_record->id);
@@ -770,10 +1184,19 @@ TEST(SpaceMultiplayerTests, LaunchedRocketCanEnterMoonAndStayMounted) {
       fixture.mount_player_on_rocket("Alice", rocket, "pilot");
   ASSERT_NE(alice_entity, (arv::EntityID{}));
 
-  fixture.pump(3U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   arv::world::WorldRuntime* space_world =
       fixture.server.world_runtime(space_record->id);
@@ -894,11 +1317,22 @@ TEST(SpaceMultiplayerTests, TwoPlayersInOneRocketLaunchTogether) {
   ASSERT_NE(alice_entity, (arv::EntityID{}));
   ASSERT_NE(bob_entity, (arv::EntityID{}));
 
-  fixture.pump_until_ingame(fixture.alice, fixture.bob, 1U);
-  fixture.pump(3U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    const arv::server::ServerSession* bob_session = fixture.session("Bob");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        bob_session != nullptr &&
+        alice_session->world_id == space_record->id &&
+        bob_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   arv::world::WorldRuntime* space_world =
       fixture.server.world_runtime(space_record->id);
@@ -939,10 +1373,22 @@ TEST(SpaceMultiplayerTests, TwoRocketsLaunchIntoSameSpaceWorldWithoutMixingSeats
   fixture.mount_player_on_rocket("Alice", alice_rocket, "pilot");
   fixture.mount_player_on_rocket("Bob", bob_rocket, "pilot");
 
-  fixture.pump(3U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    const arv::server::ServerSession* bob_session = fixture.session("Bob");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        bob_session != nullptr &&
+        alice_session->world_id == space_record->id &&
+        bob_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   arv::world::WorldRuntime* space_world =
       fixture.server.world_runtime(space_record->id);
@@ -974,10 +1420,19 @@ TEST(SpaceMultiplayerTests, PlanetPlayerDoesNotSeeSpacePlayerWorldState) {
       fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
   fixture.mount_player_on_rocket("Alice", rocket, "pilot");
 
-  fixture.pump(4U);
-
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   const arv::server::ServerSession* alice_session = fixture.session("Alice");
   const arv::server::ServerSession* bob_session = fixture.session("Bob");
@@ -998,9 +1453,19 @@ TEST(SpaceMultiplayerTests, ReconnectWhileInSpaceRestoresSpaceWorld) {
   const arv::EntityID rocket =
       fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
   fixture.mount_player_on_rocket("Alice", rocket, "pilot");
-  fixture.pump(4U);
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        fixture.server.world_runtime(space_record->id) != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
 
   const arv::client::LocalPlayerIdentity identity = fixture.alice.local_identity();
@@ -1012,7 +1477,7 @@ TEST(SpaceMultiplayerTests, ReconnectWhileInSpaceRestoresSpaceWorld) {
   reconnected.set_local_identity(identity);
   reconnected.configure_vehicles(&fixture.vehicle_registry);
   ASSERT_TRUE(reconnected.connect_integrated());
-  for (int i = 0; i < 20 &&
+  for (int i = 0; i < 200 &&
                   reconnected.connection_state() != arv::net::ConnectionState::InGame;
        ++i) {
     fixture.server.tick();
@@ -1032,9 +1497,18 @@ TEST(SpaceMultiplayerTests, ReconnectImmediatelyAfterTransitionRestoresSpaceWorl
   const arv::EntityID rocket =
       fixture.create_launch_ready_rocket({2.0F, 21.0F, 0.0F});
   fixture.mount_player_on_rocket("Alice", rocket, "pilot");
-  fixture.pump(1U);
   const arv::server::WorldRecord* space_record =
       fixture.server.worlds().find("solar_system");
+  for (arv::u32 i = 0; i < 200U; ++i) {
+    fixture.pump(1U);
+    space_record = fixture.server.worlds().find("solar_system");
+    const arv::server::ServerSession* alice_session = fixture.session("Alice");
+    if (space_record != nullptr &&
+        alice_session != nullptr &&
+        alice_session->world_id == space_record->id) {
+      break;
+    }
+  }
   ASSERT_NE(space_record, nullptr);
   const arv::client::LocalPlayerIdentity identity = fixture.alice.local_identity();
 
@@ -1046,7 +1520,7 @@ TEST(SpaceMultiplayerTests, ReconnectImmediatelyAfterTransitionRestoresSpaceWorl
   reconnected.set_local_identity(identity);
   reconnected.configure_vehicles(&fixture.vehicle_registry);
   ASSERT_TRUE(reconnected.connect_integrated());
-  for (int i = 0; i < 20 &&
+  for (int i = 0; i < 200 &&
                   reconnected.connection_state() != arv::net::ConnectionState::InGame;
        ++i) {
     fixture.server.tick();

@@ -3603,6 +3603,10 @@ void ServerRuntimeImpl::handle_chunk_interest_update(
   if (player_state == nullptr) {
     return;
   }
+  if (!world_streams_terrain(session->world_id, runtime)) {
+    chunk_streamer_.remove_session(session->session_id);
+    return;
+  }
 
   const ChunkSectionCoord authoritative_center = player_chunk_coord(*player_state);
   chunk_streamer_.update_player_interest(

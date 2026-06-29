@@ -79,15 +79,51 @@ namespace {
   return local_entity.has_value() && packet.passenger_id == local_entity.value();
 }
 
-void queue_pending_local_ride_start(
+void apply_local_mounted_vehicle_transform(
     ClientRuntimeContext& runtime,
-    const protocol::ClientboundRideStarted& packet) {
+    EntityNetID rideable_id,
+    std::string_view seat_id,
+    Vec3f vehicle_position,
+    Vec3f vehicle_velocity,
+    Quatf vehicle_rotation) noexcept;
+
+void erase_pending_local_ride_start(
+    ClientRuntimeContext& runtime,
+    EntityNetID passenger_id) {
   std::erase_if(
       runtime.pending_local_ride_starts,
       [&](const protocol::ClientboundRideStarted& existing) {
-        return existing.passenger_id == packet.passenger_id;
+        return existing.passenger_id == passenger_id;
       });
+}
+
+void queue_pending_local_ride_start(
+    ClientRuntimeContext& runtime,
+    const protocol::ClientboundRideStarted& packet) {
+  erase_pending_local_ride_start(runtime, packet.passenger_id);
   runtime.pending_local_ride_starts.push_back(packet);
+}
+
+[[nodiscard]] bool apply_local_ride_start(
+    ClientRuntimeContext& runtime,
+    const protocol::ClientboundRideStarted& packet) {
+  if (!local_ride_start_matches(runtime.player_controller, packet)) {
+    return true;
+  }
+  runtime.player_controller.apply_ride_started(packet);
+  runtime.input.clear_vehicle_prediction();
+  const ReplicatedEntityMirror* rideable = runtime.entities.find(packet.rideable_id);
+  if (rideable == nullptr) {
+    return false;
+  }
+  apply_local_mounted_vehicle_transform(
+      runtime,
+      packet.rideable_id,
+      packet.seat_id,
+      rideable->position,
+      rideable->velocity,
+      rideable->rotation);
+  return true;
 }
 
 void apply_pending_local_ride_starts(ClientRuntimeContext& runtime) {
@@ -96,15 +132,18 @@ void apply_pending_local_ride_starts(ClientRuntimeContext& runtime) {
   if (!local_entity.has_value()) {
     return;
   }
-  for (const protocol::ClientboundRideStarted& pending :
-       runtime.pending_local_ride_starts) {
-    if (pending.passenger_id != local_entity.value()) {
+  for (auto iter = runtime.pending_local_ride_starts.begin();
+       iter != runtime.pending_local_ride_starts.end();) {
+    if (iter->passenger_id != local_entity.value()) {
+      ++iter;
       continue;
     }
-    runtime.player_controller.apply_ride_started(pending);
-    break;
+    if (apply_local_ride_start(runtime, *iter)) {
+      iter = runtime.pending_local_ride_starts.erase(iter);
+    } else {
+      ++iter;
+    }
   }
-  runtime.pending_local_ride_starts.clear();
 }
 
 void apply_world_join_result(
@@ -929,22 +968,10 @@ void ClientNetworkRouter::handle_message(
       runtime.entities.apply_ride_started(packet);
       if (runtime.player_controller.local_entity_id().has_value()) {
         if (local_ride_start_matches(runtime.player_controller, packet)) {
-          runtime.player_controller.apply_ride_started(packet);
-          std::erase_if(
-              runtime.pending_local_ride_starts,
-              [&](const protocol::ClientboundRideStarted& existing) {
-                return existing.passenger_id == packet.passenger_id;
-              });
-          if (const ReplicatedEntityMirror* rideable =
-                  runtime.entities.find(packet.rideable_id);
-              rideable != nullptr) {
-            apply_local_mounted_vehicle_transform(
-                runtime,
-                packet.rideable_id,
-                packet.seat_id,
-                rideable->position,
-                rideable->velocity,
-                rideable->rotation);
+          if (apply_local_ride_start(runtime, packet)) {
+            erase_pending_local_ride_start(runtime, packet.passenger_id);
+          } else {
+            queue_pending_local_ride_start(runtime, packet);
           }
         }
       } else {
@@ -960,6 +987,7 @@ void ClientNetworkRouter::handle_message(
       runtime.entities.apply_ride_ended(event.value());
       runtime.player_controller.apply_ride_ended(event.value());
       runtime.input.clear_vehicle_prediction();
+      erase_pending_local_ride_start(runtime, event.value().passenger_id);
       return;
     }
     case protocol::MessageType::ClientboundEntityPassengersSet: {
@@ -1099,6 +1127,7 @@ void ClientNetworkRouter::handle_message(
       runtime.entities.apply_spawn(
           std::move(spawn.value()),
           runtime.player_controller.camera().world_id());
+      apply_pending_local_ride_starts(runtime);
       return;
     }
     case protocol::MessageType::ClientboundEntityDespawn: {

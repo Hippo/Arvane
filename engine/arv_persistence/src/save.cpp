@@ -1320,6 +1320,14 @@ Expected<void, PersistenceError> save_server_root(
     return save_result;
   }
 
+  const std::filesystem::path region_root = root / "worlds" / world.name / "regions";
+  std::error_code file_error;
+  std::filesystem::remove_all(region_root, file_error);
+  if (file_error) {
+    return Expected<void, PersistenceError>::failure(
+        PersistenceError{"failed to clear old region files: " + file_error.message()});
+  }
+
   HashMap<RegionCoord, std::vector<SavedChunkSection>> regions;
   for (const SavedChunkSection& chunk : chunks) {
     regions[chunk_column_to_region(chunk_to_column(chunk.coord))].push_back(chunk);
@@ -1329,7 +1337,7 @@ Expected<void, PersistenceError> save_server_root(
   for (auto& [region, region_chunks] : regions) {
     region_jobs.push_back({
         region,
-        root / "worlds" / world.name / "regions" /
+        region_root /
             ("r." + std::to_string(region.x) + "." + std::to_string(region.z) + ".arvr"),
         std::move(region_chunks)});
   }
@@ -1382,7 +1390,6 @@ Expected<void, PersistenceError> save_server_root(
   }
 
   const std::filesystem::path entity_root = root / "worlds" / world.name / "entities";
-  std::error_code file_error;
   std::filesystem::remove(root / "worlds" / world.name / "entities.json", file_error);
   file_error.clear();
   std::filesystem::remove_all(entity_root, file_error);
@@ -1564,7 +1571,7 @@ Expected<LoadedSaveData, PersistenceError> load_server_root(
     loaded.has_world_metadata = true;
 
     const std::filesystem::path regions_dir = worlds_root / loaded.world.name / "regions";
-    if (std::filesystem::exists(regions_dir)) {
+    if (options.load_chunk_regions && std::filesystem::exists(regions_dir)) {
       std::vector<std::filesystem::path> region_paths;
       for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(regions_dir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".arvr") {

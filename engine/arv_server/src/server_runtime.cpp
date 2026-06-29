@@ -999,6 +999,8 @@ void ServerRuntimeImpl::tick() {
     return;
   }
 
+  drain_pending_world_loads();
+
   const bool integrated_frame_pump =
       mode_ == ServerMode::Integrated &&
       chunk_streaming_config_.integrated_frame_pump_enabled;
@@ -1198,6 +1200,10 @@ void ServerRuntimeImpl::shutdown() {
           arv::text::text_or_fallback(language_, "server.disconnect.shutting_down", "Server is shutting down."));
     }
   }
+  for (PendingWorldLoad& pending : pending_world_loads_) {
+    pending.result.wait();
+  }
+  drain_pending_world_loads();
   drain_idle_world_exit_saves();
   world_jobs_.wait_for_all();
   for (world::WorldRuntime* runtime : loaded_worlds()) {
@@ -1344,6 +1350,24 @@ const world::WorldRuntime* ServerRuntimeImpl::world_for_session(
 world::WorldRuntime* ServerRuntimeImpl::world_for_session(
     const ServerSession& session) noexcept {
   return world_by_id(session.world_id);
+}
+
+bool ServerRuntimeImpl::world_streams_terrain(
+    WorldID world_id,
+    const world::WorldRuntime* runtime) const noexcept {
+  const WorldRecord* record = worlds_.find(world_id);
+  if (record != nullptr && record->world_type == "space") {
+    return false;
+  }
+  if (runtime == nullptr) {
+    runtime = world_by_id(world_id);
+  }
+  const world::WorldGenerationConfig* generation =
+      runtime == nullptr ? nullptr : runtime->generation_config();
+  return generation == nullptr ||
+         (!generation->void_world &&
+          generation->id != world::VoidWorldGenerationID &&
+          generation->dimension_id != world::VoidWorldGenerationID);
 }
 
 std::vector<world::WorldRuntime*> ServerRuntimeImpl::loaded_worlds() noexcept {

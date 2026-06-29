@@ -191,6 +191,17 @@ void ClientEntityMirrorStore::apply_spawn(
   if (!matches_current_or_pending_world(spawn.world_id, current_world)) {
     return;
   }
+  const auto found = entities_.find(spawn.entity_id);
+  std::optional<EntityNetID> parent_rideable;
+  std::string parent_seat_id;
+  bool controls_parent_vehicle = false;
+  std::vector<ReplicatedPassengerMirror> passengers;
+  if (found != entities_.end()) {
+    parent_rideable = found->second.parent_rideable;
+    parent_seat_id = found->second.parent_seat_id;
+    controls_parent_vehicle = found->second.controls_parent_vehicle;
+    passengers = found->second.passengers;
+  }
   ReplicatedEntityMirror& mirror = entities_[spawn.entity_id];
   mirror.entity_id = spawn.entity_id;
   mirror.entity_type = spawn.entity_type;
@@ -216,10 +227,10 @@ void ClientEntityMirrorStore::apply_spawn(
   mirror.health_max = 0.0F;
   mirror.dead = false;
   mirror.invulnerable = false;
-  mirror.parent_rideable.reset();
-  mirror.parent_seat_id.clear();
-  mirror.controls_parent_vehicle = false;
-  mirror.passengers.clear();
+  mirror.parent_rideable = parent_rideable;
+  mirror.parent_seat_id = std::move(parent_seat_id);
+  mirror.controls_parent_vehicle = controls_parent_vehicle;
+  mirror.passengers = std::move(passengers);
   apply_pending_relationships();
 }
 
