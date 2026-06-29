@@ -42,6 +42,7 @@ public:
       ClientEntityMirrorStore& entities,
       const arv::entity::VehicleDefinitionRegistry* vehicle_registry,
       bool void_space_world,
+      f32 environment_gravity_scale,
       const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds);
 

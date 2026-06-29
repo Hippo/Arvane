@@ -9,6 +9,7 @@
 #include "arv/protocol/pack_sync.hpp"
 #include "arv/protocol/crafting.hpp"
 #include "arv/protocol/vehicles.hpp"
+#include "arv/protocol/world_join.hpp"
 #include "arv/protocol/world_time.hpp"
 
 #include "client_chunk_inbox.hpp"
@@ -120,7 +121,7 @@ struct ClientRuntimeContext {
   ClientPackSyncState& pack_sync;
   ClientRecipeBookRuntime& recipe_book;
   std::optional<protocol::ClientboundWorldTime>& world_time_update;
-  std::string& world_environment_sky;
+  protocol::ClientboundWorldEnvironment& world_environment;
   bool& space_environment;
   bool& void_space_world;
   std::vector<protocol::ClientboundSpaceBodyView>& space_bodies;

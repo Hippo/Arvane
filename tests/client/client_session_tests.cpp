@@ -817,7 +817,11 @@ TEST(ClientSessionTests, SpaceWorldJoinDoesNotSendInitialChunkInterest) {
   join.spawn_position = {32.0F, 0.0F, -32.0F};
   join.tick_rate = arv::DefaultBaseTps;
   join.effective_view_distance = 4;
-  join.environment_sky = "space";
+  join.environment.sky = "space";
+  join.environment.gravity_scale = 0.0F;
+  join.environment.has_atmosphere = false;
+  join.environment.has_oxygen = false;
+  join.environment.fog = "none";
   join.space_environment = true;
   scripted->push_message(
       arv::protocol::MessageType::ClientboundWorldJoinResult,
@@ -827,6 +831,8 @@ TEST(ClientSessionTests, SpaceWorldJoinDoesNotSendInitialChunkInterest) {
   ASSERT_EQ(session.connection_state(), arv::net::ConnectionState::InGame);
   ASSERT_TRUE(session.world_join().has_value());
   EXPECT_TRUE(session.world_join()->space_environment);
+  EXPECT_FLOAT_EQ(session.world_join()->environment.gravity_scale, 0.0F);
+  EXPECT_EQ(session.world_join()->environment.sky, "space");
   EXPECT_EQ(
       transport_message_type_count(
           scripted->sent,

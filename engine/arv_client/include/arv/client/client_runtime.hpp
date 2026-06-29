@@ -97,6 +97,7 @@ public:
   void configure_chat(ClientChatSettings settings);
   [[nodiscard]] const LocalPlayerIdentity& local_identity() const noexcept;
   [[nodiscard]] const std::string& world_environment_sky() const noexcept;
+  [[nodiscard]] f32 world_environment_gravity_scale() const noexcept;
   [[nodiscard]] bool space_environment() const noexcept;
   [[nodiscard]] std::span<const protocol::ClientboundSpaceBodyView> space_bodies() const noexcept;
   [[nodiscard]] const ClientWorldTransitionStatus& world_transition_status()

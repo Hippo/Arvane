@@ -474,7 +474,8 @@ void enter_in_game(
     arv::net::ConnectionID connection_id,
     arv::Vec3f spawn_position = {8.0F, 20.0F, -20.0F},
     bool space_environment = false,
-    std::string_view environment_sky = {}) {
+    std::string_view environment_sky = {},
+    arv::f32 environment_gravity_scale = 1.0F) {
   (void)server_transport.poll_events();
 
   arv::protocol::ClientboundHello hello;
@@ -496,9 +497,14 @@ void enter_in_game(
   join.spawn_position = spawn_position;
   join.initial_tick = 1;
   join.tick_rate = arv::DefaultBaseTps;
-  join.environment_sky = environment_sky.empty()
+  join.environment.sky = environment_sky.empty()
                              ? (space_environment ? "space" : "overworld")
                              : std::string{environment_sky};
+  join.environment.gravity_scale = environment_gravity_scale;
+  const bool space_sky = join.environment.sky == "space";
+  join.environment.has_atmosphere = !(space_environment || space_sky);
+  join.environment.has_oxygen = !(space_environment || space_sky);
+  join.environment.fog = space_environment ? "none" : "overworld";
   join.space_environment = space_environment;
   send_to_client(
       server_transport,
@@ -897,6 +903,39 @@ TEST(ClientRuntimeTests, ChatSubmitSendsRawServerboundIntentWhenInGame) {
   EXPECT_TRUE(client.chat_messages().empty());
 }
 
+TEST(ClientRuntimeTests, WorldJoinEnvironmentGravityScalesLocalPlayerPrediction) {
+  auto transports = arv::net::make_in_process_transport_pair();
+  std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
+  ASSERT_TRUE(server_transport->start_listening({"in-process", 0}));
+  arv::client::ClientRuntime client(std::move(transports.client));
+  client.set_movement_send_rate(60.0F);
+  const auto connection_id = client.connect_integrated();
+  ASSERT_TRUE(connection_id);
+  enter_in_game(
+      client,
+      *server_transport,
+      connection_id.value(),
+      {0.0F, 10.0F, 0.0F},
+      false,
+      "space",
+      0.18F);
+  EXPECT_FLOAT_EQ(client.world_environment_gravity_scale(), 0.18F);
+  EXPECT_TRUE(client.space_environment());
+
+  const arv::voxel::BlockRegistry block_registry =
+      arv::testsupport::make_test_block_registry();
+  arv::world::WorldRuntime world{arv::WorldID{1}};
+  const arv::world::WorldCollisionQuery query(world, block_registry, false);
+
+  client.fixed_tick(2, &query);
+
+  EXPECT_FALSE(client.player_grounded());
+  EXPECT_NEAR(
+      client.player_velocity().y,
+      -32.0F * 0.18F / static_cast<arv::f32>(arv::DefaultBaseTps),
+      0.0001F);
+}
+
 TEST(ClientRuntimeTests, DirectChatSendSendsSlashCommandIntentWhenInGame) {
   auto transports = arv::net::make_in_process_transport_pair();
   std::unique_ptr<arv::net::ITransport> server_transport = std::move(transports.server);
@@ -1212,7 +1251,11 @@ TEST(ClientRuntimeTests, RideStartedBeforeWorldJoinRestoresMountedVehicleControl
   join.spawn_position = {4.0F, 12.0F, -6.0F};
   join.initial_tick = 20;
   join.tick_rate = arv::DefaultBaseTps;
-  join.environment_sky = "space";
+  join.environment.sky = "space";
+  join.environment.gravity_scale = 0.0F;
+  join.environment.has_atmosphere = false;
+  join.environment.has_oxygen = false;
+  join.environment.fog = "none";
   join.space_environment = true;
   send_to_client(
       *server_transport,

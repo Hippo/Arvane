@@ -24,6 +24,15 @@ struct ClientboundSpaceBodyView {
   bool entry_enabled{};
 };
 
+struct ClientboundWorldEnvironment {
+  f32 gravity_scale{1.0F};
+  bool has_atmosphere{true};
+  bool has_oxygen{true};
+  std::string sky{"overworld"};
+  f32 ambient_light{0.15F};
+  std::string fog{"none"};
+};
+
 struct ClientboundWorldJoinResult {
   bool accepted{};
   std::string reject_reason{};
@@ -34,7 +43,7 @@ struct ClientboundWorldJoinResult {
   u64 initial_tick{};
   u32 tick_rate{};
   i32 effective_view_distance{};
-  std::string environment_sky{};
+  ClientboundWorldEnvironment environment{};
   bool space_environment{};
   std::vector<ClientboundSpaceBodyView> space_bodies{};
 };

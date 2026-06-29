@@ -40,7 +40,7 @@ namespace {
 } // namespace
 
 TEST(ProtocolTests, PacketEnvelopeRoundTripsPayload) {
-  EXPECT_EQ(arv::protocol::CurrentProtocolVersion, 3U);
+  EXPECT_EQ(arv::protocol::CurrentProtocolVersion, 4U);
 
   arv::protocol::MessageWriter payload_writer;
   payload_writer.write_string("hello");
@@ -980,7 +980,12 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   result.initial_tick = 99;
   result.tick_rate = 20;
   result.effective_view_distance = 6;
-  result.environment_sky = "space";
+  result.environment.gravity_scale = 0.18F;
+  result.environment.has_atmosphere = false;
+  result.environment.has_oxygen = false;
+  result.environment.sky = "space";
+  result.environment.ambient_light = 0.15F;
+  result.environment.fog = "none";
   result.space_environment = true;
   result.space_bodies.push_back({
       "arvane:space_body/luna",
@@ -1005,7 +1010,12 @@ TEST(ProtocolTests, WorldJoinAndLeaveRoundTripThroughSerialization) {
   EXPECT_EQ(decoded.value().initial_tick, 99U);
   EXPECT_EQ(decoded.value().tick_rate, 20U);
   EXPECT_EQ(decoded.value().effective_view_distance, 6);
-  EXPECT_EQ(decoded.value().environment_sky, "space");
+  EXPECT_FLOAT_EQ(decoded.value().environment.gravity_scale, 0.18F);
+  EXPECT_FALSE(decoded.value().environment.has_atmosphere);
+  EXPECT_FALSE(decoded.value().environment.has_oxygen);
+  EXPECT_EQ(decoded.value().environment.sky, "space");
+  EXPECT_FLOAT_EQ(decoded.value().environment.ambient_light, 0.15F);
+  EXPECT_EQ(decoded.value().environment.fog, "none");
   EXPECT_TRUE(decoded.value().space_environment);
   ASSERT_EQ(decoded.value().space_bodies.size(), 1U);
   EXPECT_EQ(decoded.value().space_bodies.front().body_id, "arvane:space_body/luna");

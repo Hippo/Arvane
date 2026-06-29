@@ -165,9 +165,9 @@ void apply_world_join_result(
       result.tick_rate);
   runtime.input.clear_vehicle_prediction();
   apply_pending_local_ride_starts(runtime);
-  runtime.world_environment_sky = result.environment_sky;
+  runtime.world_environment = result.environment;
   runtime.space_environment =
-      result.space_environment || result.environment_sky == "space";
+      result.space_environment || result.environment.sky == "space";
   runtime.void_space_world = result.space_environment;
   runtime.space_bodies = result.space_bodies;
   if (runtime.world_transition_status.active) {
@@ -203,7 +203,7 @@ void apply_world_leave(
   runtime.world_time_update.reset();
   runtime.input.clear_vehicle_prediction();
   runtime.pending_local_ride_starts.clear();
-  runtime.world_environment_sky.clear();
+  runtime.world_environment = {};
   runtime.space_environment = false;
   runtime.void_space_world = false;
   runtime.space_bodies.clear();
@@ -222,7 +222,7 @@ void clear_multiplayer_runtime(ClientRuntimeContext& runtime) {
   runtime.world_time_update.reset();
   runtime.input.clear_vehicle_prediction();
   runtime.pending_local_ride_starts.clear();
-  runtime.world_environment_sky.clear();
+  runtime.world_environment = {};
   runtime.space_environment = false;
   runtime.void_space_world = false;
   runtime.space_bodies.clear();

@@ -277,6 +277,7 @@ Server replies with:
 * spawn position
 * initial tick
 * simulation settings
+* world environment snapshot (`gravity_scale`, atmosphere/oxygen flags, sky, ambient light, fog)
 * view/simulation radius limits
 
 ### 5. In Game

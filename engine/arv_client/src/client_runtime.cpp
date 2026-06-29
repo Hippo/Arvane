@@ -59,7 +59,7 @@ struct ClientRuntime::Impl {
         pack_sync,
         recipe_book,
         world_time_update,
-        world_environment_sky,
+        world_environment,
         space_environment,
         void_space_world,
         space_bodies,
@@ -102,6 +102,7 @@ struct ClientRuntime::Impl {
           entities,
           vehicle_registry,
           void_space_world,
+          world_environment.gravity_scale,
           collision_query,
           tick_seconds);
     }
@@ -140,7 +141,7 @@ struct ClientRuntime::Impl {
     world_time_update.reset();
     input.clear_vehicle_prediction();
     pending_local_ride_starts.clear();
-    world_environment_sky.clear();
+    world_environment = {};
     space_environment = false;
     void_space_world = false;
     space_bodies.clear();
@@ -194,7 +195,7 @@ struct ClientRuntime::Impl {
   detail::ClientPackSyncState pack_sync{};
   detail::ClientRecipeBookRuntime recipe_book{};
   std::optional<protocol::ClientboundWorldTime> world_time_update{};
-  std::string world_environment_sky{};
+  protocol::ClientboundWorldEnvironment world_environment{};
   bool space_environment{};
   bool void_space_world{};
   std::vector<protocol::ClientboundSpaceBodyView> space_bodies{};
@@ -246,7 +247,11 @@ const LocalPlayerIdentity& ClientRuntime::local_identity() const noexcept {
 }
 
 const std::string& ClientRuntime::world_environment_sky() const noexcept {
-  return impl_->world_environment_sky;
+  return impl_->world_environment.sky;
+}
+
+f32 ClientRuntime::world_environment_gravity_scale() const noexcept {
+  return impl_->world_environment.gravity_scale;
 }
 
 bool ClientRuntime::space_environment() const noexcept {

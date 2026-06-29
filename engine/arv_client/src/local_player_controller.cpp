@@ -122,7 +122,8 @@ void LocalPlayerController::update_local_movement(
     const player::PlayerCommand& command,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds,
-    bool void_space_world) {
+    bool void_space_world,
+    f32 gravity_scale) {
   if (!player_id_.has_value()) {
     return;
   }
@@ -137,7 +138,8 @@ void LocalPlayerController::update_local_movement(
           command,
           tuning_,
           movement_authority(void_space_world),
-          tick_seconds);
+          tick_seconds,
+          gravity_scale);
   movement_state_ = movement_step.state;
   apply_knockback_control_suppression(
       incoming_velocity,

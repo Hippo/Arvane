@@ -161,12 +161,15 @@ PlayerMovementStep simulate_player_movement_tick(
     const player::PlayerCommand& command,
     const player::PlayerTuning& tuning,
     PlayerMovementAuthority authority,
-    Seconds tick_seconds) {
+    Seconds tick_seconds,
+    f32 gravity_scale) {
   apply_player_look_and_mode(state, command, tuning, authority);
 
   PlayerMovementStep result;
   result.used_collision = authority.has_collision && collision_query != nullptr;
   if (result.used_collision) {
+    KinematicConfig config = kinematic_config_from_tuning(tuning);
+    config.gravity_per_second *= std::max(0.0F, gravity_scale);
     const KinematicStepResult step = step_kinematic_body(
         *collision_query,
         {state.position,
@@ -178,7 +181,7 @@ PlayerMovementStep simulate_player_movement_tick(
         state.yaw_radians,
         tick_seconds,
         kinematic_input_from_command(command, state, authority),
-        kinematic_config_from_tuning(tuning));
+        config);
     state.position = step.body.position;
     state.velocity = step.body.velocity;
     state.grounded = step.body.grounded;

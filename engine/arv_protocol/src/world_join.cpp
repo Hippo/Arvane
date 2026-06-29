@@ -18,7 +18,12 @@ std::vector<u8> serialize_clientbound_world_join_result(const ClientboundWorldJo
   writer.write<u64>(result.initial_tick);
   writer.write<u32>(result.tick_rate);
   writer.write<i32>(result.effective_view_distance);
-  writer.write_string(result.environment_sky);
+  write_f32(writer, result.environment.gravity_scale);
+  writer.write_bool(result.environment.has_atmosphere);
+  writer.write_bool(result.environment.has_oxygen);
+  writer.write_string(result.environment.sky);
+  write_f32(writer, result.environment.ambient_light);
+  writer.write_string(result.environment.fog);
   writer.write_bool(result.space_environment);
   writer.write<u32>(static_cast<u32>(result.space_bodies.size()));
   for (const ClientboundSpaceBodyView& body : result.space_bodies) {
@@ -50,12 +55,19 @@ Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_worl
   auto initial_tick = reader.read<u64>();
   auto tick_rate = reader.read<u32>();
   auto view_distance = reader.read<i32>();
+  auto environment_gravity_scale = read_f32(reader);
+  auto environment_has_atmosphere = reader.read_bool();
+  auto environment_has_oxygen = reader.read_bool();
   auto environment_sky = reader.read_string();
+  auto environment_ambient_light = read_f32(reader);
+  auto environment_fog = reader.read_string();
   auto space_environment = reader.read_bool();
   auto space_body_count = reader.read<u32>();
   if (!accepted || !reason || !world_id || !player_id || !entity_id || !pos_x ||
       !pos_y || !pos_z || !initial_tick || !tick_rate || !view_distance ||
-      !environment_sky || !space_environment || !space_body_count) {
+      !environment_gravity_scale || !environment_has_atmosphere ||
+      !environment_has_oxygen || !environment_sky || !environment_ambient_light ||
+      !environment_fog || !space_environment || !space_body_count) {
     return Expected<ClientboundWorldJoinResult, ProtocolError>::failure(
         ProtocolError{"failed to decode world join result"});
   }
@@ -107,7 +119,12 @@ Expected<ClientboundWorldJoinResult, ProtocolError> deserialize_clientbound_worl
   result.initial_tick = initial_tick.value();
   result.tick_rate = tick_rate.value();
   result.effective_view_distance = view_distance.value();
-  result.environment_sky = std::move(environment_sky.value());
+  result.environment.gravity_scale = environment_gravity_scale.value();
+  result.environment.has_atmosphere = environment_has_atmosphere.value();
+  result.environment.has_oxygen = environment_has_oxygen.value();
+  result.environment.sky = std::move(environment_sky.value());
+  result.environment.ambient_light = environment_ambient_light.value();
+  result.environment.fog = std::move(environment_fog.value());
   result.space_environment = space_environment.value();
   result.space_bodies = std::move(space_bodies);
   return Expected<ClientboundWorldJoinResult, ProtocolError>::success(std::move(result));

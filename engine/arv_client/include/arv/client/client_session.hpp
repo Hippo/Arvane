@@ -49,7 +49,7 @@ struct ClientSessionWorldJoin {
   u64 initial_tick{};
   u32 tick_rate{};
   i32 effective_view_distance{};
-  std::string environment_sky{};
+  protocol::ClientboundWorldEnvironment environment{};
   bool space_environment{};
   std::vector<protocol::ClientboundSpaceBodyView> space_bodies{};
 };

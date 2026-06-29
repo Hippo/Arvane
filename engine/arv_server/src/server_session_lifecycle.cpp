@@ -31,6 +31,17 @@ namespace {
   };
 }
 
+[[nodiscard]] protocol::ClientboundWorldEnvironment environment_packet(
+    const world::WorldEnvironmentState& environment) {
+  return {
+      std::max(0.0F, environment.gravity_scale),
+      environment.has_atmosphere,
+      environment.has_oxygen,
+      environment.sky,
+      environment.ambient_light,
+      environment.fog};
+}
+
 [[nodiscard]] const ServerPackSyncBundle* find_pack_sync_bundle(
     const ServerPackSyncConfig& config,
     std::string_view bundle_hash) noexcept {
@@ -680,7 +691,7 @@ void ServerRuntimeImpl::send_world_join_result(
   const bool streams_terrain = world_streams_terrain(session.world_id, runtime);
   result.effective_view_distance = streams_terrain ? max_view_distance_ : 0;
   if (runtime != nullptr) {
-    result.environment_sky = runtime->environment().sky;
+    result.environment = environment_packet(runtime->environment());
     result.space_environment = !streams_terrain;
     const std::optional<EntityID> entity_id =
         runtime->entity_for_player(session.player_id);

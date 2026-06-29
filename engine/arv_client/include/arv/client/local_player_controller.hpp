@@ -57,7 +57,8 @@ public:
       const player::PlayerCommand& command,
       const physics::ICollisionQuery* collision_query,
       Seconds tick_seconds,
-      bool void_space_world = false);
+      bool void_space_world = false,
+      f32 gravity_scale = 1.0F);
   void enter_world(
       WorldID world_id,
       PlayerID player_id,

@@ -691,6 +691,7 @@ void ClientInputRuntime::send_fixed_tick_input(
     ClientEntityMirrorStore& entities,
     const entity::VehicleDefinitionRegistry* vehicle_registry,
     bool void_space_world,
+    f32 environment_gravity_scale,
     const physics::ICollisionQuery* collision_query,
     Seconds tick_seconds) {
   u32 drop_requests = 0U;
@@ -787,6 +788,9 @@ void ClientInputRuntime::send_fixed_tick_input(
         command.jump_pressed || command.secondary_pressed || command.mount_pressed;
 
     const f32 dt = std::clamp(static_cast<f32>(tick_seconds), 1.0F / 240.0F, 0.1F);
+    const f32 environment_gravity =
+        VehicleGravityBlocksPerSecondSquared *
+        std::max(0.0F, environment_gravity_scale);
     const f32 throttle = std::clamp(static_cast<f32>(command.move_z), -1.0F, 1.0F);
     const f32 steer = std::clamp(static_cast<f32>(command.move_x), -1.0F, 1.0F);
     const f32 previous_yaw = predicted_vehicle_yaw_;
@@ -950,7 +954,7 @@ void ClientInputRuntime::send_fixed_tick_input(
       } else {
         next_vertical_speed = std::max(
             next_vertical_speed -
-                VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
+                environment_gravity * profile.gravity_scale * dt,
             -VehicleTerminalVelocityBlocksPerSecond);
       }
       next_vertical_speed = std::clamp(
@@ -1079,7 +1083,7 @@ void ClientInputRuntime::send_fixed_tick_input(
                 : std::clamp(forward_speed / profile.max_forward_speed, 0.0F, 1.0F);
         if (profile.vertical_thrust) {
           predicted_vehicle_velocity_.y -=
-              VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
+              environment_gravity * profile.gravity_scale * dt;
           if (std::abs(vertical_thrust_input) > 0.01F) {
             const f32 target_vertical_speed =
                 vertical_thrust_input > 0.0F
@@ -1096,12 +1100,10 @@ void ClientInputRuntime::send_fixed_tick_input(
           predicted_vehicle_velocity_.y +=
               speed_fraction * speed_fraction * profile.lift_strength * dt;
           predicted_vehicle_velocity_.y -=
-              VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt;
+              environment_gravity * profile.gravity_scale * dt;
           if (forward_speed < profile.stall_speed) {
             predicted_vehicle_velocity_.y -=
-                VehicleGravityBlocksPerSecondSquared *
-                profile.stall_gravity_scale *
-                dt;
+                environment_gravity * profile.stall_gravity_scale * dt;
           }
         }
         if (near_takeoff_surface && command.jump_held && !profile.vertical_thrust) {
@@ -1195,9 +1197,7 @@ void ClientInputRuntime::send_fixed_tick_input(
         predicted_vehicle_velocity_.z *= air_drag;
         predicted_vehicle_velocity_.y = std::max(
             predicted_vehicle_velocity_.y -
-                VehicleGravityBlocksPerSecondSquared *
-                    profile.gravity_scale_out_of_water *
-                    dt,
+                environment_gravity * profile.gravity_scale_out_of_water * dt,
             -VehicleTerminalVelocityBlocksPerSecond);
         if (command.secondary_held) {
           predicted_vehicle_velocity_.x =
@@ -1264,7 +1264,7 @@ void ClientInputRuntime::send_fixed_tick_input(
         } else {
           next_vertical_speed = std::max(
               next_vertical_speed -
-                  VehicleGravityBlocksPerSecondSquared * profile.gravity_scale * dt,
+                  environment_gravity * profile.gravity_scale * dt,
               -VehicleTerminalVelocityBlocksPerSecond);
         }
       }
@@ -1484,7 +1484,8 @@ void ClientInputRuntime::send_fixed_tick_input(
       command,
       collision_query,
       tick_seconds,
-      void_space_world);
+      void_space_world,
+      environment_gravity_scale);
 
   movement_send_accumulator_seconds_ += tick_seconds;
   const Seconds send_interval =

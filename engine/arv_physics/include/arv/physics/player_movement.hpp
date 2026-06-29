@@ -58,6 +58,7 @@ void apply_player_look_and_mode(
     const player::PlayerCommand& command,
     const player::PlayerTuning& tuning,
     PlayerMovementAuthority authority,
-    Seconds tick_seconds);
+    Seconds tick_seconds,
+    f32 gravity_scale = 1.0F);
 
 } // namespace arv::physics
